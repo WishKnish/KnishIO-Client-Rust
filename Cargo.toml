@@ -1,0 +1,132 @@
+[package]
+name = "knishio-client"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"  # Minimum supported Rust version for 2025 features
+authors = ["Eugene Teplitsky <eugene@wishknish.com>"]
+description = "Rust implementation of the Knish.IO SDK for post-blockchain distributed ledger technology"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/WishKnish/KnishIO-Client-Rust"
+keywords = ["knishio", "blockchain", "dag", "dlt", "quantum-resistant", "xmss", "ml-kem"]
+categories = ["cryptography", "network-programming", "api-bindings"]
+
+# 2025 Rust best practices: Modern linting configuration
+[lints.rust]
+unsafe_code = "forbid"               # No unsafe code allowed
+# missing_docs = "warn"              # Disabled for cleaner build output - SDK is functional
+dead_code = "warn"                   # Warn on dead code
+unused_imports = "warn"              # Warn on unused imports
+unused_variables = "warn"            # Warn on unused variables
+
+[lints.clippy]
+all = "warn"                         # Enable all Clippy lints as warnings
+pedantic = "warn"                    # Enable pedantic lints
+nursery = "warn"                     # Enable experimental lints
+unwrap_used = "warn"                 # Warn on unwrap() usage - gradually move to proper error handling
+expect_used = "warn"                 # Warn on expect() usage
+panic = "warn"                       # Warn on panic!() macro usage  
+todo = "warn"                        # Warn on TODO comments
+unimplemented = "warn"               # Warn on unimplemented!() macro
+
+[dependencies]
+# Async runtime - 2025 Rust best practices: specific features only
+tokio = { version = "1.41", features = [
+    "rt-multi-thread",      # Multi-threaded runtime
+    "macros",               # #[tokio::main] and #[tokio::test]
+    "sync",                 # mpsc, Mutex, RwLock
+    "time",                 # sleep, timeout
+    "net",                  # TcpStream for WebSocket
+    "io-util",              # AsyncReadExt, AsyncWriteExt
+    "signal",               # Signal handling
+] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Cryptography
+sha3 = "0.10"                    # For SHAKE256
+sha2 = "0.10"                    # For PBKDF2
+libcrux-ml-kem = "0.0.3"         # Formally verified ML-KEM (FIPS 203) implementation
+hex = "0.4"
+base64 = "0.22"
+pbkdf2 = "0.12"                  # Key derivation
+aes-gcm = "0.10"                  # AES-GCM encryption for ML-KEM768
+rand_core = "0.6"                 # Core random number generation
+
+# SIMD optimizations for crypto (2025 high performance)
+keccak = "0.1"                   # High-performance Keccak implementation
+tiny-keccak = { version = "2.0", features = ["shake", "keccak"] } # Compact Keccak with SHAKE256 support
+subtle = "2.5"                   # Constant-time operations
+aes = "0.8"                      # AES hardware acceleration (for CTR_DRBG)
+
+# GraphQL
+graphql_client = "0.14"
+reqwest = { version = "0.12", features = ["json", "stream"] }  # Removed "blocking" per YAGNI
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Async utilities
+futures = "0.3"
+futures-util = "0.3"           # Stream utilities
+tokio-tungstenite = "0.24"      # WebSocket support
+tungstenite = "0.24"            # WebSocket protocol
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+bytes = "1.7"
+rand = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+# Removed once_cell and lazy_static - using std::sync::LazyLock instead
+uuid = { version = "1.10", features = ["v4", "serde"] }
+num_cpus = "1.16"               # For system information in benchmarks
+
+# String and number utilities
+regex = "1.11"
+num-bigint = "0.4"
+num-traits = "0.2"
+colored = "2.0"
+
+# Optional SIMD acceleration - enabled per target architecture
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+# AVX2 optimizations for x86_64
+sha3-asm = { version = "0.1", optional = true }     # Assembly-optimized SHA-3
+
+[target.'cfg(target_arch = "aarch64")'.dependencies] 
+# NEON optimizations for ARM64 (Apple Silicon)
+sha3-asm = { version = "0.1", optional = true }     # Assembly-optimized SHA-3
+
+[features]
+# SIMD feature flags for optional acceleration
+default = []
+simd-optimized = ["sha3-asm"]    # Enable SIMD optimizations
+benchmark-mode = []              # Enable benchmarking-specific optimizations
+
+[dev-dependencies]
+tokio-test = "0.4"
+pretty_assertions = "1.4"
+criterion = "0.5"
+
+# [[bench]]
+# name = "crypto_bench"
+# harness = false
+
+# Self-test binary (follows JavaScript SDK pattern)
+[[bin]]
+name = "self-test"
+path = "src/bin/self-test.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.dev]
+opt-level = 0
+debug = true
