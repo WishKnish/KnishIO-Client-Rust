@@ -9,9 +9,7 @@ use crate::error::{KnishIOError, Result};
 use crate::wallet::Wallet;
 use crate::auth::AuthToken;
 use crate::molecule::Molecule;
-use crate::atom::Atom;
-use crate::types::{Isotope, MetaItem};
-use crate::response::{Response, ResponseClaimShadowWallet};
+use crate::response::{Response};
 use crate::graphql::{
     GraphQLClient, SocketConfig
 };
@@ -24,8 +22,6 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use rand;
-use chrono;
-use tokio;
 
 /// Recipient type for request_tokens() method
 ///
@@ -438,7 +434,7 @@ impl KnishIOClient {
         if self.uris.is_empty() {
             return String::new();
         }
-        let index = rand::random::<usize>() % self.uris.len();
+        let index = rand::random_range(0..self.uris.len());
         self.uris[index].clone()
     }
 
@@ -645,7 +641,7 @@ impl KnishIOClient {
         let bundle = bundle.or_else(|| self.bundle.clone());
 
         // Determine source wallet
-        let mut source_wallet = if let Some(wallet) = source_wallet {
+        let source_wallet = if let Some(wallet) = source_wallet {
             // Source wallet provided
             wallet
         } else if let Some(remainder) = &self.remainder_wallet {
@@ -1916,7 +1912,7 @@ impl KnishIOClient {
         to: Option<RecipientType>,
         mut amount: Option<f64>,
         units: Vec<String>,
-        mut meta: Option<HashMap<String, Value>>,
+        meta: Option<HashMap<String, Value>>,
         batch_id: Option<&str>
     ) -> Result<Box<dyn Response>> {
         use crate::mutation::request_tokens::{MutationRequestTokens, RequestTokensParams};
@@ -2095,7 +2091,7 @@ impl KnishIOClient {
         molecule.check(None)?;
 
         // Create & execute a mutation (matches JS lines 1871-1875)
-        let mut mutation = MutationProposeMolecule::from_molecule(molecule);
+        let mutation = MutationProposeMolecule::from_molecule(molecule);
 
         let client = self.client.as_ref()
             .ok_or(KnishIOError::NoClient)?;
@@ -2170,7 +2166,7 @@ impl KnishIOClient {
         molecule.check(None)?;
 
         // Create & execute a mutation (matches JS lines 1918-1922)
-        let mut mutation = MutationProposeMolecule::from_molecule(molecule);
+        let mutation = MutationProposeMolecule::from_molecule(molecule);
 
         let client = self.client.as_ref()
             .ok_or(KnishIOError::NoClient)?;
@@ -2297,7 +2293,7 @@ impl KnishIOClient {
         molecule.check(None)?;
 
         // Create & execute a mutation (matches JS lines 1998-2002)
-        let mut mutation = MutationProposeMolecule::from_molecule(molecule);
+        let mutation = MutationProposeMolecule::from_molecule(molecule);
 
         let client = self.client.as_ref()
             .ok_or(KnishIOError::NoClient)?;
@@ -2692,7 +2688,7 @@ impl KnishIOClient {
         molecule.check(None)?;
 
         // Create and execute ProposeMolecule mutation (matches JS lines 1344-1348)
-        let mut mutation = MutationProposeMolecule::from_molecule(molecule);
+        let mutation = MutationProposeMolecule::from_molecule(molecule);
 
         let client = self.client.as_ref()
             .ok_or(KnishIOError::NoClient)?;
@@ -2811,7 +2807,6 @@ impl KnishIOClient {
     pub async fn request_profile_auth_token(&mut self, secret: &str, encrypt: Option<bool>) -> Result<AuthToken> {
         use crate::mutation::request_authorization::MutationRequestAuthorization;
         use crate::mutation::Mutation;
-        use crate::types::MetaItem;
         use crate::auth::AuthToken;
 
         // Set secret in client

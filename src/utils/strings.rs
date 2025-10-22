@@ -96,11 +96,11 @@ pub fn random_string(length: usize, alphabet: Option<&str>) -> String {
     
     let charset = alphabet.unwrap_or("abcdef0123456789");
     let charset_bytes: Vec<u8> = charset.bytes().collect();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     
     (0..length)
         .map(|_| {
-            let idx = rng.gen_range(0..charset_bytes.len());
+            let idx = rng.random_range(0..charset_bytes.len());
             charset_bytes[idx] as char
         })
         .collect()

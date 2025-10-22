@@ -212,7 +212,7 @@ impl AuthToken {
     ///
     /// True if token is expired or has no expiration time
     pub fn is_expired(&self) -> bool {
-        if let Some(expires_at) = self.expires_at {
+        if let Some(_expires_at) = self.expires_at {
             self.get_expire_interval() < 0
         } else {
             true // No expiration time means expired

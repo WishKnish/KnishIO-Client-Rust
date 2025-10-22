@@ -438,7 +438,7 @@ impl GraphQLClient {
         });
         
         ws_sender
-            .send(Message::Text(init_message.to_string()))
+            .send(Message::Text(init_message.to_string().into()))
             .await
             .map_err(|e| KnishIOError::custom(format!("Failed to send init: {}", e)))?;
 
@@ -452,7 +452,7 @@ impl GraphQLClient {
         });
 
         ws_sender
-            .send(Message::Text(sub_message.to_string()))
+            .send(Message::Text(sub_message.to_string().into()))
             .await
             .map_err(|e| KnishIOError::custom(format!("Failed to send subscription: {}", e)))?;
 

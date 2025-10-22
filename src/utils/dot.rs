@@ -473,7 +473,7 @@ mod tests {
         let mut map = HashMap::new();
         map.insert("simple".to_string(), "value".to_string());
         
-        assert_eq!(Dot::get_from_map(&map, "simple"), Some(&"value".to_string()));
+        assert_eq!(Dot::get_from_map(&map, "simple"), Some("value".to_string()));
         assert_eq!(Dot::get_from_map(&map, "nonexistent"), None);
     }
 }

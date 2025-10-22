@@ -430,9 +430,9 @@ pub fn generate_address(key: &str) -> Result<String> {
 pub fn generate_position(salt_length: usize) -> String {
     use rand::Rng;
     
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let salt: String = (0..salt_length)
-        .map(|_| format!("{:02x}", rng.gen::<u8>()))
+        .map(|_| format!("{:02x}", rng.random::<u8>()))
         .collect();
     
     shake256(&salt, 256)
@@ -442,9 +442,9 @@ pub fn generate_position(salt_length: usize) -> String {
 fn generate_random_hash() -> String {
     use rand::Rng;
     
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let random_data: String = (0..32)
-        .map(|_| format!("{:02x}", rng.gen::<u8>()))
+        .map(|_| format!("{:02x}", rng.random::<u8>()))
         .collect();
     
     shake256(&random_data, 256)
@@ -743,7 +743,7 @@ pub fn base58_encode_bytes(input: &[u8]) -> String {
 /// Hexadecimal string representation of the random salt
 pub fn generate_salt(length: usize) -> String {
     use rand::RngCore;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut salt = vec![0u8; length];
     rng.fill_bytes(&mut salt);
     hex::encode(salt)

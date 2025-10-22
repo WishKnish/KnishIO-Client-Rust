@@ -55,7 +55,7 @@ This document will explain both ways.
 2. Instantiate the client with your node URI:
    ```rust
    let client = KnishIOClient::new(
-       vec!["https://api.knishio.dev".to_string()],
+       vec!["https://some.knishio.validator.node.url/graphql".to_string()],
        Some("my-cell-slug".to_string())
    )?;
    ```

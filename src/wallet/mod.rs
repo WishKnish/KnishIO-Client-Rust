@@ -3,14 +3,14 @@
 //! This module provides the Wallet struct and associated methods for wallet
 //! management, ensuring exact compatibility with the JavaScript implementation.
 
-use crate::crypto::{generate_bundle_hash, generate_key, generate_address};
-use crate::types::TokenUnit;
+use crate::crypto::{generate_address, generate_bundle_hash, generate_key};
 use crate::error::{KnishIOError, Result};
+use crate::types::TokenUnit;
+use aes::cipher::generic_array::GenericArray;
+use base64::Engine as _;
+use rand::{RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use base64::{Engine as _, engine::general_purpose};
-use aes::cipher::generic_array::GenericArray;
-use rand::RngCore;
 
 /// Wallet structure representing cryptographic keys and token management
 ///
@@ -353,11 +353,11 @@ impl Wallet {
         
         const HEX_CHARSET: &[u8] = b"abcdef0123456789";
         
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         
         // Use iterator with random sampling for better performance
         (0..salt_length)
-            .map(|_| HEX_CHARSET[rng.gen_range(0..HEX_CHARSET.len())] as char)
+            .map(|_| HEX_CHARSET[rng.random_range(0..HEX_CHARSET.len())] as char)
             .collect()
     }
 
@@ -493,8 +493,8 @@ impl Wallet {
     /// A new batch ID string
     fn generate_batch_id() -> String {
         use rand::Rng;
-        let mut rng = rand::thread_rng();
-        format!("{:016x}", rng.gen::<u64>())
+        let mut rng = rand::rng();
+        format!("{:016x}", rng.random::<u64>())
     }
 
     /// Initialize ML-KEM quantum encryption keys
@@ -554,7 +554,7 @@ impl Wallet {
             
         // Perform ML-KEM768 encapsulation to get shared secret
         use libcrux_ml_kem::mlkem768;
-        use libcrux_ml_kem::{MlKemPublicKey, MlKemCiphertext, MlKemSharedSecret};
+        use libcrux_ml_kem::MlKemPublicKey;
         
         // Convert recipient public key bytes to proper libcrux type
         if recipient_pubkey_bytes.len() != 1184 {
@@ -566,7 +566,7 @@ impl Wallet {
         
         // Generate random bytes for encapsulation
         let mut randomness = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut randomness);
+        rand::rng().fill_bytes(&mut randomness);
         
         let (ciphertext, shared_secret) = mlkem768::encapsulate(&public_key, randomness);
         
@@ -607,7 +607,7 @@ impl Wallet {
             
         // Perform ML-KEM768 decapsulation to recover shared secret
         use libcrux_ml_kem::mlkem768;
-        use libcrux_ml_kem::{MlKemPrivateKey, MlKemCiphertext};
+        use libcrux_ml_kem::{MlKemCiphertext, MlKemPrivateKey};
         
         // Convert secret key to proper libcrux type
         if privkey.len() != 2400 {
@@ -656,7 +656,7 @@ impl Wallet {
         
         // Generate random nonce
         let mut nonce_bytes = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        rand::rng().fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
         
         // Encrypt message

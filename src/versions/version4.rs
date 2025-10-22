@@ -296,12 +296,12 @@ mod tests {
             Isotope::C,
             "TEST"
         );
-        atom.value = Some(50.0);
+        atom.value = Some(50.0.to_string());
         atom.batch_id = Some("batch456".to_string());
         atom.meta_type = Some("identity".to_string());
         atom.meta_id = Some("id456".to_string());
         atom.index = Some(1);
-        atom.created_at = Some(9876543210);
+        atom.created_at = "9876543210".to_string();
         atom.version = Some("4".to_string());
 
         let version4 = Version4::from_atom(&atom);
@@ -342,12 +342,12 @@ mod tests {
         assert_eq!(atom.wallet_address, "addr2");
         assert_eq!(atom.isotope, Isotope::M);
         assert_eq!(atom.token, "TOKEN2");
-        assert_eq!(atom.value, Some(200.0));
+        assert_eq!(atom.value, Some("200.0".to_string()));
         assert_eq!(atom.batch_id, None);
         assert_eq!(atom.meta_type, None);
         assert_eq!(atom.meta_id, None);
         assert_eq!(atom.index, Some(2));
-        assert_eq!(atom.created_at, Some(1111111111));
+        assert_eq!(atom.created_at, "1111111111".to_string());
         assert_eq!(atom.version, Some("4".to_string()));
     }
 

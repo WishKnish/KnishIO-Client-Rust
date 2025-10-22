@@ -650,7 +650,7 @@ mod tests {
         // Verify molecule structure
         assert_eq!(molecule.atoms.len(), 1);
         assert_eq!(molecule.atoms[0].isotope, Isotope::V);
-        assert_eq!(molecule.atoms[0].value, Some(100.0));
+        assert_eq!(molecule.atoms[0].value, Some("100.0".to_string()));
         assert!(molecule.molecular_hash.is_some());
     }
 

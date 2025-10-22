@@ -13,7 +13,6 @@ use crate::wallet::Wallet;
 use crate::crypto::{shake256, generate_bundle_hash};
 use crate::types::{Isotope, MetaItem};
 use crate::error::{KnishIOError, Result};
-use crate::check_molecule::CheckMolecule;
 use base64::{Engine as _, engine::general_purpose};
 
 // Re-export the type-safe builder for convenience

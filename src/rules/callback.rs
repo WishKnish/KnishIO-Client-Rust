@@ -473,8 +473,8 @@ mod tests {
     #[test]
     fn test_meta_creation() {
         let meta = Meta::new("test_key".to_string(), "test_value".to_string());
-        assert_eq!(meta.key, "test_key");
-        assert_eq!(meta.value, "test_value");
+        assert_eq!(meta.key(), Some("test_key".to_string()));
+        assert_eq!(meta.value(), Some("test_value".to_string()));
     }
 
     #[test]
@@ -485,8 +485,8 @@ mod tests {
         });
 
         let meta = Meta::from_object(&object).unwrap();
-        assert_eq!(meta.key, "meta_key");
-        assert_eq!(meta.value, "meta_value");
+        assert_eq!(meta.key(), Some("meta_key".to_string()));
+        assert_eq!(meta.value(), Some("meta_value".to_string()));
     }
 
     #[test]
@@ -642,8 +642,8 @@ mod tests {
         assert!(callback.meta.is_some());
 
         let meta = callback.meta.unwrap();
-        assert_eq!(meta.key, "test_key");
-        assert_eq!(meta.value, "test_value");
+        assert_eq!(meta.key(), Some("test_key".to_string()));
+        assert_eq!(meta.value(), Some("test_value".to_string()));
     }
 
     #[test]

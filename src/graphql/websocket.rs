@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::{interval, sleep, timeout};
 use tokio_tungstenite::{connect_async, tungstenite::Message, WebSocketStream, MaybeTlsStream};
 use tracing::{debug, error, info, warn};
+use tungstenite::Utf8Bytes;
 use uuid::Uuid;
 
 /// WebSocket connection state
@@ -513,7 +514,7 @@ impl WebSocketManager {
         message: &GraphQLWsMessage,
     ) -> Result<()> {
         let text = Self::serialize_ws_message(message)?;
-        sender.send(Message::Text(text))
+        sender.send(Message::Text(Utf8Bytes::from(text)))
             .await
             .map_err(|e| KnishIOError::custom(format!("Failed to send WebSocket message: {}", e)))
     }

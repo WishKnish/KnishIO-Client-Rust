@@ -130,7 +130,11 @@ mod tests {
     #[test]
     fn test_mutation_request_authorization_creation() {
         let molecule = Molecule::new();
-        let mutation = MutationRequestAuthorization::new(molecule);
+        let mutation = MutationRequestAuthorization::new(
+            GraphQLClient::new("http://localhost:4000/graphql"),
+            KnishIOClient::new("http://localhost:4000/graphql", "TEST_CELL"),
+            molecule,
+        );
         
         // Test basic creation
         assert!(mutation.propose_molecule.remainder_wallet().is_none());
