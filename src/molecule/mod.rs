@@ -641,7 +641,7 @@ impl Molecule {
     /// * `meta_type` - Type of metadata
     /// * `meta_id` - Metadata identifier
     /// * `policy` - Access policy (optional)
-    pub fn init_meta(&mut self, meta: Vec<MetaItem>, meta_type: &str, meta_id: &str, policy: Option<&str>) -> Result<()> {
+    pub fn init_meta(&mut self, meta: Vec<MetaItem>, meta_type: &str, meta_id: &str, _policy: Option<&str>) -> Result<()> {
         if let Some(ref source_wallet) = self.source_wallet {
             let params = AtomCreateParams {
                 isotope: Isotope::M,
@@ -1420,7 +1420,6 @@ impl Default for Molecule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::MetaItem;
 
     #[test]
     fn test_molecule_creation() {

@@ -922,7 +922,7 @@ impl SelfTestRunner {
 
             // Create encryption wallet from seed
             let secret = generate_secret(&seed);
-            let bundle = generate_bundle_hash(&secret);
+            let _bundle = generate_bundle_hash(&secret);
 
             let encryption_wallet = Wallet::new(
                 Some(&secret),

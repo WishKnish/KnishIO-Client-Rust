@@ -246,7 +246,6 @@ impl ToJsonObject for Rule {
 mod tests {
     use super::*;
     use serde_json::json;
-    use crate::rules::callback::Meta;
 
     #[test]
     fn test_rule_new() {

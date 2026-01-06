@@ -297,11 +297,11 @@ mod tests {
         let endpoint = "https://test.example.com/graphql";
         
         // First request should create a new client
-        let client1 = pool.get_client(endpoint).await.unwrap();
+        let _client1 = pool.get_client(endpoint).await.unwrap();
         assert_eq!(pool.client_count().await, 1);
-        
+
         // Second request should reuse the existing client
-        let client2 = pool.get_client(endpoint).await.unwrap();
+        let _client2 = pool.get_client(endpoint).await.unwrap();
         assert_eq!(pool.client_count().await, 1);
         
         // Clients should be the same instance (Arc-cloned)

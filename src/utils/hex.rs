@@ -413,9 +413,9 @@ mod tests {
         let data: Vec<u8> = vec![];
         let hex = Hex::to_hex(&data, None);
         assert_eq!(hex, "");
-        
+
         let bytes = Hex::to_uint8_array("").unwrap();
-        assert_eq!(bytes, vec![]);
+        assert_eq!(bytes, Vec::<u8>::new());
     }
 
     #[test]

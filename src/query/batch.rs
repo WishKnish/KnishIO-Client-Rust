@@ -36,6 +36,63 @@ impl QueryBatch {
         self.batch_id.as_deref()
     }
 
+    /// Get GraphQL fields for batch query (matches JS getFields())
+    ///
+    /// Returns the field list used in the GraphQL query.
+    /// Matches JavaScript SDK QueryBatch.getFields() at lines 73-85
+    pub fn get_fields() -> &'static str {
+        r#"batchId,
+            molecularHash,
+            type,
+            status,
+            createdAt,
+            wallet {
+                address,
+                bundleHash,
+                amount,
+                tokenSlug,
+                token {
+                    name,
+                    amount
+                },
+                tokenUnits {
+                    id,
+                    name,
+                    metas
+                }
+            },
+            fromWallet {
+                address,
+                bundleHash,
+                amount,
+                batchId
+            },
+            toWallet {
+                address,
+                bundleHash,
+                amount,
+                batchId
+            },
+            sourceTokenUnits {
+                id,
+                name,
+                metas
+            },
+            transferTokenUnits {
+                id,
+                name,
+                metas
+            },
+            metas {
+                key,
+                value
+            },
+            throughMetas {
+                key,
+                value
+            }"#
+    }
+
 }
 
 impl Default for QueryBatch {

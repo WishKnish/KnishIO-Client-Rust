@@ -855,5 +855,47 @@ impl Atom {
         let options = crate::types::AtomFromJsonOptions::default();
         Self::from_json(&json_value, options)
     }
+
+    /// Calculate total value for value atoms
+    ///
+    /// Matches TS Atom.calculateTotalValue(atoms) at lines 619-623
+    ///
+    /// # Parameters
+    /// - `atoms`: Array of atoms to calculate total value from
+    ///
+    /// # Returns
+    /// Sum of all value atoms with isotope 'V'
+    pub fn calculate_total_value(atoms: &[Atom]) -> f64 {
+        atoms
+            .iter()
+            .filter(|atom| atom.isotope == Isotope::V && atom.value.is_some())
+            .filter_map(|atom| {
+                atom.value.as_ref()
+                    .and_then(|v| v.parse::<f64>().ok())
+            })
+            .sum()
+    }
+
+    /// Group atoms by isotope type
+    ///
+    /// Matches TS Atom.groupByIsotope(atoms) at lines 628-639
+    ///
+    /// # Parameters
+    /// - `atoms`: Array of atoms to group
+    ///
+    /// # Returns
+    /// HashMap mapping isotope types to vectors of atoms
+    pub fn group_by_isotope(atoms: &[Atom]) -> std::collections::HashMap<String, Vec<Atom>> {
+        let mut groups: std::collections::HashMap<String, Vec<Atom>> = std::collections::HashMap::new();
+
+        for atom in atoms {
+            let isotope_key = atom.isotope.as_str().to_string();
+            groups.entry(isotope_key)
+                .or_insert_with(Vec::new)
+                .push(atom.clone());
+        }
+
+        groups
+    }
 }
 

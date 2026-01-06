@@ -294,6 +294,22 @@ impl KnishIOClient {
         subscription.execute(variables, boxed_callback).await
     }
 
+    /// Create a Query instance of the specified type (equivalent to createQuery in TS)
+    ///
+    /// Matches TS createQuery<T extends Query>(QueryClass) at lines 651-653
+    ///
+    /// # Type Parameters
+    /// - `T`: Query type that implements Default
+    ///
+    /// # Returns
+    /// New instance of the specified query type
+    pub fn create_query<T>(&self) -> T
+    where
+        T: Default + crate::query::Query,
+    {
+        T::default()
+    }
+
     /// Create a Subscribe instance of the specified type (equivalent to createSubscribe in JS)
     pub fn create_subscribe<T>(&self, graphql_client: GraphQLClient) -> Result<T>
     where
@@ -1031,6 +1047,77 @@ impl KnishIOClient {
     }
     
     // =================== Query Methods ===================
+
+    /// Execute a query or mutation with automatic auth token refresh
+    ///
+    /// Matches TS executeQuery(query, variables) at lines 474-487
+    ///
+    /// # Parameters
+    /// - `query`: The query or mutation to execute
+    /// - `variables`: Optional variables for the query
+    ///
+    /// # Returns
+    /// Response from the query execution
+    pub async fn execute_query<Q: crate::query::Query + ?Sized>(
+        &mut self,
+        query: &Q,
+        variables: Option<serde_json::Value>
+    ) -> Result<Box<dyn Response>> {
+        // Check and refresh authorization token if needed (matches TS lines 476-483)
+        if let Some(ref auth_token) = self.auth_token {
+            if auth_token.is_expired() {
+                self.log("info", "KnishIOClient::execute_query() - Access token is expired. Getting new one...");
+
+                // Refresh the token (matches TS line 478)
+                let secret = self.secret.clone();
+                let cell_slug = self.cell_slug.clone();
+                let encrypt = self.encrypt;
+
+                let _new_token = self.request_auth_token(
+                    secret.as_deref(),
+                    None,
+                    cell_slug.as_deref(),
+                    Some(encrypt)
+                ).await?;
+            }
+        }
+
+        // Execute the query (matches TS line 486)
+        let client = self.client.as_ref()
+            .ok_or(KnishIOError::NoClient)?;
+
+        query.execute(client, variables, None).await
+    }
+
+    /// Cancel a specific query
+    ///
+    /// Matches TS cancelQuery(query, variables) at lines 681-689
+    ///
+    /// # Parameters
+    /// - `query_name`: Name of the query to cancel
+    /// - `variables`: Variables used for the query (for key generation)
+    pub fn cancel_query(&self, query_name: &str, variables: Option<serde_json::Value>) {
+        // Generate query key (matches TS line 682)
+        let query_key = format!("{}_{}", query_name,
+            serde_json::to_string(&variables.unwrap_or(serde_json::json!({}))).unwrap_or_default());
+
+        // Abort and remove controller (matches TS lines 683-688)
+        if let Ok(mut controllers) = self.abort_controllers.lock() {
+            if controllers.contains_key(&query_key) {
+                controllers.remove(&query_key);
+            }
+        }
+    }
+
+    /// Cancel all pending queries
+    ///
+    /// Matches TS cancelAllQueries() at lines 694-699
+    pub fn cancel_all_queries(&self) {
+        // Abort all controllers and clear (matches TS lines 695-698)
+        if let Ok(mut controllers) = self.abort_controllers.lock() {
+            controllers.clear();
+        }
+    }
 
     /// Query balance for a wallet or token
     ///
@@ -2303,43 +2390,116 @@ impl KnishIOClient {
 
     /// Deposit tokens to buffer
     ///
+    /// Matches TS depositBufferToken({ tokenSlug, amount, tradeRates, sourceWallet }) at lines 1830-1872
+    ///
     /// # Parameters
     /// - `token`: Token slug
     /// - `amount`: Amount to deposit
+    /// - `trade_rates`: Trade rates for the buffer deposit
+    /// - `source_wallet`: Optional source wallet (will be queried if not provided)
     ///
     /// # Returns
     /// Deposit response
-    pub async fn deposit_buffer_token(&mut self, token: &str, amount: f64) -> Result<serde_json::Value> {
+    pub async fn deposit_buffer_token(
+        &mut self,
+        token: &str,
+        amount: f64,
+        trade_rates: std::collections::HashMap<String, f64>,
+        source_wallet: Option<Wallet>
+    ) -> Result<Box<dyn Response>> {
+        use crate::mutation::deposit_buffer_token::{MutationDepositBufferToken, DepositBufferTokenParams};
+        use crate::mutation::Mutation;
+
         // Ensure we have authentication
         self.ensure_authentication(None).await?;
 
-        // Create deposit molecule
-        let mut molecule = Molecule::new();
-        molecule.init_deposit_buffer(amount, std::collections::HashMap::new())?;
+        self.log("info", &format!("KnishIOClient::deposit_buffer_token() - Depositing {} of {} to buffer...", amount, token));
 
-        // TODO: Sign and propose through GraphQL client
-        Err(KnishIOError::Custom("deposit_buffer_token not fully implemented yet".to_string()))
+        // Get source wallet if not provided (matches TS lines 1844-1849)
+        let source_wallet = if let Some(wallet) = source_wallet {
+            wallet
+        } else {
+            self.query_source_wallet(token, amount, None).await?
+        };
+
+        // Create molecule with source wallet
+        let mut molecule = Molecule::new();
+        molecule.source_wallet = Some(source_wallet);
+
+        // Create mutation (matches TS line 1851)
+        let mut mutation = MutationDepositBufferToken::from_molecule(molecule);
+
+        // Fill molecule (matches TS lines 1854-1859)
+        mutation.fill_molecule(DepositBufferTokenParams {
+            amount,
+            trade_rates,
+        })?;
+
+        // Execute mutation (matches TS line 1865)
+        let client = self.client.as_ref()
+            .ok_or(KnishIOError::NoClient)?;
+
+        mutation.execute(client, None, None).await
     }
 
     /// Withdraw tokens from buffer
     ///
+    /// Matches TS withdrawBufferToken({ tokenSlug, amount, sourceWallet, signingWallet }) at lines 1877-1916
+    ///
     /// # Parameters
     /// - `token`: Token slug
     /// - `amount`: Amount to withdraw
-    /// - `recipients`: Map of recipient bundle hashes to amounts
+    /// - `source_wallet`: Optional source wallet (will use default if not provided)
+    /// - `signing_wallet`: Optional signing wallet for the withdrawal
     ///
     /// # Returns
     /// Withdrawal response
-    pub async fn withdraw_buffer_token(&mut self, token: &str, amount: f64, recipients: std::collections::HashMap<String, f64>) -> Result<serde_json::Value> {
+    pub async fn withdraw_buffer_token(
+        &mut self,
+        token: &str,
+        amount: f64,
+        source_wallet: Option<Wallet>,
+        signing_wallet: Option<Wallet>
+    ) -> Result<Box<dyn Response>> {
+        use crate::mutation::withdraw_buffer_token::{MutationWithdrawBufferToken, WithdrawBufferTokenParams};
+        use crate::mutation::Mutation;
+
         // Ensure we have authentication
         self.ensure_authentication(None).await?;
 
-        // Create withdraw molecule
-        let mut molecule = Molecule::new();
-        molecule.init_withdraw_buffer(recipients, None)?;
+        self.log("info", &format!("KnishIOClient::withdraw_buffer_token() - Withdrawing {} of {} from buffer...", amount, token));
 
-        // TODO: Sign and propose through GraphQL client
-        Err(KnishIOError::Custom("withdraw_buffer_token not fully implemented yet".to_string()))
+        // Get source wallet if not provided (matches TS lines 1891-1893)
+        let source_wallet = if let Some(wallet) = source_wallet {
+            wallet
+        } else {
+            self.get_source_wallet().await?
+        };
+
+        // Create molecule with source wallet
+        let mut molecule = Molecule::new();
+        molecule.source_wallet = Some(source_wallet);
+
+        // Create mutation (matches TS line 1895)
+        let mut mutation = MutationWithdrawBufferToken::from_molecule(molecule);
+
+        // Fill molecule (matches TS lines 1898-1903 and JS lines 1806-1811)
+        // Create recipients map: bundle -> amount (matches JS lines 1806-1807)
+        let mut recipients = std::collections::HashMap::new();
+        let bundle = self.get_bundle()
+            .ok_or(KnishIOError::Custom("Bundle not set".to_string()))?;
+        recipients.insert(bundle.to_string(), amount);
+
+        mutation.fill_molecule(WithdrawBufferTokenParams {
+            recipients,
+            signing_wallet,
+        })?;
+
+        // Execute mutation (matches TS line 1909)
+        let client = self.client.as_ref()
+            .ok_or(KnishIOError::NoClient)?;
+
+        mutation.execute(client, None, None).await
     }
 
     /// Claim shadow wallet (equivalent to claimShadowWallet in JS)
@@ -2564,6 +2724,44 @@ impl KnishIOClient {
         mutation.execute(client, None, None).await
     }
 
+    /// Link an identifier to a wallet bundle
+    ///
+    /// Matches TS linkIdentifier({ type, contact }) at lines 1731-1763
+    ///
+    /// # Parameters
+    /// - `identifier_type`: Type of identifier
+    /// - `contact`: Contact information to link
+    ///
+    /// # Returns
+    /// Link identifier response
+    pub async fn link_identifier(&mut self, identifier_type: &str, contact: &str) -> Result<Box<dyn Response>> {
+        use crate::mutation::link_identifier::MutationLinkIdentifier;
+        use crate::query::Query;
+
+        self.log("info", &format!("KnishIOClient::link_identifier() - Linking identifier of type {}...", identifier_type));
+
+        // Get bundle hash (matches TS line 1743)
+        let bundle = self.get_bundle()
+            .ok_or(KnishIOError::MissingBundle)?
+            .to_string();
+
+        // Create mutation (matches TS line 1740)
+        let mutation = MutationLinkIdentifier::new();
+
+        // Build variables (matches TS lines 1746-1750 equivalent)
+        let variables = serde_json::json!({
+            "bundle": bundle,
+            "type": identifier_type,
+            "content": contact
+        });
+
+        // Execute mutation (matches TS line 1756)
+        let client = self.client.as_ref()
+            .ok_or(KnishIOError::NoClient)?;
+
+        mutation.execute(client, Some(variables), None).await
+    }
+
     /// Declare an active User Session with a given MetaAsset
     ///
     /// Matches JS activeSession({ bundle, metaType, metaId, ... }) at lines 1111-1135
@@ -2648,7 +2846,7 @@ impl KnishIOClient {
         &mut self,
         meta_type: &str,
         meta_id: &str,
-        policy: HashMap<String, Value>
+        _policy: HashMap<String, Value>
     ) -> Result<Box<dyn Response>> {
         use crate::mutation::propose_molecule::MutationProposeMolecule;
         use crate::mutation::Mutation;

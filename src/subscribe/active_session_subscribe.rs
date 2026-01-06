@@ -71,7 +71,6 @@ impl Subscribe for ActiveSessionSubscribe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     
     #[tokio::test]
     async fn test_active_session_subscribe_creation() {

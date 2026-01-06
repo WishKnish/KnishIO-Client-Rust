@@ -256,7 +256,6 @@ impl AtomVersion for Version4 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn test_version4_new() {

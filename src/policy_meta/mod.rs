@@ -669,7 +669,7 @@ mod tests {
         // Test exact JavaScript SDK behavior reproduction
 
         // Test empty policy with meta keys (JavaScript line 87-105)
-        let mut policy_meta = PolicyMeta::new(json!({}), vec![
+        let policy_meta = PolicyMeta::new(json!({}), vec![
             "pubkey".to_string(),
             "characters".to_string(),
             "balance".to_string(),

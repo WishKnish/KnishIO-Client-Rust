@@ -31,13 +31,13 @@ pub trait Query: Send + Sync {
         &self,
         client: &GraphQLClient,
         variables: Option<Value>,
-        context: Option<HashMap<String, Value>>,
+        _context: Option<HashMap<String, Value>>,
     ) -> Result<Box<dyn Response>> {
         let compiled_vars = self.compiled_variables(variables);
         let request = create_query_request(self.get_query(), compiled_vars);
-        
+
         let response = client.query(request).await?;
-        
+
         // Convert GraphQLResponse to our Response type
         let json_data = response.data.unwrap_or_else(|| json!({}));
         Ok(self.create_response(json_data))

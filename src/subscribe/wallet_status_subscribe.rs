@@ -84,7 +84,6 @@ impl Subscribe for WalletStatusSubscribe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     
     #[tokio::test]
     async fn test_wallet_status_subscribe_creation() {
