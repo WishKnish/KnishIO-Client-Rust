@@ -717,7 +717,7 @@ impl SelfTestRunner {
             Some("BASE64"),
         ).context("Failed to create source wallet")?;
 
-        source_wallet.balance = balance;  // Set balance for testing
+        source_wallet.set_balance_f64(balance);  // Set balance for testing
         Logger::test("Source wallet creation", true, None);
 
         // Create recipient wallet
@@ -820,7 +820,7 @@ impl SelfTestRunner {
             Some("BASE64"),
         ).context("Failed to create source wallet")?;
 
-        source_wallet.balance = balance;
+        source_wallet.set_balance_f64(balance);
         Logger::test("Source wallet creation", true, None);
 
         // Create fixed remainder wallet for deterministic testing
@@ -1026,7 +1026,7 @@ impl SelfTestRunner {
                 None,
                 None
             )?;
-            source_wallet.balance = 1000.0;
+            source_wallet.balance = "1000".to_string();
 
             // Test 1: Missing Molecular Hash (should fail)
             {

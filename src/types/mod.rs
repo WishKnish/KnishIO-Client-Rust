@@ -33,6 +33,10 @@ pub enum Isotope {
     B,
     /// Fusion operations
     F,
+    /// Peering operations
+    P,
+    /// Append request operations
+    A,
 }
 
 impl Isotope {
@@ -48,9 +52,11 @@ impl Isotope {
             Isotope::R => "R",
             Isotope::B => "B",
             Isotope::F => "F",
+            Isotope::P => "P",
+            Isotope::A => "A",
         }
     }
-    
+
     /// Parse isotope from string
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
@@ -63,6 +69,8 @@ impl Isotope {
             "R" => Some(Isotope::R),
             "B" => Some(Isotope::B),
             "F" => Some(Isotope::F),
+            "P" => Some(Isotope::P),
+            "A" => Some(Isotope::A),
             _ => None,
         }
     }

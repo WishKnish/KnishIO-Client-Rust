@@ -1385,15 +1385,13 @@ impl KnishIOClient {
     /// # Errors
     /// Returns `TransferBalance` error if insufficient balance or shadow wallet
     pub async fn query_source_wallet(&self, token: &str, amount: f64, wallet_type: Option<&str>) -> Result<Wallet> {
-        use crate::utils::decimal::Decimal;
-
         let _wallet_type = wallet_type.unwrap_or("regular");
 
         // Query balance for this token
         let source_wallet = self.query_balance(token, None).await?;
 
-        // Check if we have enough tokens (Decimal::cmp requires 3 args: value1, value2, debug)
-        if Decimal::cmp(source_wallet.balance, amount, false) < 0 {
+        // Check if we have enough tokens (i128 for precision-safe comparison)
+        if source_wallet.balance_as_i128() < (amount as i128) {
             return Err(KnishIOError::TransferBalance);
         }
 
@@ -1905,7 +1903,6 @@ impl KnishIOClient {
     ) -> Result<Box<dyn Response>> {
         use crate::mutation::transfer_tokens::{MutationTransferTokens, TransferTokensParams};
         use crate::mutation::Mutation;
-        use crate::utils::decimal::Decimal;
 
         // Ensure we have authentication
         self.ensure_authentication(None).await?;
@@ -1927,8 +1924,8 @@ impl KnishIOClient {
             self.query_source_wallet(token, amount.unwrap_or(0.0), None).await?
         };
 
-        // Do you have enough tokens? (matches JS lines 1667-1669)
-        if Decimal::cmp(source_wallet.balance, amount.unwrap_or(0.0), false) < 0 {
+        // Do you have enough tokens? (i128 for precision-safe comparison)
+        if source_wallet.balance_as_i128() < (amount.unwrap_or(0.0) as i128) {
             return Err(KnishIOError::TransferBalance);
         }
 

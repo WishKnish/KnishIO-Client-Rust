@@ -7,7 +7,7 @@
 //!
 //! # Features
 //!
-//! - **Post-Quantum Cryptography**: ML-KEM and XMSS signatures
+//! - **Post-Quantum Cryptography**: ML-KEM key encapsulation and WOTS+ one-time signatures
 //! - **SHAKE256 Hashing**: Quantum-resistant cryptographic hashing
 //! - **Molecular Transactions**: Atomic operations grouped into molecules
 //! - **GraphQL Integration**: Seamless communication with KnishIO nodes
@@ -84,7 +84,7 @@ pub mod check_molecule;
 // Re-exports for convenience
 pub use atom::Atom;
 pub use error::{KnishIOError, Result};
-pub use molecule::{Molecule, TypeSafeMoleculeBuilder, ValueAtomParams, MetaAtomParams, IdentityAtomParams, TokenRequestAtomParams};
+pub use molecule::{Molecule, TypeSafeMoleculeBuilder, ValueAtomParams, MetaAtomParams, IdentityAtomParams, TokenRequestAtomParams, BufferDepositAtomParams, BufferWithdrawAtomParams, FusionAtomParams, StackableTransferParams};
 pub use types::{Isotope, MetaItem};
 pub use wallet::Wallet;
 pub use client::{KnishIOClient, builder::ClientBuilder};

@@ -1536,43 +1536,41 @@ impl ResponseWalletList {
         let batch_id = data.get("batchId").and_then(|v| v.as_str());
         let characters = data.get("characters").and_then(|v| v.as_str());
         
-        // Create wallet following JS logic
+        // Create wallet following JS logic (ResponseWalletList.toClientWallet)
         let mut wallet = if position.is_none() {
-            // Create wallet from bundle (equivalent to Wallet.create in JS)
+            // No position: equivalent to JS Wallet.create({bundle, token, batchId, characters})
             Wallet::create(
                 secret,
-                batch_id,
+                Some(bundle_hash),
                 token_slug,
-                characters,
                 None,
+                characters,
             ).ok()?
         } else {
-            // Create wallet with position (equivalent to new Wallet in JS)
+            // With position: equivalent to JS new Wallet({secret, token, position, batchId, characters})
             let mut w = Wallet::create(
                 secret,
-                batch_id,
+                Some(bundle_hash),
                 token_slug,
-                characters,
                 position,
+                characters,
             ).ok()?;
-            
-            // Set address and bundle from response
+            // Overwrite address from response (server is authoritative)
             if let Some(addr) = data.get("address").and_then(|v| v.as_str()) {
                 w.address = Some(addr.to_string());
             }
-            w.bundle = Some(bundle_hash.to_string());
             w
         };
+        // Set batch_id (Wallet::create() doesn't accept it, unlike JS Wallet.create)
+        wallet.batch_id = batch_id.map(|s| s.to_string());
         
         // TODO: Token information handling - fields don't exist on current Wallet struct
         // This would need to be implemented if these fields are added to Wallet
         // or handled through a different mechanism
         
-        // Set balance and other properties
+        // Set balance and other properties (String for precision)
         if let Some(amount) = data.get("amount").and_then(|v| v.as_str()) {
-            if let Ok(balance) = amount.parse::<f64>() {
-                wallet.balance = balance;
-            }
+            wallet.balance = amount.to_string();
         }
         
         if let Some(pubkey) = data.get("pubkey").and_then(|v| v.as_str()) {

@@ -897,5 +897,44 @@ impl Atom {
 
         groups
     }
+
+    // ============================================================================
+    // Server-compatible setter methods (RS-001 support)
+    // ============================================================================
+
+    /// Set the value field
+    pub fn set_value(&mut self, value: Option<String>) {
+        self.value = value;
+    }
+
+    /// Set the batch_id field
+    pub fn set_batch_id(&mut self, batch_id: Option<String>) {
+        self.batch_id = batch_id;
+    }
+
+    /// Set the meta_type field
+    pub fn set_meta_type(&mut self, meta_type: Option<String>) {
+        self.meta_type = meta_type;
+    }
+
+    /// Set the meta_id field
+    pub fn set_meta_id(&mut self, meta_id: Option<String>) {
+        self.meta_id = meta_id;
+    }
+
+    /// Set the meta field
+    pub fn set_meta(&mut self, meta: Vec<MetaItem>) {
+        self.meta = meta;
+    }
+
+    /// Set the index field
+    pub fn set_index(&mut self, index: Option<u32>) {
+        self.index = index;
+    }
+
+    /// Set the ots_fragment field
+    pub fn set_ots_fragment(&mut self, ots_fragment: Option<String>) {
+        self.ots_fragment = ots_fragment;
+    }
 }
 

@@ -16,7 +16,7 @@ use crate::error::{KnishIOError, Result};
 use base64::{Engine as _, engine::general_purpose};
 
 // Re-export the type-safe builder for convenience
-pub use builder::{TypeSafeMoleculeBuilder, ValueAtomParams, MetaAtomParams, IdentityAtomParams, TokenRequestAtomParams};
+pub use builder::{TypeSafeMoleculeBuilder, ValueAtomParams, MetaAtomParams, IdentityAtomParams, TokenRequestAtomParams, BufferDepositAtomParams, BufferWithdrawAtomParams, FusionAtomParams, StackableTransferParams};
 
 /// Helper function to chunk a string into pieces of specified size
 /// Equivalent to JavaScript's chunkSubstr function
@@ -80,6 +80,11 @@ pub struct Molecule {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "remainderWallet")]
     pub remainder_wallet: Option<Wallet>,
+
+    /// Parent molecule hashes for DAG structure (1-8 parents, empty for genesis)
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parent_hashes: Vec<String>,
 }
 
 impl Molecule {
@@ -99,6 +104,7 @@ impl Molecule {
             secret: None,
             source_wallet: None,
             remainder_wallet: None,
+            parent_hashes: Vec::new(),
         }
     }
     
@@ -163,6 +169,7 @@ impl Molecule {
             secret,
             source_wallet,
             remainder_wallet: final_remainder_wallet,
+            parent_hashes: Vec::new(),
         }
     }
     
@@ -283,8 +290,33 @@ impl Molecule {
     }
     
     /// Add a ContinuID atom for identity continuity
+    ///
+    /// Creates an I-isotope atom from the remainder wallet, including:
+    /// - `previousPosition`: the source wallet's position (enables validator chain integrity checks)
+    /// - `pubkey`: remainder wallet's public key (if available)
+    /// - `characters`: remainder wallet's character encoding (if available)
     pub fn add_continuid_atom(&mut self) -> Result<()> {
         if let Some(ref remainder_wallet) = self.remainder_wallet {
+            let mut meta_items = Vec::new();
+
+            // previousPosition: the source wallet's position being consumed
+            // Enables validator's ContinuID chain integrity checks (i_isotope.rs Rules 4a-4c)
+            if let Some(ref source) = self.source_wallet {
+                if let Some(ref pos) = source.position {
+                    meta_items.push(MetaItem::new("previousPosition", pos.as_str()));
+                }
+            }
+
+            // pubkey: remainder wallet's public key for chain verification
+            if let Some(ref pk) = remainder_wallet.pubkey {
+                meta_items.push(MetaItem::new("pubkey", pk.as_str()));
+            }
+
+            // characters: encoding format
+            if let Some(ref chars) = remainder_wallet.characters {
+                meta_items.push(MetaItem::new("characters", chars.as_str()));
+            }
+
             let params = AtomCreateParams {
                 isotope: Isotope::I,
                 wallet_info: Some(WalletInfo {
@@ -295,13 +327,14 @@ impl Molecule {
                 }),
                 meta_type: Some("walletBundle".to_string()),
                 meta_id: remainder_wallet.bundle.clone(),
+                meta: if meta_items.is_empty() { None } else { Some(meta_items) },
                 ..Default::default()
             };
-            
+
             let atom = Atom::create(params);
             self.add_atom(atom);
         }
-        
+
         Ok(())
     }
     
@@ -436,20 +469,22 @@ impl Molecule {
     /// * `recipient_wallet` - Wallet to receive tokens
     /// * `amount` - Amount to transfer
     pub fn init_value(&mut self, recipient_wallet: &Wallet, amount: f64) -> Result<()> {
-        // Extract needed values before making mutable borrows
-        let (source_balance, source_wallet_info, remainder_wallet_info) = {
+        // Extract needed values before making mutable borrows (i128 for precision)
+        let amount_i128 = amount as i128;
+        let (source_balance_i128, source_wallet_info, remainder_wallet_info) = {
             if let Some(ref source_wallet) = self.source_wallet {
-                if source_wallet.balance - amount < 0.0 {
+                let bal = source_wallet.balance_as_i128();
+                if bal - amount_i128 < 0 {
                     return Err(KnishIOError::BalanceInsufficient);
                 }
-                
+
                 let source_info = WalletInfo {
                     position: source_wallet.position.clone().unwrap_or_default(),
                     address: source_wallet.address.clone().unwrap_or_default(),
                     token: source_wallet.token.clone(),
                     batch_id: source_wallet.batch_id.clone(),
                 };
-                
+
                 let remainder_info = if let Some(ref remainder_wallet) = self.remainder_wallet {
                     Some(WalletInfo {
                         position: remainder_wallet.position.clone().unwrap_or_default(),
@@ -460,24 +495,26 @@ impl Molecule {
                 } else {
                     None
                 };
-                
-                (source_wallet.balance, Some(source_info), remainder_info)
+
+                (bal, Some(source_info), remainder_info)
             } else {
                 return Ok(());
             }
         };
-        
+
         // Now we can safely make mutable borrows
         if let Some(source_info) = source_wallet_info {
             // Remove FULL BALANCE from source (JavaScript UTXO pattern)
             let source_params = AtomCreateParams {
                 isotope: Isotope::V,
                 wallet_info: Some(source_info),
-                value: Some(-source_balance),  // Debit full balance, not just transfer amount
+                value: None,  // Set below with String precision
                 ..Default::default()
             };
-            self.add_atom(Atom::create(source_params));
-            
+            let mut source_atom = Atom::create(source_params);
+            source_atom.value = Some((-source_balance_i128).to_string());
+            self.add_atom(source_atom);
+
             // Add tokens to recipient
             let recipient_params = AtomCreateParams {
                 isotope: Isotope::V,
@@ -493,21 +530,23 @@ impl Molecule {
                 ..Default::default()
             };
             self.add_atom(Atom::create(recipient_params));
-            
+
             // Add remainder atom
             if let Some(remainder_info) = remainder_wallet_info {
                 let remainder_params = AtomCreateParams {
                     isotope: Isotope::V,
                     wallet_info: Some(remainder_info),
-                    value: Some(source_balance - amount),
+                    value: None,  // Set below with String precision
                     meta_type: Some("walletBundle".to_string()),
                     meta_id: self.remainder_wallet.as_ref().and_then(|w| w.bundle.clone()),
                     ..Default::default()
                 };
-                self.add_atom(Atom::create(remainder_params));
+                let mut remainder_atom = Atom::create(remainder_params);
+                remainder_atom.value = Some((source_balance_i128 - amount_i128).to_string());
+                self.add_atom(remainder_atom);
             }
         }
-        
+
         Ok(())
     }
     
@@ -577,12 +616,13 @@ impl Molecule {
                 token: wallet.token.clone(),
                 batch_id: wallet.batch_id.clone(),
             }),
-            value: Some(wallet.balance),
+            value: None,  // Set below with String precision
             ..Default::default()
         };
-        
-        self.add_atom(Atom::create(params));
-        
+        let mut atom = Atom::create(params);
+        atom.value = Some(wallet.balance.clone());
+        self.add_atom(atom);
+
         if let Some(ref remainder_wallet) = self.remainder_wallet {
             let remainder_params = AtomCreateParams {
                 isotope: Isotope::V,
@@ -592,14 +632,16 @@ impl Molecule {
                     token: remainder_wallet.token.clone(),
                     batch_id: remainder_wallet.batch_id.clone(),
                 }),
-                value: Some(remainder_wallet.balance),
+                value: None,  // Set below with String precision
                 meta_type: Some("walletBundle".to_string()),
                 meta_id: remainder_wallet.bundle.clone(),
                 ..Default::default()
             };
-            self.add_atom(Atom::create(remainder_params));
+            let mut atom = Atom::create(remainder_params);
+            atom.value = Some(remainder_wallet.balance.clone());
+            self.add_atom(atom);
         }
-        
+
         Ok(())
     }
     
@@ -730,15 +772,16 @@ impl Molecule {
         if amount < 0.0 {
             return Err(KnishIOError::NegativeAmount);
         }
-        
+
+        let amount_i128 = amount as i128;
+
         // Extract all needed data from source_wallet first
-        let (source_atom, source_balance) = if let Some(ref source_wallet) = self.source_wallet {
-            if source_wallet.balance - amount < 0.0 {
+        let (source_atom, source_balance_i128) = if let Some(ref source_wallet) = self.source_wallet {
+            let bal = source_wallet.balance_as_i128();
+            if bal - amount_i128 < 0 {
                 return Err(KnishIOError::BalanceInsufficient);
             }
-            
-            let balance = source_wallet.balance;
-            
+
             // Remove tokens from source wallet
             let source_params = AtomCreateParams {
                 isotope: Isotope::V,
@@ -751,15 +794,15 @@ impl Molecule {
                 value: Some(-amount),
                 ..Default::default()
             };
-            (Some(Atom::create(source_params)), balance)
+            (Some(Atom::create(source_params)), bal)
         } else {
-            (None, 0.0)
+            (None, 0_i128)
         };
-        
+
         // Add atoms after immutable borrow ends
         if let Some(atom) = source_atom {
             self.add_atom(atom);
-            
+
             // Add remainder to remainder wallet
             if let Some(ref remainder_wallet) = self.remainder_wallet {
                 let remainder_params = AtomCreateParams {
@@ -770,15 +813,17 @@ impl Molecule {
                         token: remainder_wallet.token.clone(),
                         batch_id: remainder_wallet.batch_id.clone(),
                     }),
-                    value: Some(source_balance - amount),
+                    value: None,  // Set below with String precision
                     meta_type: Some("walletBundle".to_string()),
                     meta_id: remainder_wallet.bundle.clone(),
                     ..Default::default()
                 };
-                self.add_atom(Atom::create(remainder_params));
+                let mut remainder_atom = Atom::create(remainder_params);
+                remainder_atom.value = Some((source_balance_i128 - amount_i128).to_string());
+                self.add_atom(remainder_atom);
             }
         }
-        
+
         Ok(())
     }
     
@@ -790,24 +835,26 @@ impl Molecule {
         if amount < 0.0 {
             return Err(KnishIOError::NegativeAmount);
         }
-        
+
+        let amount_i128 = amount as i128;
+
         if let Some(ref mut source_wallet) = self.source_wallet.clone() {
+            let source_bal = source_wallet.balance_as_i128();
+
             // Handle token units if provided
             if let Some(_unit_list) = units {
-                // For token units, merge with existing units
-                // This is a simplified version - full implementation would need token unit handling
-                source_wallet.balance = amount;
+                source_wallet.set_balance_i128(amount_i128);
                 if let Some(ref mut remainder_wallet) = self.remainder_wallet {
-                    remainder_wallet.balance = source_wallet.balance + amount;
+                    remainder_wallet.set_balance_i128(source_bal + amount_i128);
                 }
             } else {
                 // Update wallet balances for fungible tokens
                 if let Some(ref mut remainder_wallet) = self.remainder_wallet {
-                    remainder_wallet.balance = source_wallet.balance + amount;
+                    remainder_wallet.set_balance_i128(source_bal + amount_i128);
                 }
-                source_wallet.balance = amount;
+                source_wallet.set_balance_i128(amount_i128);
             }
-            
+
             // Add atom to remove tokens from source
             let source_params = AtomCreateParams {
                 isotope: Isotope::V,
@@ -817,11 +864,13 @@ impl Molecule {
                     token: source_wallet.token.clone(),
                     batch_id: source_wallet.batch_id.clone(),
                 }),
-                value: Some(source_wallet.balance),
+                value: None,  // Set below with String precision
                 ..Default::default()
             };
-            self.add_atom(Atom::create(source_params));
-            
+            let mut source_atom = Atom::create(source_params);
+            source_atom.value = Some(source_wallet.balance.clone());
+            self.add_atom(source_atom);
+
             // Add remainder atom
             if let Some(ref remainder_wallet) = self.remainder_wallet {
                 let remainder_params = AtomCreateParams {
@@ -832,15 +881,17 @@ impl Molecule {
                         token: remainder_wallet.token.clone(),
                         batch_id: remainder_wallet.batch_id.clone(),
                     }),
-                    value: Some(remainder_wallet.balance),
+                    value: None,  // Set below with String precision
                     meta_type: Some("walletBundle".to_string()),
                     meta_id: remainder_wallet.bundle.clone(),
                     ..Default::default()
                 };
-                self.add_atom(Atom::create(remainder_params));
+                let mut remainder_atom = Atom::create(remainder_params);
+                remainder_atom.value = Some(remainder_wallet.balance.clone());
+                self.add_atom(remainder_atom);
             }
         }
-        
+
         Ok(())
     }
     
@@ -897,21 +948,23 @@ impl Molecule {
     /// * `amount` - Amount to deposit
     /// * `trade_rates` - Trading rates (not implemented in this version)
     pub fn init_deposit_buffer(&mut self, amount: f64, _trade_rates: HashMap<String, f64>) -> Result<()> {
+        let amount_i128 = amount as i128;
+
         // Extract all needed data from source_wallet first
         let atoms_to_add = if let Some(ref source_wallet) = self.source_wallet {
-            if source_wallet.balance - amount < 0.0 {
+            let source_balance_i128 = source_wallet.balance_as_i128();
+            if source_balance_i128 - amount_i128 < 0 {
                 return Err(KnishIOError::BalanceInsufficient);
             }
-            
-            let source_balance = source_wallet.balance;
+
             let source_bundle = source_wallet.bundle.clone();
             let source_token = source_wallet.token.clone();
             let source_batch_id = source_wallet.batch_id.clone();
             let source_position = source_wallet.position.clone().unwrap_or_default();
             let source_address = source_wallet.address.clone().unwrap_or_default();
-            
+
             let mut atoms = Vec::new();
-            
+
             // Create buffer wallet
             if let Some(ref secret) = self.secret {
                 let buffer_wallet = Wallet::create(
@@ -921,8 +974,7 @@ impl Molecule {
                     source_batch_id.as_deref(),
                     None,
                 )?;
-                // TODO: Set trade rates on buffer wallet
-                
+
                 // Remove tokens from source
                 let source_params = AtomCreateParams {
                     isotope: Isotope::V,
@@ -936,7 +988,7 @@ impl Molecule {
                     ..Default::default()
                 };
                 atoms.push(Atom::create(source_params));
-                
+
                 // Add tokens to buffer wallet
                 let buffer_params = AtomCreateParams {
                     isotope: Isotope::B,
@@ -952,7 +1004,7 @@ impl Molecule {
                     ..Default::default()
                 };
                 atoms.push(Atom::create(buffer_params));
-                
+
                 // Add remainder atom if remainder wallet exists
                 if let Some(ref remainder_wallet) = self.remainder_wallet {
                     let remainder_params = AtomCreateParams {
@@ -963,25 +1015,27 @@ impl Molecule {
                             token: remainder_wallet.token.clone(),
                             batch_id: remainder_wallet.batch_id.clone(),
                         }),
-                        value: Some(source_balance - amount),
+                        value: None,  // Set below with String precision
                         meta_type: Some("walletBundle".to_string()),
                         meta_id: source_bundle,
                         ..Default::default()
                     };
-                    atoms.push(Atom::create(remainder_params));
+                    let mut remainder_atom = Atom::create(remainder_params);
+                    remainder_atom.value = Some((source_balance_i128 - amount_i128).to_string());
+                    atoms.push(remainder_atom);
                 }
             }
-            
+
             atoms
         } else {
             Vec::new()
         };
-        
+
         // Add all atoms after immutable borrow ends
         for atom in atoms_to_add {
             self.add_atom(atom);
         }
-        
+
         Ok(())
     }
     
@@ -996,22 +1050,23 @@ impl Molecule {
     ) -> Result<()> {
         // Calculate total amount from all recipients
         let total_amount: f64 = recipients.values().sum();
-        
+        let total_amount_i128 = total_amount as i128;
+
         // Extract all needed data from source_wallet first
         let atoms_to_add = if let Some(ref source_wallet) = self.source_wallet {
-            if source_wallet.balance - total_amount < 0.0 {
+            let source_balance_i128 = source_wallet.balance_as_i128();
+            if source_balance_i128 - total_amount_i128 < 0 {
                 return Err(KnishIOError::BalanceInsufficient);
             }
-            
-            let source_balance = source_wallet.balance;
+
             let source_token = source_wallet.token.clone();
             let source_batch_id = source_wallet.batch_id.clone();
             let source_bundle = source_wallet.bundle.clone();
             let source_position = source_wallet.position.clone().unwrap_or_default();
             let source_address = source_wallet.address.clone().unwrap_or_default();
-            
+
             let mut atoms = Vec::new();
-            
+
             // Remove tokens from source
             let source_params = AtomCreateParams {
                 isotope: Isotope::B,
@@ -1027,7 +1082,7 @@ impl Molecule {
                 ..Default::default()
             };
             atoms.push(Atom::create(source_params));
-            
+
             // Add atoms for each recipient
             for (recipient_bundle, amount) in recipients {
                 let recipient_params = AtomCreateParams {
@@ -1042,7 +1097,7 @@ impl Molecule {
                 };
                 atoms.push(Atom::create(recipient_params));
             }
-            
+
             // Add remainder atom if remainder wallet exists
             if let Some(ref remainder_wallet) = self.remainder_wallet {
                 let remainder_params = AtomCreateParams {
@@ -1053,24 +1108,26 @@ impl Molecule {
                         token: remainder_wallet.token.clone(),
                         batch_id: remainder_wallet.batch_id.clone(),
                     }),
-                    value: Some(source_balance - total_amount),
+                    value: None,  // Set below with String precision
                     meta_type: Some("walletBundle".to_string()),
                     meta_id: remainder_wallet.bundle.clone(),
                     ..Default::default()
                 };
-                atoms.push(Atom::create(remainder_params));
+                let mut remainder_atom = Atom::create(remainder_params);
+                remainder_atom.value = Some((source_balance_i128 - total_amount_i128).to_string());
+                atoms.push(remainder_atom);
             }
-            
+
             atoms
         } else {
             Vec::new()
         };
-        
+
         // Add all atoms after immutable borrow ends
         for atom in atoms_to_add {
             self.add_atom(atom);
         }
-        
+
         Ok(())
     }
     
@@ -1121,21 +1178,22 @@ impl Molecule {
     /// * `recipient_wallet` - Wallet to receive fused token
     pub fn fuse_token(&mut self, token_units: Vec<String>, recipient_wallet: &Wallet) -> Result<()> {
         let amount = token_units.len() as f64;
-        
+        let amount_i128 = token_units.len() as i128;
+
         // Extract all needed data from source_wallet first
         let atoms_to_add = if let Some(ref source_wallet) = self.source_wallet {
-            if source_wallet.balance - amount < 0.0 {
+            let source_balance_i128 = source_wallet.balance_as_i128();
+            if source_balance_i128 - amount_i128 < 0 {
                 return Err(KnishIOError::BalanceInsufficient);
             }
-            
-            let source_balance = source_wallet.balance;
+
             let source_position = source_wallet.position.clone().unwrap_or_default();
             let source_address = source_wallet.address.clone().unwrap_or_default();
             let source_token = source_wallet.token.clone();
             let source_batch_id = source_wallet.batch_id.clone();
-            
+
             let mut atoms = Vec::new();
-            
+
             // Remove tokens from source wallet
             let source_params = AtomCreateParams {
                 isotope: Isotope::V,
@@ -1149,7 +1207,7 @@ impl Molecule {
                 ..Default::default()
             };
             atoms.push(Atom::create(source_params));
-            
+
             // Add F isotope for fused tokens creation
             let fuse_params = AtomCreateParams {
                 isotope: Isotope::F,
@@ -1165,7 +1223,7 @@ impl Molecule {
                 ..Default::default()
             };
             atoms.push(Atom::create(fuse_params));
-            
+
             // Add remainder atom if remainder wallet exists
             if let Some(ref remainder_wallet) = self.remainder_wallet {
                 let remainder_params = AtomCreateParams {
@@ -1176,24 +1234,26 @@ impl Molecule {
                         token: remainder_wallet.token.clone(),
                         batch_id: remainder_wallet.batch_id.clone(),
                     }),
-                    value: Some(source_balance - amount),
+                    value: None,  // Set below with String precision
                     meta_type: Some("walletBundle".to_string()),
                     meta_id: remainder_wallet.bundle.clone(),
                     ..Default::default()
                 };
-                atoms.push(Atom::create(remainder_params));
+                let mut remainder_atom = Atom::create(remainder_params);
+                remainder_atom.value = Some((source_balance_i128 - amount_i128).to_string());
+                atoms.push(remainder_atom);
             }
-            
+
             atoms
         } else {
             Vec::new()
         };
-        
+
         // Add all atoms after immutable borrow ends
         for atom in atoms_to_add {
             self.add_atom(atom);
         }
-        
+
         Ok(())
     }
     
@@ -1294,6 +1354,11 @@ impl Molecule {
             serialized["cellSlugOrigin"] = serde_json::json!(cell_slug_origin);
         }
 
+        // Include parent hashes for DAG linkage (only when non-empty)
+        if !self.parent_hashes.is_empty() {
+            serialized["parentHashes"] = serde_json::json!(self.parent_hashes);
+        }
+
         // Serialize atoms array with optional OTS fragments
         let atom_options = crate::types::AtomJsonOptions {
             include_ots_fragments: options.include_ots_fragments,
@@ -1384,6 +1449,14 @@ impl Molecule {
         } else {
             // Default to cellSlug if cellSlugOrigin is missing (PHP/C SDK compatibility)
             molecule.cell_slug_origin = molecule.cell_slug.clone();
+        }
+
+        // Reconstruct parent hashes for DAG linkage (may be absent in older molecules)
+        if let Some(parent_hashes) = json.get("parentHashes").and_then(|p| p.as_array()) {
+            molecule.parent_hashes = parent_hashes
+                .iter()
+                .filter_map(|h| h.as_str().map(|s| s.to_string()))
+                .collect();
         }
 
         // Reconstruct atoms array with proper Atom instances
@@ -1550,7 +1623,7 @@ mod tests {
         ).unwrap();
         
         let mut source_wallet = source_wallet;
-        source_wallet.balance = 100.0;
+        source_wallet.balance = "100".to_string();
         
         let recipient_wallet = Wallet::create(
             Some("test-secret2"), 
@@ -1581,9 +1654,9 @@ mod tests {
         
         assert_eq!(molecule.atoms.len(), 3); // source, recipient, remainder
         assert_eq!(molecule.atoms[0].isotope, Isotope::V);
-        assert_eq!(molecule.atoms[0].value, Some("-50".to_string()));
+        assert_eq!(molecule.atoms[0].value, Some("-100".to_string())); // UTXO: full balance debit
         assert_eq!(molecule.atoms[1].value, Some("50".to_string()));
-        assert_eq!(molecule.atoms[2].value, Some("50".to_string()));
+        assert_eq!(molecule.atoms[2].value, Some("50".to_string())); // remainder: 100 - 50
     }
     
     #[test]
@@ -1595,7 +1668,7 @@ mod tests {
             None, 
             None
         ).unwrap();
-        source_wallet.balance = 10.0;
+        source_wallet.balance = "10".to_string();
         
         let recipient_wallet = Wallet::create(
             Some("test-secret2"), 
@@ -1618,6 +1691,227 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), KnishIOError::BalanceInsufficient));
     }
+
+    #[test]
+    fn test_molecule_parent_hashes_default_empty() {
+        let molecule = Molecule::default();
+        assert!(molecule.parent_hashes.is_empty(), "New molecule should have empty parent_hashes");
+    }
+
+    #[test]
+    fn test_molecule_set_parent_hashes() {
+        let mut molecule = Molecule::default();
+        let hashes = vec!["abc123".to_string(), "def456".to_string()];
+        molecule.set_parent_hashes(hashes.clone());
+        assert_eq!(molecule.parent_hashes, hashes);
+    }
+
+    #[test]
+    fn test_molecule_to_json_includes_parent_hashes() {
+        let mut molecule = Molecule::default();
+        molecule.set_parent_hashes(vec!["hash_a".to_string(), "hash_b".to_string()]);
+        molecule.add_atom(Atom::new("pos1", "addr1", Isotope::V, "TEST"));
+
+        let options = crate::types::MoleculeJsonOptions::default();
+        let json = molecule.to_json(options).unwrap();
+
+        let parent_hashes = json.get("parentHashes").expect("parentHashes should be present");
+        let arr = parent_hashes.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0].as_str().unwrap(), "hash_a");
+        assert_eq!(arr[1].as_str().unwrap(), "hash_b");
+    }
+
+    #[test]
+    fn test_molecule_to_json_omits_empty_parent_hashes() {
+        let mut molecule = Molecule::default();
+        molecule.add_atom(Atom::new("pos1", "addr1", Isotope::V, "TEST"));
+
+        let options = crate::types::MoleculeJsonOptions::default();
+        let json = molecule.to_json(options).unwrap();
+
+        assert!(json.get("parentHashes").is_none(), "Empty parent_hashes should be omitted from JSON");
+    }
+
+    #[test]
+    fn test_molecule_from_json_with_parent_hashes() {
+        let json_str = r#"{
+            "molecularHash": "test_hash",
+            "bundle": "test-bundle",
+            "createdAt": "1640995200000",
+            "status": null,
+            "cellSlug": null,
+            "version": null,
+            "parentHashes": ["parent_1", "parent_2", "parent_3"],
+            "atoms": [
+                {
+                    "position": "pos1",
+                    "walletAddress": "addr1",
+                    "isotope": "V",
+                    "token": "TEST",
+                    "meta": [],
+                    "createdAt": "1640995200000"
+                }
+            ]
+        }"#;
+
+        let json_value: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        let options = crate::types::MoleculeFromJsonOptions {
+            include_validation_context: false,
+            validate_structure: false,
+            strict_mode: false,
+        };
+        let molecule = Molecule::from_json(&json_value, options).unwrap();
+
+        assert_eq!(molecule.parent_hashes.len(), 3);
+        assert_eq!(molecule.parent_hashes[0], "parent_1");
+        assert_eq!(molecule.parent_hashes[1], "parent_2");
+        assert_eq!(molecule.parent_hashes[2], "parent_3");
+    }
+
+    // ── GAP-07-002: ContinuID chain tracking tests ─────────────────────
+
+    #[test]
+    fn test_add_continuid_atom_includes_previous_position() {
+        let source_pos = "a".repeat(64);
+        let mut source_wallet = Wallet::create(
+            Some("test-secret"), None, "USER", Some(&source_pos), None,
+        ).unwrap();
+        source_wallet.position = Some(source_pos.clone());
+
+        let remainder_wallet = Wallet::create(
+            Some("test-secret"), None, "USER", None, None,
+        ).unwrap();
+
+        let mut molecule = Molecule::with_params(
+            Some("test-secret".to_string()),
+            None,
+            Some(source_wallet),
+            Some(remainder_wallet),
+            None,
+            None,
+        );
+
+        molecule.add_continuid_atom().unwrap();
+
+        // Find the I-isotope atom
+        let i_atom = molecule.atoms.iter()
+            .find(|a| a.isotope == Isotope::I)
+            .expect("Should have an I-isotope atom");
+
+        // Assert previousPosition meta is present with source wallet's position
+        let prev_pos_meta = i_atom.meta.iter()
+            .find(|m| m.key == "previousPosition")
+            .expect("I-atom should have previousPosition metadata");
+        assert_eq!(prev_pos_meta.value, source_pos,
+            "previousPosition must match source wallet position");
+    }
+
+    #[test]
+    fn test_add_continuid_atom_without_source_wallet() {
+        let remainder_wallet = Wallet::create(
+            Some("test-secret"), None, "USER", None, None,
+        ).unwrap();
+
+        let mut molecule = Molecule::with_params(
+            Some("test-secret".to_string()),
+            None,
+            None, // no source wallet
+            Some(remainder_wallet),
+            None,
+            None,
+        );
+
+        molecule.add_continuid_atom().unwrap();
+
+        let i_atom = molecule.atoms.iter()
+            .find(|a| a.isotope == Isotope::I)
+            .expect("Should have an I-isotope atom");
+
+        // No source wallet → no previousPosition (graceful first-molecule behavior)
+        let prev_pos = i_atom.meta.iter().find(|m| m.key == "previousPosition");
+        assert!(prev_pos.is_none(),
+            "First molecule (no source) should not have previousPosition");
+    }
+
+    #[test]
+    fn test_add_continuid_atom_includes_pubkey_when_present() {
+        let mut remainder_wallet = Wallet::create(
+            Some("test-secret"), None, "USER", None, None,
+        ).unwrap();
+        remainder_wallet.pubkey = Some("test-pubkey-hex".to_string());
+
+        let mut molecule = Molecule::with_params(
+            Some("test-secret".to_string()),
+            None,
+            None,
+            Some(remainder_wallet),
+            None,
+            None,
+        );
+
+        molecule.add_continuid_atom().unwrap();
+
+        let i_atom = molecule.atoms.iter()
+            .find(|a| a.isotope == Isotope::I)
+            .expect("Should have an I-isotope atom");
+
+        let pubkey_meta = i_atom.meta.iter()
+            .find(|m| m.key == "pubkey")
+            .expect("I-atom should have pubkey metadata when wallet has pubkey");
+        assert_eq!(pubkey_meta.value, "test-pubkey-hex");
+    }
+
+    #[test]
+    fn test_add_continuid_atom_skips_pubkey_when_absent() {
+        // Create remainder via Wallet::new with bundle (no secret) → no ML-KEM init → no pubkey
+        let remainder_wallet = Wallet::new(
+            None,                                    // no secret
+            Some("test-bundle"),                     // bundle
+            Some("USER"),                            // token
+            Some("test-address"),                    // address
+            Some(&"b".repeat(64)),                   // position (valid 64-hex)
+            None,                                    // batch_id
+            None,                                    // characters
+        ).unwrap();
+        assert!(remainder_wallet.pubkey.is_none(), "precondition: no pubkey on shadow wallet");
+
+        let mut molecule = Molecule::with_params(
+            Some("test-secret".to_string()),
+            None,
+            None,
+            Some(remainder_wallet),
+            None,
+            None,
+        );
+
+        molecule.add_continuid_atom().unwrap();
+
+        let i_atom = molecule.atoms.iter()
+            .find(|a| a.isotope == Isotope::I)
+            .expect("Should have an I-isotope atom");
+
+        let pubkey_meta = i_atom.meta.iter().find(|m| m.key == "pubkey");
+        assert!(pubkey_meta.is_none(),
+            "I-atom should NOT have pubkey when wallet has no pubkey");
+    }
+
+    #[test]
+    fn test_position_format_validation() {
+        // Valid: 64-char hex
+        assert!(Wallet::is_valid_position(&"a".repeat(64)));
+        assert!(Wallet::is_valid_position(&"0123456789abcdef".repeat(4)));
+        assert!(Wallet::is_valid_position(&"ABCDEF0123456789".repeat(4)));
+
+        // Invalid: too short
+        assert!(!Wallet::is_valid_position("abc123"));
+        // Invalid: too long
+        assert!(!Wallet::is_valid_position(&"a".repeat(65)));
+        // Invalid: non-hex characters
+        assert!(!Wallet::is_valid_position(&format!("{}g", "a".repeat(63))));
+        // Invalid: empty
+        assert!(!Wallet::is_valid_position(""));
+    }
 }
 
 /// Helper function to reconstruct wallet from JSON data for validation context
@@ -1637,18 +1931,18 @@ fn reconstruct_wallet_from_json(wallet_data: &serde_json::Value) -> crate::error
         .and_then(|a| a.as_str())
         .map(|s| s.to_string());
         
-    // Handle balance as either integer or float (PHP uses integers, others use floats)
-    let balance = wallet_data.get("balance")
-        .and_then(|b| {
-            if let Some(f) = b.as_f64() {
-                Some(f)
-            } else if let Some(i) = b.as_i64() {
-                Some(i as f64)
+    // Handle balance as string, integer, or float (precision-safe)
+    let balance = match wallet_data.get("balance") {
+        Some(v) if v.is_string() => v.as_str().unwrap_or("0").to_string(),
+        Some(v) if v.is_number() => {
+            if let Some(i) = v.as_i64() {
+                i.to_string()
             } else {
-                None
+                format!("{}", v.as_f64().unwrap_or(0.0) as i128)
             }
-        })
-        .unwrap_or(0.0);
+        }
+        _ => "0".to_string(),
+    };
 
     let bundle = wallet_data.get("bundle")
         .and_then(|b| b.as_str())
@@ -1689,7 +1983,7 @@ fn reconstruct_wallet_from_json(wallet_data: &serde_json::Value) -> crate::error
         )?
     };
     
-    // Set additional properties from JSON
+    // Set additional properties from JSON (balance is already String)
     wallet.balance = balance;
     if let Some(addr) = address {
         wallet.address = Some(addr);
@@ -1744,30 +2038,12 @@ impl Molecule {
     /// Returns JSON string directly, matching JavaScript SDK pattern
     #[allow(non_snake_case)]
     pub fn toJSON(&self) -> crate::error::Result<String> {
-        // Debug: Check molecule state before serialization
-        eprintln!("DEBUG: Rust toJSON() called - atom_count: {}, molecular_hash: {:?}", 
-                 self.atoms.len(), self.molecular_hash);
-        
         let options = crate::types::MoleculeJsonOptions::default();
-        let json_value = match self.to_json(options) {
-            Ok(val) => {
-                eprintln!("DEBUG: Rust to_json() succeeded, JSON keys: {:?}", 
-                         val.as_object().map(|o| o.keys().collect::<Vec<_>>()));
-                val
-            },
-            Err(e) => {
-                eprintln!("ERROR: Rust to_json() failed: {}", e);
-                return Err(e);
-            }
-        };
-        
+        let json_value = self.to_json(options)?;
+
         let json_string = serde_json::to_string(&json_value)
             .map_err(|e| crate::error::KnishIOError::custom(&format!("JSON serialization failed: {}", e)))?;
-            
-        eprintln!("DEBUG: Rust toJSON() output length: {}, first 100 chars: {}", 
-                 json_string.len(), 
-                 &json_string.chars().take(100).collect::<String>());
-                 
+
         Ok(json_string)
     }
     
@@ -1802,6 +2078,40 @@ impl Molecule {
         };
         
         Self::from_json(&json_value, options)
+    }
+
+    // ============================================================================
+    // Server-compatible setter methods (RS-001 support)
+    // ============================================================================
+
+    /// Set the molecular_hash field
+    pub fn set_molecular_hash(&mut self, hash: Option<String>) {
+        self.molecular_hash = hash;
+    }
+
+    /// Set the bundle field
+    pub fn set_bundle(&mut self, bundle: Option<String>) {
+        self.bundle = bundle;
+    }
+
+    /// Set the cell_slug field
+    pub fn set_cell_slug(&mut self, cell_slug: Option<String>) {
+        self.cell_slug = cell_slug;
+    }
+
+    /// Set the status field
+    pub fn set_status(&mut self, status: Option<String>) {
+        self.status = status;
+    }
+
+    /// Set the created_at field
+    pub fn set_created_at(&mut self, created_at: String) {
+        self.created_at = created_at;
+    }
+
+    /// Set parent molecule hashes for DAG linkage
+    pub fn set_parent_hashes(&mut self, hashes: Vec<String>) {
+        self.parent_hashes = hashes;
     }
 }
 

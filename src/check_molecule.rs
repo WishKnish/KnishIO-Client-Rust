@@ -319,7 +319,10 @@ impl<'a> CheckMolecule<'a> {
 
         let first_atom = &self.molecule.atoms[0];
 
-        // Handle simple 2-atom transfer case
+        // Handle simple 2-atom transfer case (e.g., B-isotope deposit: V-debit + V-remainder)
+        // Only checks token match and non-negative remainder — does NOT check sum,
+        // because B/F isotope molecules have V-atoms that don't sum to zero
+        // (the B/F atom absorbs the difference)
         if first_atom.isotope == Isotope::V && isotope_v.len() == 2 {
             let end_atom = &isotope_v[isotope_v.len() - 1];
 
@@ -327,22 +330,12 @@ impl<'a> CheckMolecule<'a> {
                 return Err(KnishIOError::TransferMismatched);
             }
 
-            let first_value: f64 = first_atom.value.as_ref()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0.0);
-
             let end_value: f64 = end_atom.value.as_ref()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0);
 
             if end_value < 0.0 {
                 return Err(KnishIOError::TransferMalformed);
-            }
-
-            // Check that the two atoms balance to zero
-            let sum = first_value + end_value;
-            if sum != 0.0 {
-                return Err(KnishIOError::TransferUnbalanced);
             }
 
             return Ok(true);
@@ -403,7 +396,7 @@ impl<'a> CheckMolecule<'a> {
                 return Err(KnishIOError::Custom("Invalid isotope V values".to_string()));
             }
 
-            let remainder = sender.balance + value;
+            let remainder = sender.balance_as_i128() as f64 + value;
 
             // Is there enough balance to send?
             if remainder < 0.0 {
@@ -440,7 +433,7 @@ impl<'a> CheckMolecule<'a> {
     /// Verify one-time signature (OTS)
     ///
     /// Equivalent to CheckMolecule.ots() in JavaScript
-    fn ots(&self) -> Result<bool> {
+    pub fn ots(&self) -> Result<bool> {
         // Convert Hm to numeric notation via EnumerateMolecule(Hm)
         let normalized_hash = self.molecule.normalized_hash()?;
 

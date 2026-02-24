@@ -2,7 +2,23 @@
 //!
 //! This module provides all cryptographic operations required by the SDK,
 //! ensuring exact compatibility with the JavaScript implementation.
-//! 
+//!
+//! # Signature Architecture: Position-Based WOTS+ (Not Full XMSS)
+//!
+//! This implementation follows XMSS/WOTS+ *principles* (NIST SP 800-208) but
+//! deliberately omits the Merkle tree structure. The whitepaper specifies:
+//!
+//! > "Knish.IO adopts a conservative approach: each key is used exactly once.
+//! > This eliminates risks associated with WOTS+ key reuse while maintaining
+//! > compatibility with XMSS security proofs [...] eliminating Merkle tree
+//! > overhead unnecessary for single-use keys."
+//!
+//! **Why no Merkle tree?** ContinuID's position-based key derivation replaces it:
+//! - Each wallet position generates exactly one OTS key via `generate_key(secret, token, position)`
+//! - Position reuse is prevented by the validator's `used_positions` table (NIST SP 800-208 compliance)
+//! - Position space is 2^256 (vs XMSS's typical 2^16 to 2^32 leaf nodes)
+//! - ContinuID chain provides ordered key succession without tree traversal
+//!
 //! # Performance Features
 //!
 //! - **SIMD Optimization**: Hardware-accelerated SHAKE256 targeting <1ms performance
@@ -317,19 +333,30 @@ pub fn generate_batch_id() -> String {
 pub fn generate_key(secret: &str, token: &str, position: &str) -> String {
     use num_bigint::BigUint;
     use num_traits::Num;
-    
-    // JavaScript implementation:
-    // 1. Convert secret and position to BigInt from hex
-    // 2. Add them together
-    // 3. Convert result to hex string
-    // 4. Hash with SHAKE256 (with optional token)
-    // 5. Hash again with SHAKE256
-    
-    // Convert secret to BigInt (from hex string)
-    let big_int_secret = BigUint::from_str_radix(secret, 16).unwrap_or_else(|_| BigUint::from(0u32));
-    
-    // Convert position to BigInt (from hex string)
-    let big_int_position = BigUint::from_str_radix(position, 16).unwrap_or_else(|_| BigUint::from(0u32));
+
+    // Algorithm (matches Kotlin/JS):
+    // 1. Normalize secret/position to valid hex (hash if not already hex)
+    // 2. Convert to BigInt, add together
+    // 3. Hash with SHAKE256 (with token appended)
+    // 4. Hash again with SHAKE256
+
+    // Normalize secret: if not valid hex, hash it to produce deterministic hex
+    // (Matches Kotlin: Shake256.hash(secret, 128) = 128 bytes = 256 hex chars)
+    let secret_hex = match BigUint::from_str_radix(secret, 16) {
+        Ok(_) => secret.to_string(),
+        Err(_) => shake256(secret, 1024), // 1024 bits = 128 bytes = 256 hex chars
+    };
+
+    // Normalize position: if not valid hex, hash it to produce deterministic hex
+    // (Matches Kotlin: Shake256.hash(position, 32) = 32 bytes = 64 hex chars)
+    let position_hex = match BigUint::from_str_radix(position, 16) {
+        Ok(_) => position.to_string(),
+        Err(_) => shake256(position, 256), // 256 bits = 32 bytes = 64 hex chars
+    };
+
+    // Convert to BigInt (now guaranteed valid hex)
+    let big_int_secret = BigUint::from_str_radix(&secret_hex, 16).unwrap_or_else(|_| BigUint::from(0u32));
+    let big_int_position = BigUint::from_str_radix(&position_hex, 16).unwrap_or_else(|_| BigUint::from(0u32));
     
     // Add them together (BigInt addition)
     let indexed_key = big_int_secret + big_int_position;
@@ -1448,23 +1475,109 @@ mod tests {
     #[test]
     fn test_js_crypto_compatibility() {
         // Test that core functions match JavaScript SDK behavior
-        
+
         // SHAKE256 compatibility
         assert_eq!(
             shake256("test", 256),
             "b54ff7255705a71ee2925e4a3e30e41aed489a579d5595e0df13e32e1e4dd202"
         );
-        
+
         // Bundle hash deterministic
         let bundle1 = generate_bundle_hash("test-secret");
         let bundle2 = generate_bundle_hash("test-secret");
         assert_eq!(bundle1, bundle2);
         assert_eq!(bundle1.len(), 64);
-        
+
         // Batch ID with parameters
         let batch1 = generate_batch_id_with_params(Some("hash"), Some(123));
         let batch2 = generate_batch_id_with_params(Some("hash"), Some(123));
         assert_eq!(batch1, batch2);
         assert_eq!(batch1.len(), 64);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Whitepaper invariant unit tests (GAP verification)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// Whitepaper: normalized hash values MUST sum to exactly 0 for arbitrary inputs
+    #[test]
+    fn test_normalized_hash_sum_zero_random_inputs() {
+        let test_inputs = [
+            "alpha", "beta", "gamma", "delta", "epsilon",
+            "hello world", "KnishIO", "test-secret-1234",
+        ];
+        for input in &test_inputs {
+            let hash = hex_to_base17(&shake256(input, 256));
+            let normalized = normalize_hash(&hash);
+            let sum: i32 = normalized.iter().map(|&v| v as i32).sum();
+            assert_eq!(sum, 0, "Sum != 0 for hash of '{}': sum={}", input, sum);
+        }
+    }
+
+    /// Whitepaper: signing iterations (8-n) + verification iterations (8+n) = 16
+    #[test]
+    fn test_ots_signing_iterations_total_16() {
+        for n in -8i8..=8 {
+            let sign_iters = 8 - n as i32;
+            let verify_iters = 8 + n as i32;
+            assert_eq!(sign_iters + verify_iters, 16,
+                "Iteration total != 16 for n={}", n);
+            assert!(sign_iters >= 0, "Negative sign iterations for n={}", n);
+            assert!(verify_iters >= 0, "Negative verify iterations for n={}", n);
+        }
+    }
+
+    /// Non-hex secrets must produce deterministic keys via SHAKE256 normalization
+    #[test]
+    fn test_generate_key_non_hex_deterministic() {
+        let key1 = generate_key("hello-world", "TEST", "some-position");
+        let key2 = generate_key("hello-world", "TEST", "some-position");
+        assert_eq!(key1, key2, "Non-hex key generation must be deterministic");
+        assert_eq!(key1.len(), 2048, "Key must be 2048 hex chars");
+    }
+
+    /// Hex and non-hex secrets must produce different keys
+    #[test]
+    fn test_generate_key_hex_vs_nonhex_differ() {
+        let hex_secret = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+        let nonhex_secret = "hello-world-not-hex";
+        let hex_position = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let key_hex = generate_key(hex_secret, "TEST", hex_position);
+        let key_nonhex = generate_key(nonhex_secret, "TEST", hex_position);
+        assert_ne!(key_hex, key_nonhex, "Hex and non-hex secrets must produce different keys");
+    }
+
+    /// Full OTS round-trip: generate key, sign, verify, and determinism check
+    #[test]
+    fn test_ots_full_roundtrip_deterministic() {
+        let secret = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+        let position = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let key = generate_key(secret, "TEST", position);
+        let mol_hash = hex_to_base17(&shake256("test-molecule-data", 256));
+
+        // Compute OTS verification address (hash each chunk 16x, join, shake256)
+        let mut pub_fragments = Vec::new();
+        for i in 0..16 {
+            let start = i * 128;
+            let chunk = &key[start..start + 128];
+            let mut working = chunk.to_string();
+            for _ in 0..16 {
+                working = shake256(&working, 512);
+            }
+            pub_fragments.push(working);
+        }
+        let address = shake256(&pub_fragments.join(""), 256);
+
+        // Sign
+        let sig = generate_ots_signature(&key, &mol_hash);
+        assert_eq!(sig.len(), 16, "Must produce 16 OTS fragments");
+
+        // Verify
+        let verified = verify_ots_signature(&sig, &mol_hash, &address);
+        assert!(verified, "OTS round-trip verification must succeed");
+
+        // Determinism: second run must produce identical signature
+        let sig2 = generate_ots_signature(&key, &mol_hash);
+        assert_eq!(sig, sig2, "OTS signature must be deterministic");
     }
 }

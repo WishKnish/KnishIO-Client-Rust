@@ -9,6 +9,9 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/WishKnish/KnishIO-Client-Rust"
 keywords = ["postquantum", "quantum-resistant", "xmss", "ml-kem", "decentralized"]
 categories = ["cryptography", "network-programming", "api-bindings"]
+readme = "README.md"
+homepage = "https://knish.io"
+exclude = ["target/", "tests/", ".github/", "docs/", "examples/", "*.md", "!README.md", ".DS_Store"]
 
 # 2025 Rust best practices: Modern linting configuration
 [lints.rust]
@@ -47,7 +50,7 @@ serde_json = "1.0"
 # Cryptography
 sha3 = "0.10"                    # For SHAKE256
 sha2 = "0.10"                    # For PBKDF2
-libcrux-ml-kem = "0.0.3"         # Formally verified ML-KEM (FIPS 203) implementation
+libcrux-ml-kem = "0.0.7"         # Pinned: formally verified ML-KEM (FIPS 203); upgraded 2026-02
 hex = "0.4"
 base64 = "0.22"
 pbkdf2 = "0.12"                  # Key derivation

@@ -202,6 +202,32 @@ impl Decimal {
         Self::equal(value, 0.0)
     }
 
+    /// Compare two string-encoded integer values with i128 precision
+    ///
+    /// Unlike `cmp()` which uses f64 (lossy for values > 2^53), this method
+    /// parses strings as i128 for exact comparison of large balances.
+    ///
+    /// # Arguments
+    ///
+    /// * `value1` - First string-encoded integer
+    /// * `value2` - Second string-encoded integer
+    /// * `_debug` - Debug flag (unused, kept for API consistency)
+    ///
+    /// # Returns
+    ///
+    /// * `0` if values are equal
+    /// * `1` if value1 > value2
+    /// * `-1` if value1 < value2
+    pub fn cmp_str(value1: &str, value2: &str, _debug: bool) -> i8 {
+        let v1: i128 = value1.parse().unwrap_or(0);
+        let v2: i128 = value2.parse().unwrap_or(0);
+        match v1.cmp(&v2) {
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+            std::cmp::Ordering::Less => -1,
+        }
+    }
+
     /// Get the absolute value with precision handling
     ///
     /// # Arguments
@@ -282,5 +308,27 @@ mod tests {
         assert_eq!(Decimal::abs(-5.0), 5.0);
         assert_eq!(Decimal::abs(5.0), 5.0);
         assert_eq!(Decimal::abs(0.0), 0.0);
+    }
+
+    #[test]
+    fn test_cmp_str() {
+        // Equal values
+        assert_eq!(Decimal::cmp_str("1000", "1000", false), 0);
+
+        // Greater than
+        assert_eq!(Decimal::cmp_str("2000", "1000", false), 1);
+
+        // Less than
+        assert_eq!(Decimal::cmp_str("1000", "2000", false), -1);
+
+        // Large values beyond f64 precision (> 2^53)
+        assert_eq!(Decimal::cmp_str("9007199254740993", "9007199254740992", false), 1);
+
+        // Negative values
+        assert_eq!(Decimal::cmp_str("-500", "500", false), -1);
+        assert_eq!(Decimal::cmp_str("-500", "-500", false), 0);
+
+        // Unparseable defaults to 0
+        assert_eq!(Decimal::cmp_str("abc", "0", false), 0);
     }
 }
