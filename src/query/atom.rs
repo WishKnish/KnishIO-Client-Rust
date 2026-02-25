@@ -341,7 +341,13 @@ impl Query for QueryAtom {
 
     /// Create a response from the JSON data (equivalent to createResponse in JS)
     fn create_response(&self, json: Value) -> Box<dyn Response> {
-        Box::new(ResponseAtom::new(json, None).expect("Failed to create ResponseAtom"))
+        match ResponseAtom::new(json, None) {
+            Ok(resp) => Box::new(resp),
+            Err(e) => {
+                eprintln!("ResponseAtom construction failed: {}", e);
+                Box::new(crate::response::BaseResponse::empty())
+            }
+        }
     }
 }
 

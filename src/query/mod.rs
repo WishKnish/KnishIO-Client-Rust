@@ -120,7 +120,13 @@ impl Query for BaseQuery {
     }
     
     fn create_response(&self, json: Value) -> Box<dyn Response> {
-        Box::new(crate::response::BaseResponse::new(json).expect("Failed to create BaseResponse"))
+        match crate::response::BaseResponse::new(json) {
+            Ok(resp) => Box::new(resp),
+            Err(e) => {
+                eprintln!("BaseResponse construction failed: {}", e);
+                Box::new(crate::response::BaseResponse::empty())
+            }
+        }
     }
     
     /// Execute the query with enhanced functionality matching JS

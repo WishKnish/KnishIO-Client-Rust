@@ -65,7 +65,13 @@ impl Query for QueryContinuId {
 
     /// Create a response from the JSON data (equivalent to createResponse in JS)
     fn create_response(&self, json: Value) -> Box<dyn Response> {
-        Box::new(ResponseContinuId::new(json, None).expect("Failed to create ResponseContinuId"))
+        match ResponseContinuId::new(json, None) {
+            Ok(resp) => Box::new(resp),
+            Err(e) => {
+                eprintln!("ResponseContinuId construction failed: {}", e);
+                Box::new(crate::response::BaseResponse::empty())
+            }
+        }
     }
 }
 

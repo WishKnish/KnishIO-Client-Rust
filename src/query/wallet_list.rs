@@ -114,7 +114,13 @@ impl Query for QueryWalletList {
 
     /// Create a response from the JSON data (equivalent to createResponse in JS)
     fn create_response(&self, json: Value) -> Box<dyn Response> {
-        Box::new(ResponseWalletList::new(json, None).expect("Failed to create ResponseWalletList"))
+        match ResponseWalletList::new(json, None) {
+            Ok(resp) => Box::new(resp),
+            Err(e) => {
+                eprintln!("ResponseWalletList construction failed: {}", e);
+                Box::new(crate::response::BaseResponse::empty())
+            }
+        }
     }
 }
 

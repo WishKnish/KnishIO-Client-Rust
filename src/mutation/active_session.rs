@@ -68,7 +68,13 @@ impl Query for MutationActiveSession {
     
     /// Create a response from the JSON data
     fn create_response(&self, json: Value) -> Box<dyn Response> {
-        Box::new(ResponseActiveSession::new(json, None).expect("Failed to create ResponseActiveSession"))
+        match ResponseActiveSession::new(json, None) {
+            Ok(resp) => Box::new(resp),
+            Err(e) => {
+                eprintln!("ResponseActiveSession construction failed: {}", e);
+                Box::new(crate::response::BaseResponse::empty())
+            }
+        }
     }
 }
 

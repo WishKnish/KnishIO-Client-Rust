@@ -215,6 +215,18 @@ impl BaseResponse {
         Ok(response)
     }
     
+    /// Create a fallback BaseResponse for error cases (avoids panic in constructors)
+    pub fn empty() -> Self {
+        BaseResponse {
+            data: Value::Null,
+            origin_response: Value::Null,
+            error_key: "exception".to_string(),
+            data_key: None,
+            payload: None,
+            query: None,
+        }
+    }
+
     /// Create BaseResponse with query reference
     pub fn with_query(json: Value, query: Option<Value>) -> Result<Self, KnishIOError> {
         let mut response = Self::new(json)?;
@@ -669,7 +681,10 @@ pub struct ResponseCreateMeta {
 impl ResponseCreateMeta {
     pub fn new(json: Value) -> Self {
         ResponseCreateMeta {
-            base: BaseResponse::new(json).expect("Failed to create BaseResponse").with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json).unwrap_or_else(|e| {
+                eprintln!("Response construction failed: {}", e);
+                BaseResponse::empty()
+            }).with_data_key("data.ProposeMolecule"),
         }
     }
     
@@ -717,7 +732,10 @@ pub struct ResponseCreateRule {
 impl ResponseCreateRule {
     pub fn new(json: Value) -> Self {
         ResponseCreateRule {
-            base: BaseResponse::new(json).expect("Failed to create BaseResponse").with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json).unwrap_or_else(|e| {
+                eprintln!("Response construction failed: {}", e);
+                BaseResponse::empty()
+            }).with_data_key("data.ProposeMolecule"),
         }
     }
     
@@ -765,7 +783,10 @@ pub struct ResponseCreateToken {
 impl ResponseCreateToken {
     pub fn new(json: Value) -> Self {
         ResponseCreateToken {
-            base: BaseResponse::new(json).expect("Failed to create BaseResponse").with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json).unwrap_or_else(|e| {
+                eprintln!("Response construction failed: {}", e);
+                BaseResponse::empty()
+            }).with_data_key("data.ProposeMolecule"),
         }
     }
     
@@ -813,7 +834,10 @@ pub struct ResponseCreateWallet {
 impl ResponseCreateWallet {
     pub fn new(json: Value) -> Self {
         ResponseCreateWallet {
-            base: BaseResponse::new(json).expect("Failed to create BaseResponse").with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json).unwrap_or_else(|e| {
+                eprintln!("Response construction failed: {}", e);
+                BaseResponse::empty()
+            }).with_data_key("data.ProposeMolecule"),
         }
     }
     
@@ -1016,12 +1040,64 @@ impl ResponseMetaTypeViaAtom {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.AtomsByMoleculeLookup"),
         })
     }
-    
+
     pub fn atoms(&self) -> Vec<Value> {
         self.base.get_data()
             .as_array()
             .map(|arr| arr.clone())
             .unwrap_or_default()
+    }
+
+    /// Verify the cryptographic integrity of all molecules in this response.
+    ///
+    /// For each instance that contains a `molecule` field, reconstructs the
+    /// molecule from server data and runs CheckMolecule verification (molecular
+    /// hash + OTS signature) to prove the server didn't tamper with results.
+    ///
+    /// Equivalent to ResponseMetaTypeViaMolecule.verifyIntegrity() in JavaScript.
+    pub fn verify_integrity(&self) -> crate::check_molecule::IntegrityReport {
+        use crate::check_molecule::CheckMolecule;
+
+        let mut results = Vec::new();
+        let data = self.base.get_data();
+
+        // Data may be an array of meta type groupings
+        let meta_type_array = match data.as_array() {
+            Some(arr) if !arr.is_empty() => arr,
+            _ => {
+                return crate::check_molecule::IntegrityReport {
+                    verified: true,
+                    molecules: results,
+                };
+            }
+        };
+
+        // Get instances from the last element (matching JS: metaTypeData[metaTypeData.length - 1])
+        let last = &meta_type_array[meta_type_array.len() - 1];
+        let instances = match last.get("instances").and_then(|v| v.as_array()) {
+            Some(arr) => arr,
+            None => {
+                return crate::check_molecule::IntegrityReport {
+                    verified: true,
+                    molecules: results,
+                };
+            }
+        };
+
+        for instance in instances {
+            if let Some(molecule_data) = instance.get("molecule") {
+                if molecule_data.is_null() {
+                    continue;
+                }
+                results.push(CheckMolecule::verify_from_server_data(molecule_data));
+            }
+        }
+
+        let verified = results.is_empty() || results.iter().all(|r| r.verified);
+        crate::check_molecule::IntegrityReport {
+            verified,
+            molecules: results,
+        }
     }
 }
 
@@ -1175,7 +1251,10 @@ pub struct ResponseQueryActiveSession {
 impl ResponseQueryActiveSession {
     pub fn new(json: Value) -> Self {
         ResponseQueryActiveSession {
-            base: BaseResponse::new(json).expect("Failed to create BaseResponse").with_data_key("data.ActiveSession"),
+            base: BaseResponse::new(json).unwrap_or_else(|e| {
+                eprintln!("Response construction failed: {}", e);
+                BaseResponse::empty()
+            }).with_data_key("data.ActiveSession"),
         }
     }
     
@@ -1215,7 +1294,10 @@ pub struct ResponseQueryUserActivity {
 impl ResponseQueryUserActivity {
     pub fn new(json: Value) -> Self {
         ResponseQueryUserActivity {
-            base: BaseResponse::new(json).expect("Failed to create BaseResponse").with_data_key("data.UserActivity"),
+            base: BaseResponse::new(json).unwrap_or_else(|e| {
+                eprintln!("Response construction failed: {}", e);
+                BaseResponse::empty()
+            }).with_data_key("data.UserActivity"),
         }
     }
     
@@ -1248,7 +1330,10 @@ pub struct ResponseRequestAuthorization {
 impl ResponseRequestAuthorization {
     pub fn new(json: Value) -> Self {
         ResponseRequestAuthorization {
-            base: BaseResponse::new(json).expect("Failed to create BaseResponse").with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json).unwrap_or_else(|e| {
+                eprintln!("Response construction failed: {}", e);
+                BaseResponse::empty()
+            }).with_data_key("data.ProposeMolecule"),
         }
     }
     
@@ -1384,7 +1469,10 @@ pub struct ResponseRequestTokens {
 impl ResponseRequestTokens {
     pub fn new(json: Value) -> Self {
         ResponseRequestTokens {
-            base: BaseResponse::new(json).expect("Failed to create BaseResponse").with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json).unwrap_or_else(|e| {
+                eprintln!("Response construction failed: {}", e);
+                BaseResponse::empty()
+            }).with_data_key("data.ProposeMolecule"),
         }
     }
     
@@ -1432,7 +1520,10 @@ pub struct ResponseTransferTokens {
 impl ResponseTransferTokens {
     pub fn new(json: Value) -> Self {
         ResponseTransferTokens {
-            base: BaseResponse::new(json).expect("Failed to create BaseResponse").with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json).unwrap_or_else(|e| {
+                eprintln!("Response construction failed: {}", e);
+                BaseResponse::empty()
+            }).with_data_key("data.ProposeMolecule"),
         }
     }
     
@@ -1569,8 +1660,12 @@ impl ResponseWalletList {
         // or handled through a different mechanism
         
         // Set balance and other properties (String for precision)
-        if let Some(amount) = data.get("amount").and_then(|v| v.as_str()) {
-            wallet.balance = amount.to_string();
+        if let Some(amount) = data.get("amount").and_then(|v| {
+            v.as_str().map(|s| s.to_string())
+                .or_else(|| v.as_f64().map(|n| n.to_string()))
+                .or_else(|| v.as_i64().map(|n| n.to_string()))
+        }) {
+            wallet.balance = amount;
         }
         
         if let Some(pubkey) = data.get("pubkey").and_then(|v| v.as_str()) {
@@ -1592,11 +1687,12 @@ impl ResponseWalletList {
         // Handle trade rates (equivalent to JS tradeRates processing)
         if let Some(trade_rates) = data.get("tradeRates").and_then(|v| v.as_array()) {
             for rate_data in trade_rates {
-                if let (Some(slug), Some(amount)) = (
-                    rate_data.get("tokenSlug").and_then(|v| v.as_str()),
-                    rate_data.get("amount").and_then(|v| v.as_str())
-                ) {
-                    if let Ok(amount_f64) = amount.parse::<f64>() {
+                if let Some(slug) = rate_data.get("tokenSlug").and_then(|v| v.as_str()) {
+                    let amount = rate_data.get("amount").and_then(|v| {
+                        v.as_str().and_then(|s| s.parse::<f64>().ok())
+                            .or_else(|| v.as_f64())
+                    });
+                    if let Some(amount_f64) = amount {
                         wallet.trade_rates.insert(slug.to_string(), amount_f64);
                     }
                 }

@@ -275,7 +275,13 @@ impl Query for QueryMetaType {
 
     /// Create a response from the JSON data (equivalent to createResponse in JS)
     fn create_response(&self, json: Value) -> Box<dyn Response> {
-        Box::new(ResponseMetaType::new(json, None).expect("Failed to create ResponseMetaType"))
+        match ResponseMetaType::new(json, None) {
+            Ok(resp) => Box::new(resp),
+            Err(e) => {
+                eprintln!("ResponseMetaType construction failed: {}", e);
+                Box::new(crate::response::BaseResponse::empty())
+            }
+        }
     }
 }
 

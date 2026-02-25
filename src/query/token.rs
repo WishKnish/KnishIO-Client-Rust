@@ -137,7 +137,13 @@ impl Query for QueryToken {
     /// Create a response from the JSON data (equivalent to createResponse in JS)
     fn create_response(&self, json: Value) -> Box<dyn Response> {
         // Equivalent to dataKey: 'data.Token' in JS
-        Box::new(BaseResponse::new(json).expect("Failed to create BaseResponse").with_data_key("data.Token"))
+        match BaseResponse::new(json) {
+            Ok(resp) => Box::new(resp.with_data_key("data.Token")),
+            Err(e) => {
+                eprintln!("BaseResponse construction failed: {}", e);
+                Box::new(BaseResponse::empty())
+            }
+        }
     }
 }
 

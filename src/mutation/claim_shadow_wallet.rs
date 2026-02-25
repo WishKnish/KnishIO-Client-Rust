@@ -93,7 +93,13 @@ impl Query for MutationClaimShadowWallet {
     
     /// Create a response from the JSON data
     fn create_response(&self, json: Value) -> Box<dyn Response> {
-        Box::new(ResponseClaimShadowWallet::new(json, None).expect("Failed to create ResponseClaimShadowWallet"))
+        match ResponseClaimShadowWallet::new(json, None) {
+            Ok(resp) => Box::new(resp),
+            Err(e) => {
+                eprintln!("ResponseClaimShadowWallet construction failed: {}", e);
+                Box::new(crate::response::BaseResponse::empty())
+            }
+        }
     }
 }
 

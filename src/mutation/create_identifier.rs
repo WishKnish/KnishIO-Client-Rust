@@ -86,7 +86,13 @@ impl Query for MutationCreateIdentifier {
     
     /// Create a response from the JSON data
     fn create_response(&self, json: Value) -> Box<dyn Response> {
-        Box::new(ResponseCreateIdentifier::new(json, None).expect("Failed to create ResponseCreateIdentifier"))
+        match ResponseCreateIdentifier::new(json, None) {
+            Ok(resp) => Box::new(resp),
+            Err(e) => {
+                eprintln!("ResponseCreateIdentifier construction failed: {}", e);
+                Box::new(crate::response::BaseResponse::empty())
+            }
+        }
     }
 }
 

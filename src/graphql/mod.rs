@@ -250,7 +250,10 @@ impl GraphQLClient {
             .tcp_keepalive(client_config.tcp_keepalive)
             .user_agent(format!("KnishIO-Rust-SDK/{}", env!("CARGO_PKG_VERSION")))
             .build()
-            .expect("Failed to create HTTP client");
+            .unwrap_or_else(|e| {
+                eprintln!("CRITICAL: Failed to create HTTP client: {}", e);
+                Client::new()
+            });
 
         GraphQLClient {
             server_uri: server_uri.into(),

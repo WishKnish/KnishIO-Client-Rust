@@ -108,7 +108,13 @@ impl Query for MutationProposeMolecule {
     /// Create a response from the JSON data
     fn create_response(&self, json: Value) -> Box<dyn Response> {
         // Using ResponseProposeMolecule for proper type safety
-        Box::new(ResponseProposeMolecule::new(json, None).expect("Failed to create ResponseProposeMolecule"))
+        match ResponseProposeMolecule::new(json, None) {
+            Ok(resp) => Box::new(resp),
+            Err(e) => {
+                eprintln!("ResponseProposeMolecule construction failed: {}", e);
+                Box::new(crate::response::BaseResponse::empty())
+            }
+        }
     }
 }
 

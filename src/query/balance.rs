@@ -130,7 +130,13 @@ impl Query for QueryBalance {
 
     /// Create a response from the JSON data (equivalent to createResponse in JS)
     fn create_response(&self, json: Value) -> Box<dyn Response> {
-        Box::new(ResponseBalance::new(json, None).expect("Failed to create ResponseBalance"))
+        match ResponseBalance::new(json, None) {
+            Ok(resp) => Box::new(resp),
+            Err(e) => {
+                eprintln!("ResponseBalance construction failed: {}", e);
+                Box::new(crate::response::BaseResponse::empty())
+            }
+        }
     }
 }
 

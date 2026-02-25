@@ -177,7 +177,7 @@ impl WebSocketManager {
                 variables,
                 operation_name,
                 callback_sender,
-            }).map_err(|_| KnishIOError::custom("Failed to send subscribe command"))?;
+            }).map_err(|_| KnishIOError::WebSocketError("Failed to send subscribe command".into()))?;
         }
         
         Ok(callback_receiver)
@@ -188,7 +188,7 @@ impl WebSocketManager {
         if let Some(ref sender) = self.connection_sender {
             sender.send(WebSocketCommand::Unsubscribe {
                 id: subscription_id.to_string(),
-            }).map_err(|_| KnishIOError::custom("Failed to send unsubscribe command"))?;
+            }).map_err(|_| KnishIOError::WebSocketError("Failed to send unsubscribe command".into()))?;
         }
         Ok(())
     }
@@ -215,7 +215,7 @@ impl WebSocketManager {
     pub async fn reconnect(&self) -> Result<()> {
         if let Some(ref sender) = self.connection_sender {
             sender.send(WebSocketCommand::Reconnect)
-                .map_err(|_| KnishIOError::custom("Failed to send reconnect command"))?;
+                .map_err(|_| KnishIOError::WebSocketError("Failed to send reconnect command".into()))?;
         }
         Ok(())
     }
@@ -333,8 +333,8 @@ impl WebSocketManager {
             connect_async(socket_uri)
         )
         .await
-        .map_err(|_| KnishIOError::custom("WebSocket connection timeout"))?
-        .map_err(|e| KnishIOError::custom(format!("WebSocket connection failed: {}", e)))?
+        .map_err(|_| KnishIOError::WebSocketError("Connection timeout".into()))?
+        .map_err(|e| KnishIOError::WebSocketError(format!("Connection failed: {}", e)))?
         .0;
         
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
@@ -357,13 +357,13 @@ impl WebSocketManager {
             Ok(Some(Ok(Message::Text(text)))) => {
                 if let Ok(msg) = Self::parse_ws_message(&text) {
                     if !matches!(msg, GraphQLWsMessage::ConnectionAck) {
-                        return Err(KnishIOError::custom("Expected connection_ack"));
+                        return Err(KnishIOError::WebSocketError("Expected connection_ack".into()));
                     }
                 } else {
-                    return Err(KnishIOError::custom("Invalid connection_ack message"));
+                    return Err(KnishIOError::WebSocketError("Invalid connection_ack message".into()));
                 }
             }
-            _ => return Err(KnishIOError::custom("Failed to receive connection_ack")),
+            _ => return Err(KnishIOError::WebSocketError("Failed to receive connection_ack".into())),
         }
         
         *state.write().await = ConnectionState::Connected;
@@ -414,13 +414,13 @@ impl WebSocketManager {
                             if debug {
                                 info!("WebSocket connection closed by server");
                             }
-                            return Err(KnishIOError::custom("Connection closed by server"));
+                            return Err(KnishIOError::WebSocketError("Connection closed by server".into()));
                         }
                         Some(Err(e)) => {
-                            return Err(KnishIOError::custom(format!("WebSocket error: {}", e)));
+                            return Err(KnishIOError::WebSocketError(format!("Stream error: {}", e)));
                         }
                         None => {
-                            return Err(KnishIOError::custom("WebSocket stream ended"));
+                            return Err(KnishIOError::WebSocketError("Stream ended".into()));
                         }
                         _ => {} // Ignore other message types
                     }
@@ -482,14 +482,14 @@ impl WebSocketManager {
                             if debug {
                                 info!("Reconnect requested");
                             }
-                            return Err(KnishIOError::custom("Reconnect requested"));
+                            return Err(KnishIOError::WebSocketError("Reconnect requested".into()));
                         }
                         
                         None => {
                             if debug {
                                 info!("Command channel closed");
                             }
-                            return Err(KnishIOError::custom("Command channel closed"));
+                            return Err(KnishIOError::WebSocketError("Command channel closed".into()));
                         }
                     }
                 }
@@ -516,7 +516,7 @@ impl WebSocketManager {
         let text = Self::serialize_ws_message(message)?;
         sender.send(Message::Text(Utf8Bytes::from(text)))
             .await
-            .map_err(|e| KnishIOError::custom(format!("Failed to send WebSocket message: {}", e)))
+            .map_err(|e| KnishIOError::WebSocketError(format!("Failed to send message: {}", e)))
     }
     
     /// Handle incoming WebSocket message
@@ -583,18 +583,18 @@ impl WebSocketManager {
     /// Parse a WebSocket message from text
     fn parse_ws_message(text: &str) -> Result<GraphQLWsMessage> {
         let value: Value = serde_json::from_str(text)
-            .map_err(|e| KnishIOError::custom(format!("Failed to parse WebSocket message: {}", e)))?;
+            .map_err(|e| KnishIOError::WebSocketError(format!("Failed to parse message: {}", e)))?;
         
         let msg_type = value.get("type")
             .and_then(|t| t.as_str())
-            .ok_or_else(|| KnishIOError::custom("Missing message type"))?;
+            .ok_or_else(|| KnishIOError::WebSocketError("Missing message type".into()))?;
         
         match msg_type {
             "connection_ack" => Ok(GraphQLWsMessage::ConnectionAck),
             "data" => {
                 let id = value.get("id")
                     .and_then(|i| i.as_str())
-                    .ok_or_else(|| KnishIOError::custom("Missing subscription ID"))?;
+                    .ok_or_else(|| KnishIOError::WebSocketError("Missing subscription ID".into()))?;
                 let payload = value.get("payload")
                     .cloned()
                     .unwrap_or(Value::Null);
@@ -603,7 +603,7 @@ impl WebSocketManager {
             "error" => {
                 let id = value.get("id")
                     .and_then(|i| i.as_str())
-                    .ok_or_else(|| KnishIOError::custom("Missing subscription ID"))?;
+                    .ok_or_else(|| KnishIOError::WebSocketError("Missing subscription ID".into()))?;
                 let payload = value.get("payload")
                     .cloned()
                     .unwrap_or(Value::Null);
@@ -612,11 +612,11 @@ impl WebSocketManager {
             "complete" => {
                 let id = value.get("id")
                     .and_then(|i| i.as_str())
-                    .ok_or_else(|| KnishIOError::custom("Missing subscription ID"))?;
+                    .ok_or_else(|| KnishIOError::WebSocketError("Missing subscription ID".into()))?;
                 Ok(GraphQLWsMessage::Complete { id: id.to_string() })
             }
             "ka" => Ok(GraphQLWsMessage::KeepAlive),
-            _ => Err(KnishIOError::custom(format!("Unknown message type: {}", msg_type)))
+            _ => Err(KnishIOError::WebSocketError(format!("Unknown message type: {}", msg_type)))
         }
     }
     
@@ -642,11 +642,11 @@ impl WebSocketManager {
             GraphQLWsMessage::KeepAlive => json!({
                 "type": "ka"
             }),
-            _ => return Err(KnishIOError::custom("Cannot serialize this message type")),
+            _ => return Err(KnishIOError::WebSocketError("Cannot serialize this message type".into())),
         };
         
         serde_json::to_string(&value)
-            .map_err(|e| KnishIOError::custom(format!("Failed to serialize WebSocket message: {}", e)))
+            .map_err(|e| KnishIOError::WebSocketError(format!("Failed to serialize message: {}", e)))
     }
 }
 

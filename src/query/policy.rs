@@ -98,7 +98,13 @@ impl Query for QueryPolicy {
 
     /// Create a response from the JSON data (equivalent to createResponse in JS)
     fn create_response(&self, json: Value) -> Box<dyn Response> {
-        Box::new(ResponsePolicy::new(json, None).expect("Failed to create ResponsePolicy"))
+        match ResponsePolicy::new(json, None) {
+            Ok(resp) => Box::new(resp),
+            Err(e) => {
+                eprintln!("ResponsePolicy construction failed: {}", e);
+                Box::new(crate::response::BaseResponse::empty())
+            }
+        }
     }
 }
 
