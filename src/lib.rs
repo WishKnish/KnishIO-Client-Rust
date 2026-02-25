@@ -88,7 +88,7 @@ pub use molecule::{Molecule, TypeSafeMoleculeBuilder, ValueAtomParams, MetaAtomP
 pub use types::{Isotope, MetaItem};
 pub use wallet::Wallet;
 pub use client::{KnishIOClient, builder::ClientBuilder};
-pub use check_molecule::CheckMolecule;
+pub use check_molecule::{CheckMolecule, IntegrityReport, MoleculeIntegrityResult};
 pub use token_unit::TokenUnit;
 pub use policy_meta::PolicyMeta;
 

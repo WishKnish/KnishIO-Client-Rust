@@ -430,6 +430,14 @@ impl Molecule {
         }
     }
     
+    /// Sign the molecule with default parameters (non-anonymous, compressed).
+    ///
+    /// Convenience method equivalent to `molecule.sign(None, false, true)`,
+    /// matching the JS SDK pattern of `molecule.sign({})`.
+    pub fn sign_default(&mut self) -> Result<Option<String>> {
+        self.sign(None, false, true)
+    }
+
     /// Get normalized hash for signing
     /// Normalized hash array for one-time signature
     pub fn normalized_hash(&self) -> Result<Vec<i8>> {

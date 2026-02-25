@@ -12,7 +12,29 @@ use crate::error::{KnishIOError, Result};
 use crate::meta::Meta;
 use crate::crypto::shake256;
 use crate::rules::Rule;
+use serde::{Serialize, Deserialize};
+use serde_json::Value;
 use std::collections::HashMap;
+
+/// Result of verifying a single molecule's integrity
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MoleculeIntegrityResult {
+    /// Molecular hash of the verified molecule
+    pub molecular_hash: Option<String>,
+    /// Whether the molecule passed integrity verification
+    pub verified: bool,
+    /// Error message if verification failed
+    pub error: Option<String>,
+}
+
+/// Result of verifying integrity across all molecules in a response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntegrityReport {
+    /// Whether all molecules passed verification
+    pub verified: bool,
+    /// Individual molecule verification results
+    pub molecules: Vec<MoleculeIntegrityResult>,
+}
 
 /// Comprehensive molecule validation class
 ///
@@ -538,7 +560,7 @@ impl<'a> CheckMolecule<'a> {
     fn chunk_substr(string: &str, size: usize) -> Vec<String> {
         let mut chunks = Vec::new();
         let mut chars = string.chars();
-        
+
         loop {
             let chunk: String = chars.by_ref().take(size).collect();
             if chunk.is_empty() {
@@ -546,8 +568,158 @@ impl<'a> CheckMolecule<'a> {
             }
             chunks.push(chunk);
         }
-        
+
         chunks
+    }
+
+    /// Reconstruct a Molecule from server-side GraphQL response data.
+    ///
+    /// Maps server field names to SDK field names:
+    /// - `tokenSlug` / `token` → `token`
+    /// - `metasJson` (JSON string) → `meta` (array of key-value pairs)
+    /// - `bundleHash` → `bundle`
+    ///
+    /// Equivalent to CheckMolecule.fromServerData() in JavaScript.
+    pub fn from_server_data(molecule_data: &Value) -> Result<Molecule> {
+        let molecular_hash = molecule_data.get("molecularHash")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let bundle_hash = molecule_data.get("bundleHash")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let cell_slug = molecule_data.get("cellSlug")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let status = molecule_data.get("status")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let created_at = molecule_data.get("createdAt")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // Map server atoms to SDK atom JSON format
+        let mapped_atoms: Vec<Value> = molecule_data.get("atoms")
+            .and_then(|v| v.as_array())
+            .map(|atoms| {
+                atoms.iter().map(|server_atom| {
+                    // Parse metasJson into meta array
+                    let meta = Self::parse_metas_json(server_atom);
+
+                    // Map tokenSlug → token (server uses tokenSlug)
+                    let token = server_atom.get("tokenSlug")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| server_atom.get("token").and_then(|v| v.as_str()))
+                        .unwrap_or_default();
+
+                    // Map value to string (server may send as number)
+                    let value = if let Some(v) = server_atom.get("value") {
+                        if v.is_null() {
+                            Value::Null
+                        } else if let Some(s) = v.as_str() {
+                            Value::String(s.to_string())
+                        } else {
+                            Value::String(v.to_string())
+                        }
+                    } else {
+                        Value::Null
+                    };
+
+                    serde_json::json!({
+                        "position": server_atom.get("position").and_then(|v| v.as_str()).unwrap_or_default(),
+                        "walletAddress": server_atom.get("walletAddress").and_then(|v| v.as_str()).unwrap_or_default(),
+                        "isotope": server_atom.get("isotope").and_then(|v| v.as_str()).unwrap_or_default(),
+                        "token": token,
+                        "value": value,
+                        "batchId": server_atom.get("batchId").and_then(|v| v.as_str()),
+                        "metaType": server_atom.get("metaType").and_then(|v| v.as_str()),
+                        "metaId": server_atom.get("metaId").and_then(|v| v.as_str()),
+                        "meta": meta,
+                        "index": server_atom.get("index").and_then(|v| v.as_u64()),
+                        "otsFragment": server_atom.get("otsFragment").and_then(|v| v.as_str()),
+                        "createdAt": server_atom.get("createdAt").and_then(|v| v.as_str()),
+                    })
+                }).collect()
+            })
+            .unwrap_or_default();
+
+        // Build molecule JSON in SDK format
+        let molecule_json = serde_json::json!({
+            "molecularHash": molecular_hash,
+            "bundle": bundle_hash,
+            "cellSlug": cell_slug,
+            "status": status,
+            "createdAt": created_at,
+            "atoms": mapped_atoms,
+        });
+
+        let options = crate::types::MoleculeFromJsonOptions {
+            include_validation_context: false,
+            validate_structure: false,
+            strict_mode: false,
+        };
+
+        Molecule::from_json(&molecule_json, options)
+    }
+
+    /// Parse metasJson field from a server atom into a meta array.
+    ///
+    /// Server atoms carry metadata as a JSON string in `metasJson`.
+    /// This parses it into the `[{key, value}]` format the SDK expects.
+    fn parse_metas_json(server_atom: &Value) -> Vec<Value> {
+        let metas_json = match server_atom.get("metasJson").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+
+        match serde_json::from_str::<Value>(metas_json) {
+            Ok(Value::Array(arr)) => arr,
+            Ok(Value::Object(obj)) => {
+                // Object format {key1: val1, ...} → [{key, value}]
+                obj.into_iter()
+                    .map(|(key, value)| {
+                        serde_json::json!({
+                            "key": key,
+                            "value": value.as_str().unwrap_or_default()
+                        })
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Verify a molecule reconstructed from server-side GraphQL data.
+    ///
+    /// Reconstructs the molecule from server data and runs full verification
+    /// (molecular hash + OTS signature). Returns a result object indicating
+    /// success or failure with error details.
+    ///
+    /// Equivalent to CheckMolecule.verifyFromServerData() in JavaScript.
+    pub fn verify_from_server_data(molecule_data: &Value) -> MoleculeIntegrityResult {
+        let molecular_hash = molecule_data.get("molecularHash")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        match Self::try_verify_server_data(molecule_data) {
+            Ok(()) => MoleculeIntegrityResult {
+                molecular_hash,
+                verified: true,
+                error: None,
+            },
+            Err(e) => MoleculeIntegrityResult {
+                molecular_hash,
+                verified: false,
+                error: Some(e.to_string()),
+            },
+        }
+    }
+
+    /// Internal helper that attempts verification and returns Result for error propagation.
+    fn try_verify_server_data(molecule_data: &Value) -> Result<()> {
+        let molecule = Self::from_server_data(molecule_data)?;
+        let checker = CheckMolecule::new(&molecule)?;
+        checker.verify(None)?;
+        Ok(())
     }
 }
 
@@ -598,5 +770,120 @@ mod tests {
     fn test_chunk_substr() {
         let result = CheckMolecule::chunk_substr("abcdefgh", 3);
         assert_eq!(result, vec!["abc", "def", "gh"]);
+    }
+
+    #[test]
+    fn test_from_server_data_maps_fields() {
+        let server_data = serde_json::json!({
+            "molecularHash": "abc123",
+            "bundleHash": "bundle456",
+            "cellSlug": "test_cell",
+            "status": "accepted",
+            "createdAt": "2026-01-01",
+            "atoms": [
+                {
+                    "position": "pos1",
+                    "walletAddress": "addr1",
+                    "isotope": "M",
+                    "tokenSlug": "USER",
+                    "value": null,
+                    "metaType": "TestMeta",
+                    "metaId": "id1",
+                    "metasJson": "[{\"key\":\"name\",\"value\":\"test\"}]",
+                    "index": 0,
+                    "otsFragment": "frag1"
+                }
+            ]
+        });
+
+        let molecule = CheckMolecule::from_server_data(&server_data).unwrap();
+        assert_eq!(molecule.molecular_hash.as_deref(), Some("abc123"));
+        assert_eq!(molecule.bundle.as_deref(), Some("bundle456"));
+        assert_eq!(molecule.cell_slug.as_deref(), Some("test_cell"));
+        assert_eq!(molecule.status.as_deref(), Some("accepted"));
+        assert_eq!(molecule.atoms.len(), 1);
+        assert_eq!(molecule.atoms[0].token, "USER");
+        assert_eq!(molecule.atoms[0].meta_type.as_deref(), Some("TestMeta"));
+        assert_eq!(molecule.atoms[0].ots_fragment.as_deref(), Some("frag1"));
+        assert_eq!(molecule.atoms[0].meta.len(), 1);
+        assert_eq!(molecule.atoms[0].meta[0].key, "name");
+        assert_eq!(molecule.atoms[0].meta[0].value, "test");
+    }
+
+    #[test]
+    fn test_from_server_data_token_slug_fallback() {
+        // When tokenSlug is absent, should fall back to token
+        let server_data = serde_json::json!({
+            "molecularHash": "hash1",
+            "atoms": [{
+                "position": "p", "walletAddress": "a",
+                "isotope": "V", "token": "TEST",
+                "index": 0
+            }]
+        });
+
+        let molecule = CheckMolecule::from_server_data(&server_data).unwrap();
+        assert_eq!(molecule.atoms[0].token, "TEST");
+    }
+
+    #[test]
+    fn test_from_server_data_metas_json_object_format() {
+        // metasJson as object {key: value} instead of array
+        let server_data = serde_json::json!({
+            "molecularHash": "hash2",
+            "atoms": [{
+                "position": "p", "walletAddress": "a",
+                "isotope": "M", "tokenSlug": "USER",
+                "metasJson": "{\"color\":\"red\",\"size\":\"large\"}",
+                "index": 0
+            }]
+        });
+
+        let molecule = CheckMolecule::from_server_data(&server_data).unwrap();
+        assert_eq!(molecule.atoms[0].meta.len(), 2);
+        let meta_keys: Vec<&str> = molecule.atoms[0].meta.iter().map(|m| m.key.as_str()).collect();
+        assert!(meta_keys.contains(&"color"));
+        assert!(meta_keys.contains(&"size"));
+    }
+
+    #[test]
+    fn test_verify_from_server_data_invalid_hash() {
+        // Molecule with mismatched hash should fail verification
+        let server_data = serde_json::json!({
+            "molecularHash": "wrong_hash",
+            "atoms": [{
+                "position": "p", "walletAddress": "a",
+                "isotope": "V", "token": "TEST",
+                "value": "100", "index": 0
+            }]
+        });
+
+        let result = CheckMolecule::verify_from_server_data(&server_data);
+        assert!(!result.verified);
+        assert!(result.error.is_some());
+        assert_eq!(result.molecular_hash.as_deref(), Some("wrong_hash"));
+    }
+
+    #[test]
+    fn test_verify_from_server_data_empty_atoms() {
+        // Molecule with no atoms should fail
+        let server_data = serde_json::json!({
+            "molecularHash": "hash",
+            "atoms": []
+        });
+
+        let result = CheckMolecule::verify_from_server_data(&server_data);
+        assert!(!result.verified);
+        assert!(result.error.is_some());
+    }
+
+    #[test]
+    fn test_integrity_report_empty_verified() {
+        let report = IntegrityReport {
+            verified: true,
+            molecules: vec![],
+        };
+        assert!(report.verified);
+        assert!(report.molecules.is_empty());
     }
 }

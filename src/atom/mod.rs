@@ -279,7 +279,7 @@ impl Atom {
             }
             _ => {
                 // Default: base17 representation - matches JS charsetBaseConvert exactly
-                Ok(hex_to_base17(&hex_hash))
+                hex_to_base17(&hex_hash)
             }
         }
     }
@@ -381,13 +381,13 @@ impl Atom {
             for field in required_fields {
                 match field {
                     "position" if self.position.is_empty() => {
-                        return Err(KnishIOError::custom("Required field 'position' is missing or empty"));
+                        return Err(KnishIOError::AtomsMissing);
                     }
                     "walletAddress" if self.wallet_address.is_empty() => {
-                        return Err(KnishIOError::custom("Required field 'walletAddress' is missing or empty"));
+                        return Err(KnishIOError::AtomsMissing);
                     }
                     "token" if self.token.is_empty() => {
-                        return Err(KnishIOError::custom("Required field 'token' is missing or empty"));
+                        return Err(KnishIOError::AtomsMissing);
                     }
                     _ => {}
                 }
@@ -624,6 +624,45 @@ impl Default for AtomCreateParams {
 }
 
 
+impl WalletInfo {
+    /// Create WalletInfo from a Wallet reference.
+    ///
+    /// Extracts position, address, token, and batch_id from the wallet,
+    /// matching the JS SDK pattern of `Atom.create({ wallet: someWallet, ... })`.
+    pub fn from_wallet(wallet: &crate::wallet::Wallet) -> Self {
+        WalletInfo {
+            position: wallet.position.clone().unwrap_or_default(),
+            address: wallet.address.clone().unwrap_or_default(),
+            token: wallet.token.clone(),
+            batch_id: wallet.batch_id.clone(),
+        }
+    }
+}
+
+impl Atom {
+    /// Create an atom from a wallet, extracting position and address automatically.
+    ///
+    /// This is a convenience constructor matching the JS SDK pattern:
+    /// `Atom.create({ isotope, wallet: sourceWallet, metaType, metaId, meta })`
+    ///
+    /// # Arguments
+    ///
+    /// * `wallet` - Wallet to extract position, address, and token from
+    /// * `isotope` - Isotope type for this atom
+    ///
+    /// # Returns
+    ///
+    /// A new Atom with fields populated from the wallet
+    pub fn from_wallet(wallet: &crate::wallet::Wallet, isotope: Isotope) -> Self {
+        Self::new(
+            wallet.position.clone().unwrap_or_default(),
+            wallet.address.clone().unwrap_or_default(),
+            isotope,
+            wallet.token.clone(),
+        )
+    }
+}
+
 impl Default for Atom {
     fn default() -> Self {
         Atom::new("", "", Isotope::V, "")
@@ -815,11 +854,11 @@ mod tests {
     #[test]
     fn test_hex_to_base17() {
         let hex = "0123456789abcdef";
-        let base17 = hex_to_base17(hex);
+        let base17 = hex_to_base17(hex).unwrap();
         assert_eq!(base17.len(), 64);
-        
+
         // Test with zero
-        let zero_base17 = hex_to_base17("0");
+        let zero_base17 = hex_to_base17("0").unwrap();
         assert_eq!(zero_base17, "0".repeat(64));
     }
 }

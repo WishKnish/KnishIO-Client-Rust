@@ -200,6 +200,14 @@ pub enum KnishIOError {
     #[error("UTF-8 error: {0}")]
     Utf8(String),
     
+    /// WebSocket communication error
+    #[error("WebSocket error: {0}")]
+    WebSocketError(String),
+
+    /// Configuration or builder validation error
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String),
+
     /// Custom error with message
     #[error("{0}")]
     Custom(String),
@@ -231,7 +239,7 @@ impl KnishIOError {
     
     /// Check if this error is a network-related error
     pub fn is_network_error(&self) -> bool {
-        matches!(self, KnishIOError::Network(_))
+        matches!(self, KnishIOError::Network(_) | KnishIOError::WebSocketError(_))
     }
     
     /// Check if this error is a cryptographic error

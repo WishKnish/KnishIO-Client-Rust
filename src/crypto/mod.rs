@@ -354,9 +354,11 @@ pub fn generate_key(secret: &str, token: &str, position: &str) -> String {
         Err(_) => shake256(position, 256), // 256 bits = 32 bytes = 64 hex chars
     };
 
-    // Convert to BigInt (now guaranteed valid hex)
-    let big_int_secret = BigUint::from_str_radix(&secret_hex, 16).unwrap_or_else(|_| BigUint::from(0u32));
-    let big_int_position = BigUint::from_str_radix(&position_hex, 16).unwrap_or_else(|_| BigUint::from(0u32));
+    // Convert to BigInt (normalization above guarantees valid hex via shake256)
+    let big_int_secret = BigUint::from_str_radix(&secret_hex, 16)
+        .expect("internal invariant violated: hex normalization produced non-hex output");
+    let big_int_position = BigUint::from_str_radix(&position_hex, 16)
+        .expect("internal invariant violated: hex normalization produced non-hex output");
     
     // Add them together (BigInt addition)
     let indexed_key = big_int_secret + big_int_position;
@@ -584,17 +586,15 @@ pub fn normalize_hash(hash: &str) -> Vec<i8> {
 ///
 /// Encodes hexadecimal input to Base58 format matching JavaScript implementation
 #[allow(dead_code)]
-fn base58_encode(input: &str) -> String {
+fn base58_encode(input: &str) -> Result<String> {
     const BASE58_ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    
+
     // Convert hex string to bytes
-    let bytes = match hex::decode(input) {
-        Ok(b) => b,
-        Err(_) => return format!("Kk{}", &input[0..std::cmp::min(42, input.len())]),
-    };
+    let bytes = hex::decode(input)
+        .map_err(|_| KnishIOError::Code("base58_encode: invalid hex input".into()))?;
     
     if bytes.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
     
     // Count leading zeros
@@ -623,7 +623,9 @@ fn base58_encode(input: &str) -> String {
     
     // Reverse and convert to string
     encoded.reverse();
-    String::from_utf8(encoded).unwrap_or_else(|_| format!("Kk{}", &input[0..std::cmp::min(42, input.len())]))
+    // BASE58_ALPHABET is all ASCII, so this is infallible in practice
+    String::from_utf8(encoded)
+        .map_err(|_| KnishIOError::Code("base58_encode: produced invalid UTF-8".into()))
 }
 
 /// Convert hexadecimal string to base-17 representation
@@ -639,38 +641,40 @@ fn base58_encode(input: &str) -> String {
 /// # Returns
 ///
 /// Base-17 string representation padded to 64 characters
-pub fn hex_to_base17(hex: &str) -> String {
+pub fn hex_to_base17(hex: &str) -> Result<String> {
     use num_bigint::BigUint;
     use num_traits::{Num, Zero};
-    
+
     // Convert hex string to BigUint - matches JavaScript BigInt conversion
-    let num = BigUint::from_str_radix(hex, 16).unwrap_or_else(|_| BigUint::zero());
-    
+    let num = BigUint::from_str_radix(hex, 16)
+        .map_err(|_| KnishIOError::Code(format!("hex_to_base17: invalid hex input: {}", &hex[..hex.len().min(16)])))?;
+
     // Base-17 digits - exact match to JavaScript destSymbolTable
     let digits = "0123456789abcdefg";
     let base = BigUint::from(17u32);
-    
+
     // JavaScript: If the result is empty, it means the source was 0
     if num.is_zero() {
-        return "0".repeat(64);  // padStart(64, '0')
+        return Ok("0".repeat(64));  // padStart(64, '0')
     }
-    
+
     let mut result = String::new();
     let mut n = num;
-    
+
     // JavaScript algorithm: while (val > 0)
     while !n.is_zero() {
         let remainder = &n % &base;
-        let digit_index = remainder.to_string().parse::<usize>().unwrap_or(0);
-        if digit_index < digits.len() {
-            // JavaScript: destSymbolTable.charAt(Number(r)) + res
-            result.insert(0, digits.chars().nth(digit_index).unwrap_or('0'));
-        }
+        // remainder is always 0..16, parsing to usize is infallible
+        let digit_index: usize = remainder.to_string().parse()
+            .expect("internal invariant: BigUint remainder mod 17 is always a valid usize");
+        // digit_index is always < 17 = digits.len(), so nth() is infallible
+        result.insert(0, digits.chars().nth(digit_index)
+            .expect("internal invariant: digit_index < 17"));
         n /= &base;
     }
-    
+
     // JavaScript: .padStart(64, '0') - pad to 64 characters with leading zeros
-    format!("{:0>64}", result)
+    Ok(format!("{:0>64}", result))
 }
 
 /// Decode Base58 string back to bytes
@@ -891,22 +895,22 @@ pub fn hash_molecule(molecule_data: &str) -> String {
 ///
 /// # Returns
 ///
-/// Signature fragment as hexadecimal string (128 characters)
-pub fn generate_ots_fragment(key_chunk: &str, normalized_value: i8) -> String {
+/// Result containing signature fragment as hexadecimal string (128 characters)
+pub fn generate_ots_fragment(key_chunk: &str, normalized_value: i8) -> Result<String> {
     if key_chunk.len() != 128 {
-        panic!("Key chunk must be exactly 128 characters");
+        return Err(KnishIOError::SignatureMalformed);
     }
     
     let mut working_chunk = key_chunk.to_string();
-    
+
     // Hash (8 - normalizedHash[index]) times for signing
     let iterations = 8 - normalized_value;
-    
+
     for _ in 0..iterations {
         working_chunk = shake256(&working_chunk, 512); // 512 bits = 128 hex chars
     }
-    
-    working_chunk
+
+    Ok(working_chunk)
 }
 
 /// Verify a one-time signature fragment using WOTS+ algorithm
@@ -921,22 +925,22 @@ pub fn generate_ots_fragment(key_chunk: &str, normalized_value: i8) -> String {
 ///
 /// # Returns
 ///
-/// Public key fragment as hexadecimal string (128 characters)
-pub fn verify_ots_fragment(ots_fragment: &str, normalized_value: i8) -> String {
+/// Result containing public key fragment as hexadecimal string (128 characters)
+pub fn verify_ots_fragment(ots_fragment: &str, normalized_value: i8) -> Result<String> {
     if ots_fragment.len() != 128 {
-        panic!("OTS fragment must be exactly 128 characters");
+        return Err(KnishIOError::SignatureMalformed);
     }
     
     let mut working_chunk = ots_fragment.to_string();
-    
+
     // Hash (8 + normalizedHash[index]) times for verification
     let iterations = 8 + normalized_value;
-    
+
     for _ in 0..iterations {
         working_chunk = shake256(&working_chunk, 512); // 512 bits = 128 hex chars
     }
-    
-    working_chunk
+
+    Ok(working_chunk)
 }
 
 /// Generate complete WOTS+ signature for a molecular hash
@@ -950,19 +954,19 @@ pub fn verify_ots_fragment(ots_fragment: &str, normalized_value: i8) -> String {
 ///
 /// # Returns
 ///
-/// Vector of 16 OTS fragments, each 128 hex characters
-pub fn generate_ots_signature(private_key: &str, molecular_hash: &str) -> Vec<String> {
+/// Result containing vector of 16 OTS fragments, each 128 hex characters
+pub fn generate_ots_signature(private_key: &str, molecular_hash: &str) -> Result<Vec<String>> {
     if private_key.len() != 2048 {
-        panic!("Private key must be 2048 characters");
+        return Err(KnishIOError::SignatureMalformed);
     }
-    
+
     if molecular_hash.len() != 64 {
-        panic!("Molecular hash must be 64 characters (base17)");
+        return Err(KnishIOError::SignatureMalformed);
     }
-    
+
     // Step 1: Normalize the molecular hash
     let normalized_hash = normalize_hash(molecular_hash);
-    
+
     // Step 2: Split private key into 16 chunks of 128 characters each
     let mut key_chunks = Vec::new();
     for i in 0..16 {
@@ -970,16 +974,16 @@ pub fn generate_ots_signature(private_key: &str, molecular_hash: &str) -> Vec<St
         let chunk = &private_key[start..start + 128];
         key_chunks.push(chunk.to_string());
     }
-    
+
     // Step 3: Generate OTS fragment for each chunk
     let mut ots_fragments = Vec::new();
     for (i, key_chunk) in key_chunks.iter().enumerate() {
         let normalized_value = normalized_hash[i];
-        let ots_fragment = generate_ots_fragment(key_chunk, normalized_value);
+        let ots_fragment = generate_ots_fragment(key_chunk, normalized_value)?;
         ots_fragments.push(ots_fragment);
     }
-    
-    ots_fragments
+
+    Ok(ots_fragments)
 }
 
 /// Verify complete WOTS+ signature for a molecular hash
@@ -1015,7 +1019,10 @@ pub fn verify_ots_signature(
     let mut public_key_fragments = Vec::new();
     for (i, ots_fragment) in ots_signature.iter().enumerate() {
         let normalized_value = normalized_hash[i];
-        let public_key_fragment = verify_ots_fragment(ots_fragment, normalized_value);
+        let public_key_fragment = match verify_ots_fragment(ots_fragment, normalized_value) {
+            Ok(fragment) => fragment,
+            Err(_) => return false,
+        };
         public_key_fragments.push(public_key_fragment);
     }
     
@@ -1231,7 +1238,7 @@ mod tests {
         // Test basic encoding/decoding
         let test_data = "hello world";
         let hex_data = hex::encode(test_data.as_bytes());
-        let encoded = base58_encode(&hex_data);
+        let encoded = base58_encode(&hex_data).unwrap();
         assert!(!encoded.is_empty());
         
         // Test decode
@@ -1334,18 +1341,18 @@ mod tests {
         let key_chunk = "a".repeat(128);
         let normalized_value = 0i8; // Middle value
         
-        let fragment1 = generate_ots_fragment(&key_chunk, normalized_value);
-        let fragment2 = generate_ots_fragment(&key_chunk, normalized_value);
-        let fragment3 = generate_ots_fragment(&key_chunk, 1i8); // Different normalized value
-        
+        let fragment1 = generate_ots_fragment(&key_chunk, normalized_value).unwrap();
+        let fragment2 = generate_ots_fragment(&key_chunk, normalized_value).unwrap();
+        let fragment3 = generate_ots_fragment(&key_chunk, 1i8).unwrap(); // Different normalized value
+
         assert_eq!(fragment1.len(), 128); // 512 bits = 128 hex chars
         assert_eq!(fragment1, fragment2); // Deterministic
         assert_ne!(fragment1, fragment3); // Different inputs produce different outputs
-        
+
         // Test with different normalized values
-        let fragment_neg8 = generate_ots_fragment(&key_chunk, -8i8); // Max iterations (16)
-        let fragment_pos8 = generate_ots_fragment(&key_chunk, 8i8);  // Min iterations (0)
-        
+        let fragment_neg8 = generate_ots_fragment(&key_chunk, -8i8).unwrap(); // Max iterations (16)
+        let fragment_pos8 = generate_ots_fragment(&key_chunk, 8i8).unwrap();  // Min iterations (0)
+
         assert_eq!(fragment_pos8, key_chunk); // 0 iterations = original chunk
         assert_ne!(fragment_neg8, key_chunk); // 16 iterations = heavily hashed
     }
@@ -1356,10 +1363,10 @@ mod tests {
         let normalized_value = 2i8;
         
         // Generate OTS fragment (8 - 2 = 6 iterations)
-        let ots_fragment = generate_ots_fragment(&key_chunk, normalized_value);
-        
+        let ots_fragment = generate_ots_fragment(&key_chunk, normalized_value).unwrap();
+
         // Verify should do (8 + 2 = 10 iterations)
-        let public_key_fragment = verify_ots_fragment(&ots_fragment, normalized_value);
+        let public_key_fragment = verify_ots_fragment(&ots_fragment, normalized_value).unwrap();
         
         assert_eq!(public_key_fragment.len(), 128);
         
@@ -1378,20 +1385,20 @@ mod tests {
         let private_key = "c".repeat(2048); // 2048-character private key
         let molecular_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"; // 64 chars base17
         
-        let ots_signature = generate_ots_signature(&private_key, &molecular_hash);
-        
+        let ots_signature = generate_ots_signature(&private_key, &molecular_hash).unwrap();
+
         assert_eq!(ots_signature.len(), 16); // 16 fragments
         for fragment in &ots_signature {
             assert_eq!(fragment.len(), 128); // Each fragment is 128 hex chars
         }
-        
+
         // Test deterministic behavior
-        let ots_signature2 = generate_ots_signature(&private_key, &molecular_hash);
+        let ots_signature2 = generate_ots_signature(&private_key, &molecular_hash).unwrap();
         assert_eq!(ots_signature, ots_signature2);
-        
+
         // Test different molecular hash produces different signature
         let different_hash = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
-        let different_signature = generate_ots_signature(&private_key, &different_hash);
+        let different_signature = generate_ots_signature(&private_key, &different_hash).unwrap();
         assert_ne!(ots_signature, different_signature);
     }
     
@@ -1399,9 +1406,9 @@ mod tests {
     fn test_verify_ots_signature() {
         let private_key = "d".repeat(2048);
         let molecular_hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"; // 64 chars
-        
+
         // Generate signature
-        let ots_signature = generate_ots_signature(&private_key, &molecular_hash);
+        let ots_signature = generate_ots_signature(&private_key, &molecular_hash).unwrap();
         
         // Calculate expected address by simulating the verification process
         let normalized_hash = normalize_hash(&molecular_hash);
@@ -1446,7 +1453,7 @@ mod tests {
         let molecular_hash = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"; 
         
         // Generate signature
-        let ots_signature = generate_ots_signature(&private_key, &molecular_hash);
+        let ots_signature = generate_ots_signature(&private_key, &molecular_hash).unwrap();
 
         // Calculate the correct address for this key
         let _normalized_hash = normalize_hash(&molecular_hash);
@@ -1507,7 +1514,7 @@ mod tests {
             "hello world", "KnishIO", "test-secret-1234",
         ];
         for input in &test_inputs {
-            let hash = hex_to_base17(&shake256(input, 256));
+            let hash = hex_to_base17(&shake256(input, 256)).unwrap();
             let normalized = normalize_hash(&hash);
             let sum: i32 = normalized.iter().map(|&v| v as i32).sum();
             assert_eq!(sum, 0, "Sum != 0 for hash of '{}': sum={}", input, sum);
@@ -1553,7 +1560,7 @@ mod tests {
         let secret = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
         let position = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
         let key = generate_key(secret, "TEST", position);
-        let mol_hash = hex_to_base17(&shake256("test-molecule-data", 256));
+        let mol_hash = hex_to_base17(&shake256("test-molecule-data", 256)).unwrap();
 
         // Compute OTS verification address (hash each chunk 16x, join, shake256)
         let mut pub_fragments = Vec::new();
@@ -1569,7 +1576,7 @@ mod tests {
         let address = shake256(&pub_fragments.join(""), 256);
 
         // Sign
-        let sig = generate_ots_signature(&key, &mol_hash);
+        let sig = generate_ots_signature(&key, &mol_hash).unwrap();
         assert_eq!(sig.len(), 16, "Must produce 16 OTS fragments");
 
         // Verify
@@ -1577,7 +1584,7 @@ mod tests {
         assert!(verified, "OTS round-trip verification must succeed");
 
         // Determinism: second run must produce identical signature
-        let sig2 = generate_ots_signature(&key, &mol_hash);
+        let sig2 = generate_ots_signature(&key, &mol_hash).unwrap();
         assert_eq!(sig, sig2, "OTS signature must be deterministic");
     }
 }
