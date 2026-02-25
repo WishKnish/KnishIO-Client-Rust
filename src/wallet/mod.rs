@@ -16,7 +16,7 @@ use std::collections::HashMap;
 ///
 /// The Wallet struct maintains exact compatibility with the JavaScript implementation,
 /// including shadow wallet support, ML-KEM quantum encryption, and token unit management.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wallet {
     /// Token slug this wallet is intended for (e.g., "USER", "TEST")
@@ -63,6 +63,27 @@ pub struct Wallet {
     
     /// Molecules associated with this wallet
     pub molecules: HashMap<String, serde_json::Value>,
+}
+
+/// Debug impl that redacts sensitive cryptographic material (private key, ML-KEM private key)
+impl std::fmt::Debug for Wallet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Wallet")
+            .field("token", &self.token)
+            .field("balance", &self.balance)
+            .field("address", &self.address)
+            .field("position", &self.position)
+            .field("bundle", &self.bundle)
+            .field("batch_id", &self.batch_id)
+            .field("characters", &self.characters)
+            .field("key", &self.key.as_ref().map(|_| "[REDACTED]"))
+            .field("pubkey", &self.pubkey)
+            .field("privkey", &self.privkey.as_ref().map(|_| "[REDACTED]"))
+            .field("token_units", &self.token_units)
+            .field("trade_rates", &self.trade_rates)
+            .field("molecules", &self.molecules)
+            .finish()
+    }
 }
 
 impl Wallet {

@@ -380,38 +380,38 @@ impl ClientBuilder {
     fn validate(&self) -> Result<()> {
         // Check that at least one URI is provided
         if self.uris.is_empty() {
-            return Err(KnishIOError::custom("At least one URI must be specified"));
+            return Err(KnishIOError::ConfigurationError("At least one URI must be specified".into()));
         }
 
         // Validate URIs format
         for uri in &self.uris {
             if !uri.starts_with("http://") && !uri.starts_with("https://") && !uri.starts_with("ws://") && !uri.starts_with("wss://") {
-                return Err(KnishIOError::custom(&format!("Invalid URI format: {}", uri)));
+                return Err(KnishIOError::ConfigurationError(format!("Invalid URI format: {}", uri)));
             }
         }
 
         // Validate SDK version
         if self.server_sdk_version < 2 || self.server_sdk_version > 4 {
-            return Err(KnishIOError::custom("Server SDK version must be between 2 and 4"));
+            return Err(KnishIOError::ConfigurationError("Server SDK version must be between 2 and 4".into()));
         }
 
         // Validate timeout values
         if let Some(timeout) = self.connection_timeout {
             if timeout == 0 || timeout > 300 {
-                return Err(KnishIOError::custom("Connection timeout must be between 1 and 300 seconds"));
+                return Err(KnishIOError::ConfigurationError("Connection timeout must be between 1 and 300 seconds".into()));
             }
         }
 
         if let Some(timeout) = self.request_timeout {
             if timeout == 0 || timeout > 600 {
-                return Err(KnishIOError::custom("Request timeout must be between 1 and 600 seconds"));
+                return Err(KnishIOError::ConfigurationError("Request timeout must be between 1 and 600 seconds".into()));
             }
         }
 
         // Validate retry count
         if let Some(retries) = self.max_retries {
             if retries > 10 {
-                return Err(KnishIOError::custom("Maximum retries cannot exceed 10"));
+                return Err(KnishIOError::ConfigurationError("Maximum retries cannot exceed 10".into()));
             }
         }
 

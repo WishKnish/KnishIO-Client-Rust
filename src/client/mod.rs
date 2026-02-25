@@ -338,11 +338,10 @@ impl KnishIOClient {
 
     /// Check if subscription WebSocket is connected
     pub async fn is_subscription_websocket_connected(&self) -> bool {
-        self.subscription_manager
-            .as_ref()
-            .map(|manager| async move { manager.is_connected().await })
-            .map(|future| futures::executor::block_on(future))
-            .unwrap_or(false)
+        match &self.subscription_manager {
+            Some(manager) => manager.is_connected().await,
+            None => false,
+        }
     }
 
     /// Stop all active subscriptions
@@ -356,20 +355,18 @@ impl KnishIOClient {
 
     /// Get active subscription count
     pub async fn active_subscription_count(&self) -> usize {
-        self.subscription_manager
-            .as_ref()
-            .map(|manager| async move { manager.active_count().await })
-            .map(|future| futures::executor::block_on(future))
-            .unwrap_or(0)
+        match &self.subscription_manager {
+            Some(manager) => manager.active_count().await,
+            None => 0,
+        }
     }
 
     /// List all active subscription IDs
     pub async fn list_active_subscriptions(&self) -> Vec<String> {
-        self.subscription_manager
-            .as_ref()
-            .map(|manager| async move { manager.list_subscriptions().await })
-            .map(|future| futures::executor::block_on(future))
-            .unwrap_or_default()
+        match &self.subscription_manager {
+            Some(manager) => manager.list_subscriptions().await,
+            None => Vec::new(),
+        }
     }
 
     /// Get a specific subscription by ID
@@ -706,6 +703,38 @@ impl KnishIOClient {
         Ok(molecule)
     }
 
+    /// Submit a pre-built, pre-signed molecule directly to the ledger.
+    ///
+    /// Unlike higher-level methods (create_token, transfer_token, etc.) which build
+    /// and sign molecules internally, this method accepts a molecule that has already
+    /// been constructed and signed by the caller. This is useful for:
+    /// - Validation testing (submitting intentionally corrupted molecules)
+    /// - Advanced molecule composition patterns
+    /// - Custom isotope operations
+    ///
+    /// # Arguments
+    ///
+    /// * `molecule` - A pre-built and pre-signed Molecule
+    ///
+    /// # Returns
+    ///
+    /// Result containing the server response
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the client is not initialized or the server rejects the molecule
+    pub async fn propose_molecule(&mut self, molecule: Molecule) -> Result<Box<dyn Response>> {
+        use crate::mutation::propose_molecule::MutationProposeMolecule;
+        use crate::mutation::Mutation;
+
+        let mutation = MutationProposeMolecule::from_molecule(molecule);
+
+        let client = self.client.as_ref()
+            .ok_or(KnishIOError::NoClient)?;
+
+        mutation.execute(client, None, None).await
+    }
+
     /// Log a message if logging is enabled
     pub fn log(&self, level: &str, message: &str) {
         if self.logging {
@@ -734,68 +763,67 @@ impl KnishIOClient {
         use crate::mutation::Mutation;
         use crate::types::MetaItem;
 
-        // Check if we have a secret
-        let secret = self.secret.as_ref()
-            .ok_or(KnishIOError::custom("Secret must be set before requesting authorization"))?;
+        // Check if we have a secret (before setting flag — no cleanup needed on this error)
+        let secret = self.secret.clone()
+            .ok_or(KnishIOError::MissingSecret)?;
 
-        // Set authentication in process
+        // Set authentication in process — must be reset on ALL exit paths below
         self.auth_in_process = true;
 
-        // Create AUTH wallet from secret
-        let auth_wallet = Wallet::new(
-            Some(secret),
-            None,
-            Some("AUTH"),
-            None,
-            None,
-            None,
-            None,
-        )?;
+        // Inner block captures Result so we can always reset the flag
+        let result: Result<bool> = async {
+            // Create AUTH wallet from secret
+            let auth_wallet = Wallet::new(
+                Some(&secret),
+                None,
+                Some("AUTH"),
+                None,
+                None,
+                None,
+                None,
+            )?;
 
-        // Create molecule with secret and source wallet
-        let mut molecule = Molecule::new();
-        molecule.secret = Some(secret.clone());
-        molecule.source_wallet = Some(auth_wallet.clone());
+            // Create molecule with secret and source wallet
+            let mut molecule = Molecule::new();
+            molecule.secret = Some(secret.clone());
+            molecule.source_wallet = Some(auth_wallet.clone());
 
-        // Convert meta HashMap to Vec<MetaItem> if provided
-        let meta_items: Vec<MetaItem> = meta.unwrap_or_default()
-            .iter()
-            .map(|(k, v)| MetaItem::new(k, &v.to_string()))
-            .collect();
+            // Convert meta HashMap to Vec<MetaItem> if provided
+            let meta_items: Vec<MetaItem> = meta.unwrap_or_default()
+                .iter()
+                .map(|(k, v)| MetaItem::new(k, &v.to_string()))
+                .collect();
 
-        // Initialize authorization on molecule
-        molecule.init_authorization(meta_items)?;
+            // Initialize authorization on molecule
+            molecule.init_authorization(meta_items)?;
 
-        // Sign the molecule
-        molecule.sign(None, false, true)?;
+            // Sign the molecule
+            molecule.sign(None, false, true)?;
 
-        // Check molecule integrity
-        molecule.check(None)?;
+            // Check molecule integrity
+            molecule.check(None)?;
 
-        // Create mutation (need GraphQL client)
-        if let Some(ref client) = self.client {
-            let mutation = MutationRequestAuthorization::from_molecule(molecule);
+            // Create mutation (need GraphQL client)
+            if let Some(ref client) = self.client {
+                let mutation = MutationRequestAuthorization::from_molecule(molecule);
+                let response = mutation.execute(client, None, None).await?;
+                let success = response.success();
 
-            // Execute mutation
-            let response = mutation.execute(client, None, None).await?;
+                if success {
+                    self.log("info", "Authorization request completed successfully");
+                } else {
+                    self.log("error", &format!("Authorization request failed: {:?}", response.reason()));
+                }
 
-            // Check if successful
-            let success = response.success();
-
-            // Reset auth_in_process flag
-            self.auth_in_process = false;
-
-            if success {
-                self.log("info", "Authorization request completed successfully");
+                Ok(success)
             } else {
-                self.log("error", &format!("Authorization request failed: {:?}", response.reason()));
+                Err(KnishIOError::NoClient)
             }
+        }.await;
 
-            Ok(success)
-        } else {
-            self.auth_in_process = false;
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
-        }
+        // Always reset flag, regardless of success or failure
+        self.auth_in_process = false;
+        result
     }
     
     /// Authenticate with the server using credentials (equivalent to authenticate in JS)
@@ -1156,9 +1184,9 @@ impl KnishIOClient {
                 return Ok(wallet);
             }
 
-            Err(KnishIOError::Custom("No balance data in response".to_string()))
+            Err(KnishIOError::InvalidResponse)
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -1202,7 +1230,7 @@ impl KnishIOClient {
 
             Ok(vec![])
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -1219,7 +1247,7 @@ impl KnishIOClient {
 
         // Get bundle hash - from parameter or client bundle
         let bundle = bundle_hash.or(self.bundle.as_deref())
-            .ok_or(KnishIOError::Custom("Bundle hash required".to_string()))?;
+            .ok_or(KnishIOError::MissingBundle)?;
 
         // Convert string to Vec (matching JS logic: bundle = [bundle])
         let bundle_hashes = vec![bundle.to_string()];
@@ -1238,7 +1266,7 @@ impl KnishIOClient {
 
             Ok(serde_json::json!(null))
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -1307,7 +1335,7 @@ impl KnishIOClient {
 
             Ok(vec![])
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -1336,7 +1364,7 @@ impl KnishIOClient {
 
             Ok(serde_json::json!(null))
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -1365,7 +1393,7 @@ impl KnishIOClient {
 
             Ok(vec![])
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -1397,7 +1425,7 @@ impl KnishIOClient {
 
         // Check for shadow wallet (no position or address)
         if source_wallet.position.is_none() || source_wallet.address.is_none() {
-            return Err(KnishIOError::Custom("Source wallet cannot be a shadow wallet".to_string()));
+            return Err(KnishIOError::WalletCredential);
         }
 
         Ok(source_wallet)
@@ -1415,7 +1443,7 @@ impl KnishIOClient {
         use crate::query::Query;
 
         let bundle = bundle_hash.or(self.bundle.as_deref())
-            .ok_or(KnishIOError::Custom("Bundle hash required for ContinuID query".to_string()))?;
+            .ok_or(KnishIOError::MissingBundle)?;
 
         let query = QueryContinuId::new(bundle);
 
@@ -1435,7 +1463,7 @@ impl KnishIOClient {
 
             Ok(None)
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -1467,7 +1495,7 @@ impl KnishIOClient {
 
             Ok(serde_json::json!(null))
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -1540,7 +1568,7 @@ impl KnishIOClient {
 
             Ok(vec![])
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -1587,7 +1615,7 @@ impl KnishIOClient {
 
             Ok(serde_json::json!(null))
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -1617,7 +1645,7 @@ impl KnishIOClient {
 
             Ok(serde_json::json!(null))
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -1675,7 +1703,7 @@ impl KnishIOClient {
 
                 Ok(serde_json::json!(null))
             } else {
-                Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+                Err(KnishIOError::NoClient)
             }
         } else {
             use crate::query::meta_type::QueryMetaType;
@@ -1707,7 +1735,7 @@ impl KnishIOClient {
 
                 Ok(serde_json::json!(null))
             } else {
-                Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+                Err(KnishIOError::NoClient)
             }
         }
     }
@@ -2226,7 +2254,7 @@ impl KnishIOClient {
 
         // Check if wallet is valid (matches JS lines 1896-1898)
         if source_wallet.address.is_none() {
-            return Err(KnishIOError::Custom("Source wallet is missing or invalid.".to_string()));
+            return Err(KnishIOError::WalletCredential);
         }
 
         // Remainder wallet (matches JS line 1901)
@@ -2484,7 +2512,7 @@ impl KnishIOClient {
         // Create recipients map: bundle -> amount (matches JS lines 1806-1807)
         let mut recipients = std::collections::HashMap::new();
         let bundle = self.get_bundle()
-            .ok_or(KnishIOError::Custom("Bundle not set".to_string()))?;
+            .ok_or(KnishIOError::MissingBundle)?;
         recipients.insert(bundle.to_string(), amount);
 
         mutation.fill_molecule(WithdrawBufferTokenParams {
@@ -2948,11 +2976,11 @@ impl KnishIOClient {
             if response.success() {
                 // Extract token data from response payload
                 let payload = response.payload()
-                    .ok_or(KnishIOError::Custom("No payload in guest authorization response".to_string()))?;
+                    .ok_or(KnishIOError::InvalidResponse)?;
 
                 let token_str = payload.get("token")
                     .and_then(|t| t.as_str())
-                    .ok_or(KnishIOError::Custom("No token in guest authorization response".to_string()))?
+                    .ok_or(KnishIOError::InvalidResponse)?
                     .to_string();
 
                 let pubkey = payload.get("pubkey")
@@ -2987,7 +3015,7 @@ impl KnishIOClient {
                 )))
             }
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -3045,11 +3073,11 @@ impl KnishIOClient {
             if response.success() {
                 // Extract token from response payload
                 let payload = response.payload()
-                    .ok_or(KnishIOError::Custom("No payload in authorization response".to_string()))?;
+                    .ok_or(KnishIOError::InvalidResponse)?;
 
                 let token_str = payload.get("token")
                     .and_then(|t| t.as_str())
-                    .ok_or(KnishIOError::Custom("No token in payload".to_string()))?
+                    .ok_or(KnishIOError::InvalidResponse)?
                     .to_string();
 
                 let expires_at = payload.get("expiresAt")
@@ -3080,7 +3108,7 @@ impl KnishIOClient {
                 )))
             }
         } else {
-            Err(KnishIOError::Custom("GraphQL client not initialized".to_string()))
+            Err(KnishIOError::NoClient)
         }
     }
 
@@ -3121,8 +3149,10 @@ impl KnishIOClient {
 
         // Generate a secret from the seed if it has been passed (matches JS line 2124-2127)
         let mut working_secret = secret.map(|s| s.to_string());
-        if working_secret.is_none() && seed.is_some() {
-            working_secret = Some(generate_secret(seed.unwrap()));
+        if working_secret.is_none() {
+            if let Some(s) = seed {
+                working_secret = Some(generate_secret(s));
+            }
         }
 
         // Set cell slug if it has been passed (matches JS line 2129-2132)
@@ -3130,32 +3160,35 @@ impl KnishIOClient {
             self.cell_slug = Some(slug.to_string());
         }
 
-        // Auth in process (matches JS line 2135)
+        // Auth in process (matches JS line 2135) — must be reset on ALL exit paths below
         self.auth_in_process = true;
 
-        // Dual-path authentication (matches JS line 2140-2152)
-        let auth_token = if let Some(ref sec) = working_secret {
-            // Authorized user - use profile auth
-            self.request_profile_auth_token(sec, encrypt).await?
-        } else {
-            // Guest - use guest auth
-            self.request_guest_auth_token(cell_slug, encrypt).await?
-        };
+        // Inner block captures Result so we can always reset the flag
+        let result: Result<AuthToken> = async {
+            // Dual-path authentication (matches JS line 2140-2152)
+            let auth_token = if let Some(ref sec) = working_secret {
+                // Authorized user - use profile auth
+                self.request_profile_auth_token(sec, encrypt).await?
+            } else {
+                // Guest - use guest auth
+                self.request_guest_auth_token(cell_slug, encrypt).await?
+            };
 
-        // Log success (matches JS line 2155)
-        self.log("info", &format!(
-            "KnishIOClient::request_auth_token() - Successfully retrieved auth token {}...",
-            auth_token.get_token()
-        ));
+            // Log success (matches JS line 2155)
+            self.log("info", &format!(
+                "KnishIOClient::request_auth_token() - Successfully retrieved auth token {}...",
+                auth_token.get_token()
+            ));
 
-        // Switch encryption mode if it has been changed (matches JS line 2158)
-        self.switch_encryption(encrypt.unwrap_or(false));
+            // Switch encryption mode if it has been changed (matches JS line 2158)
+            self.switch_encryption(encrypt.unwrap_or(false));
 
-        // Auth process is stopped (matches JS line 2161)
+            Ok(auth_token)
+        }.await;
+
+        // Always reset flag, regardless of success or failure (matches JS line 2161)
         self.auth_in_process = false;
-
-        // Return auth token
-        Ok(auth_token)
+        result
     }
 
     /// Switch encryption mode
