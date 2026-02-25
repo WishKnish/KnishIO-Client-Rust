@@ -11,7 +11,7 @@ keywords = ["postquantum", "quantum-resistant", "xmss", "ml-kem", "decentralized
 categories = ["cryptography", "network-programming", "api-bindings"]
 readme = "README.md"
 homepage = "https://knish.io"
-exclude = ["target/", "tests/", ".github/", "docs/", "examples/", "*.md", "!README.md", ".DS_Store"]
+exclude = ["target/", "tests/", ".github/", "docs/", "examples/", "*.md", "!README.md", ".DS_Store", "run-selftest.sh", "src/bin/integration-test.rs"]
 
 # 2025 Rust best practices: Modern linting configuration
 [lints.rust]
