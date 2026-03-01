@@ -240,11 +240,14 @@ impl Atom {
         let all_have_versions = sorted_atoms.iter().all(|atom| atom.version.is_some());
         
         let hex_hash = if all_have_versions {
-            // Use versioned view (placeholder for now - YAGNI)
-            // TODO: Implement when needed for versioned molecules
+            // GAP-03-005: Versioned hashing — replicate SDK's HashAtom.structure() algorithm:
+            // 1. Extract only 12 Version4 properties (exclude otsFragment)
+            // 2. Sort keys alphabetically
+            // 3. Wrap each key-value as a single-key object in an array
+            // 4. Recursively structure nested objects (meta items)
             let atom_views: Vec<serde_json::Value> = sorted_atoms.iter()
-                .map(|atom| serde_json::to_value(atom))
-                .collect::<Result<Vec<_>, _>>()?;
+                .map(|atom| Self::structure_atom_v4(atom))
+                .collect();
             shake256(&serde_json::to_string(&atom_views)?, 256)
         } else {
             // JavaScript legacy hashing: exact match pattern
@@ -284,6 +287,59 @@ impl Atom {
         }
     }
     
+    /// Produce the Version4 structured view for a single atom.
+    ///
+    /// Replicates the SDK's HashAtom.structure() algorithm:
+    /// - Extract only 12 Version4 properties (exclude otsFragment)
+    /// - Sort keys alphabetically: batchId, createdAt, index, isotope, meta,
+    ///   metaId, metaType, position, token, value, version, walletAddress
+    /// - Each key-value becomes a single-key object in the outer array
+    /// - Meta items are recursively structured the same way
+    fn structure_atom_v4(atom: &Atom) -> serde_json::Value {
+        use serde_json::{json, Value};
+
+        fn opt_str_to_json(opt: &Option<String>) -> Value {
+            match opt {
+                Some(s) => Value::String(s.clone()),
+                None => Value::Null,
+            }
+        }
+
+        fn structure_meta(meta: &[MetaItem]) -> Value {
+            Value::Array(
+                meta.iter()
+                    .map(|m| {
+                        let meta_value = if m.value.is_empty() {
+                            Value::Null
+                        } else {
+                            Value::String(m.value.clone())
+                        };
+                        Value::Array(vec![
+                            json!({"key": m.key}),
+                            json!({"value": meta_value}),
+                        ])
+                    })
+                    .collect(),
+            )
+        }
+
+        // 12 properties in alphabetical order matching Object.keys().sort()
+        Value::Array(vec![
+            json!({"batchId": opt_str_to_json(&atom.batch_id)}),
+            json!({"createdAt": if atom.created_at.is_empty() { Value::Null } else { Value::String(atom.created_at.clone()) }}),
+            json!({"index": atom.index.map(Value::from).unwrap_or(Value::Null)}),
+            json!({"isotope": atom.isotope.as_str()}),
+            json!({"meta": structure_meta(&atom.meta)}),
+            json!({"metaId": opt_str_to_json(&atom.meta_id)}),
+            json!({"metaType": opt_str_to_json(&atom.meta_type)}),
+            json!({"position": if atom.position.is_empty() { Value::Null } else { Value::String(atom.position.clone()) }}),
+            json!({"token": if atom.token.is_empty() { Value::Null } else { Value::String(atom.token.clone()) }}),
+            json!({"value": opt_str_to_json(&atom.value)}),
+            json!({"version": opt_str_to_json(&atom.version)}),
+            json!({"walletAddress": if atom.wallet_address.is_empty() { Value::Null } else { Value::String(atom.wallet_address.clone()) }}),
+        ])
+    }
+
     /// Sort atoms by their index field - matches JavaScript implementation exactly
     ///
     /// # Arguments
