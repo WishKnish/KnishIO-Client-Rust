@@ -85,6 +85,12 @@ pub struct Molecule {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub parent_hashes: Vec<String>,
+
+    /// Explicit ContinuID position override for non-USER source wallets (JS SDK compat).
+    /// When source wallet is a TOKEN wallet (value-transfers), this stores the current
+    /// USER ContinuID head position for the I-atom's previousPosition metadata.
+    #[serde(skip)]
+    pub continuid_position: Option<String>,
 }
 
 impl Molecule {
@@ -105,6 +111,7 @@ impl Molecule {
             source_wallet: None,
             remainder_wallet: None,
             parent_hashes: Vec::new(),
+            continuid_position: None,
         }
     }
     
@@ -170,6 +177,7 @@ impl Molecule {
             source_wallet,
             remainder_wallet: final_remainder_wallet,
             parent_hashes: Vec::new(),
+            continuid_position: None,
         }
     }
     
@@ -296,12 +304,32 @@ impl Molecule {
     /// - `pubkey`: remainder wallet's public key (if available)
     /// - `characters`: remainder wallet's character encoding (if available)
     pub fn add_continuid_atom(&mut self) -> Result<()> {
+        // JS SDK pattern: If remainder wallet is not USER token, create a new USER remainder wallet.
+        // ContinuID I-atoms MUST always use "USER" token.
+        if self.remainder_wallet.as_ref().map_or(true, |w| w.token != "USER") {
+            if let Some(ref secret) = self.secret {
+                let user_wallet = Wallet::create(
+                    Some(secret),
+                    self.bundle.as_deref(),
+                    "USER",
+                    None,
+                    None,
+                ).ok();
+                if user_wallet.is_some() {
+                    self.remainder_wallet = user_wallet;
+                }
+            }
+        }
+
         if let Some(ref remainder_wallet) = self.remainder_wallet {
             let mut meta_items = Vec::new();
 
-            // previousPosition: the source wallet's position being consumed
-            // Enables validator's ContinuID chain integrity checks (i_isotope.rs Rules 4a-4c)
-            if let Some(ref source) = self.source_wallet {
+            // previousPosition: the current USER ContinuID position being consumed.
+            // For non-USER source wallets (value-transfers), use the explicit
+            // continuid_position (JS SDK compat) instead of the TOKEN wallet position.
+            if let Some(ref cid_pos) = self.continuid_position {
+                meta_items.push(MetaItem::new("previousPosition", cid_pos.as_str()));
+            } else if let Some(ref source) = self.source_wallet {
                 if let Some(ref pos) = source.position {
                     meta_items.push(MetaItem::new("previousPosition", pos.as_str()));
                 }
@@ -565,6 +593,23 @@ impl Molecule {
     /// * `meta` - Token metadata
     pub fn init_token_creation(&mut self, recipient_wallet: &Wallet, amount: f64, meta: Vec<MetaItem>) -> Result<()> {
         if let Some(ref source_wallet) = self.source_wallet {
+            // Enrich metadata with recipient wallet info (JS SDK: atomMeta.setMetaWallet)
+            // This tells the server WHERE to create the token wallet — separate from the
+            // source wallet position used for OTS signing.
+            let mut enriched_meta = meta;
+            if let Some(ref addr) = recipient_wallet.address {
+                enriched_meta.push(MetaItem::new("walletAddress", addr));
+            }
+            if let Some(ref pos) = recipient_wallet.position {
+                enriched_meta.push(MetaItem::new("walletPosition", pos));
+            }
+            if let Some(ref bun) = recipient_wallet.bundle {
+                enriched_meta.push(MetaItem::new("walletBundleHash", bun));
+            }
+            if let Some(ref pk) = recipient_wallet.pubkey {
+                enriched_meta.push(MetaItem::new("walletPubkey", pk));
+            }
+
             let params = AtomCreateParams {
                 isotope: Isotope::C,
                 wallet_info: Some(WalletInfo {
@@ -576,14 +621,14 @@ impl Molecule {
                 value: Some(amount),
                 meta_type: Some("token".to_string()),
                 meta_id: Some(recipient_wallet.token.clone()),
-                meta: Some(meta),
+                meta: Some(enriched_meta),
                 batch_id: recipient_wallet.batch_id.clone(),
                 ..Default::default()
             };
-            
+
             self.add_atom(Atom::create(params));
         }
-        
+
         Ok(())
     }
     
@@ -726,22 +771,27 @@ impl Molecule {
     /// * `batch_id` - Batch ID
     pub fn init_token_request(&mut self, token: &str, amount: f64, meta_type: &str, meta_id: &str, meta: Vec<MetaItem>, batch_id: Option<String>) -> Result<()> {
         if let Some(ref source_wallet) = self.source_wallet {
+            // JS SDK injects token and amount into metadata (meta.token = token; meta.amount = String(amount))
+            let mut enriched_meta = meta;
+            enriched_meta.push(MetaItem::new("token", token));
+            enriched_meta.push(MetaItem::new("amount", &amount.to_string()));
+
             let params = AtomCreateParams {
                 isotope: Isotope::T,
                 wallet_info: Some(WalletInfo {
                     position: source_wallet.position.clone().unwrap_or_default(),
                     address: source_wallet.address.clone().unwrap_or_default(),
-                    token: token.to_string(),
+                    token: source_wallet.token.clone(),
                     batch_id: source_wallet.batch_id.clone(),
                 }),
                 value: Some(amount),
                 meta_type: Some(meta_type.to_string()),
                 meta_id: Some(meta_id.to_string()),
-                meta: Some(meta),
+                meta: Some(enriched_meta),
                 batch_id,
                 ..Default::default()
             };
-            
+
             self.add_atom(Atom::create(params));
         }
         
