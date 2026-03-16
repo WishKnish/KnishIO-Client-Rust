@@ -35,6 +35,8 @@ pub struct PoolConfig {
     pub cleanup_interval: Duration,
     /// User agent string
     pub user_agent: String,
+    /// Accept invalid TLS certificates (for self-signed certs in dev)
+    pub insecure_tls: bool,
 }
 
 /// A pooled HTTP client with metadata
@@ -66,6 +68,7 @@ impl Default for PoolConfig {
             keep_alive_timeout: Duration::from_secs(90),
             cleanup_interval: Duration::from_secs(60),
             user_agent: format!("KnishIO-Rust-SDK/{}", env!("CARGO_PKG_VERSION")),
+            insecure_tls: false,
         }
     }
 }
@@ -125,14 +128,20 @@ impl ConnectionPool {
     
     /// Create a new HTTP client with the pool's configuration
     fn create_new_client(&self) -> Result<Client> {
-        let client = Client::builder()
+        let mut builder = Client::builder()
             .timeout(self.config.request_timeout)
             .connect_timeout(self.config.connect_timeout)
             .pool_idle_timeout(self.config.keep_alive_timeout)
-            .user_agent(&self.config.user_agent)
+            .user_agent(&self.config.user_agent);
+
+        if self.config.insecure_tls {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+
+        let client = builder
             .build()
             .map_err(|e| KnishIOError::custom(format!("Failed to create HTTP client: {}", e)))?;
-        
+
         Ok(client)
     }
     

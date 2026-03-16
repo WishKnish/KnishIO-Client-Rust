@@ -6,14 +6,15 @@
 use knishio_client::{
     KnishIOClient, GraphQLClient, Wallet, Molecule,
     mutation::{
+        Mutation,
         MutationProposeMolecule, MutationCreateWallet, MutationCreateToken,
         MutationTransferTokens, MutationRequestTokens, MutationClaimShadowWallet,
         MutationRequestAuthorization, MutationActiveSession,
         CreateTokenParams, TransferTokensParams, RequestTokensParams,
         ClaimShadowWalletParams, RequestAuthorizationParams
-    }
+    },
 };
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::HashMap;
 
 /// Example: Basic setup for all mutations
@@ -47,7 +48,7 @@ async fn example_propose_molecule(
     println!("=== ProposeMolecule Example ===");
 
     // Create a molecule with some transaction data
-    let mut molecule = Molecule::new();
+    let molecule = Molecule::new();
     // Note: In practice, you would populate the molecule with atoms
     // molecule.add_atom(...);
     // molecule.sign(...);
@@ -62,7 +63,7 @@ async fn example_propose_molecule(
 
     // Execute the mutation
     let response = mutation.execute(graphql_client, None, None).await?;
-    println!("ProposeMolecule response: {:?}", response);
+    println!("ProposeMolecule response: {}", response.data());
 
     Ok(())
 }
@@ -105,7 +106,7 @@ async fn example_create_wallet(
     match mutation.fill_molecule(&wallet) {
         Ok(_) => {
             let response = mutation.execute(graphql_client, None, None).await?;
-            println!("CreateWallet response: {:?}", response);
+            println!("CreateWallet response: {}", response.data());
         }
         Err(e) => {
             println!("CreateWallet failed (expected): {:?}", e);
@@ -167,7 +168,7 @@ async fn example_create_token(
     match mutation.fill_molecule(params) {
         Ok(_) => {
             let response = mutation.execute(graphql_client, None, None).await?;
-            println!("CreateToken response: {:?}", response);
+            println!("CreateToken response: {}", response.data());
         }
         Err(e) => {
             println!("CreateToken failed (expected): {:?}", e);
@@ -230,7 +231,7 @@ async fn example_transfer_tokens(
     match mutation.fill_molecule(params) {
         Ok(_) => {
             let response = mutation.execute(graphql_client, None, None).await?;
-            println!("TransferTokens response: {:?}", response);
+            println!("TransferTokens response: {}", response.data());
         }
         Err(e) => {
             println!("TransferTokens failed (expected): {:?}", e);
@@ -284,7 +285,7 @@ async fn example_request_tokens(
     match mutation.fill_molecule(params) {
         Ok(_) => {
             let response = mutation.execute(graphql_client, None, None).await?;
-            println!("RequestTokens response: {:?}", response);
+            println!("RequestTokens response: {}", response.data());
         }
         Err(e) => {
             println!("RequestTokens failed (expected): {:?}", e);
@@ -325,11 +326,20 @@ async fn example_claim_shadow_wallet(
         molecule
     );
 
-    // Fill the molecule with claim data
-    match mutation.fill_molecule(params) {
+    // Create a wallet to claim
+    let claim_wallet = Wallet::create(
+        Some("claimer-secret-12345"),
+        None,
+        "TEST",
+        None,
+        None
+    )?;
+
+    // Fill the molecule with claim data (requires both params and wallet)
+    match mutation.fill_molecule(params, &claim_wallet) {
         Ok(_) => {
             let response = mutation.execute(graphql_client, None, None).await?;
-            println!("ClaimShadowWallet response: {:?}", response);
+            println!("ClaimShadowWallet response: {}", response.data());
         }
         Err(e) => {
             println!("ClaimShadowWallet failed (expected): {:?}", e);
@@ -379,7 +389,7 @@ async fn example_request_authorization(
     match mutation.fill_molecule(params) {
         Ok(_) => {
             let response = mutation.execute(graphql_client, None, None).await?;
-            println!("RequestAuthorization response: {:?}", response);
+            println!("RequestAuthorization response: {}", response.data());
         }
         Err(e) => {
             println!("RequestAuthorization failed (expected): {:?}", e);
@@ -418,7 +428,7 @@ async fn example_active_session(
 
     // Execute the mutation
     let response = mutation.execute(graphql_client, Some(variables), None).await?;
-    println!("ActiveSession response: {:?}", response);
+    println!("ActiveSession response: {}", response.data());
 
     Ok(())
 }
@@ -442,7 +452,7 @@ async fn example_builder_pattern(
     let molecule = Molecule::new();
 
     // Use builder to create mutation
-    let mutation = builder.propose_molecule(molecule)?;
+    let _mutation = builder.propose_molecule(molecule)?;
     println!("Created ProposeMolecule using builder pattern");
 
     // You can also use the builder for other mutations
@@ -450,8 +460,8 @@ async fn example_builder_pattern(
         .with_secret("user-secret-12345")
         .with_client(graphql_client.clone());
 
-    let active_session = builder.active_session();
-    println!("Created ActiveSession using builder pattern: {:?}", active_session);
+    let _active_session = builder.active_session();
+    println!("Created ActiveSession using builder pattern");
 
     Ok(())
 }
@@ -487,7 +497,7 @@ async fn example_helper_functions() -> Result<(), Box<dyn std::error::Error>> {
         &recipient_wallet,
         100.0,
     ) {
-        Ok(mutation) => {
+        Ok(_mutation) => {
             println!("Created value transfer mutation using helper");
             println!("Mutation type: TransferTokens, Amount: 100.0");
         }
@@ -499,7 +509,7 @@ async fn example_helper_functions() -> Result<(), Box<dyn std::error::Error>> {
 
     // Use helper to create wallet creation
     match helpers::create_wallet_creation("user-secret", &source_wallet) {
-        Ok(mutation) => {
+        Ok(_mutation) => {
             println!("Created wallet creation mutation using helper");
         }
         Err(e) => {
@@ -517,7 +527,7 @@ async fn example_helper_functions() -> Result<(), Box<dyn std::error::Error>> {
         1000.0,
         Some(metadata),
     ) {
-        Ok(mutation) => {
+        Ok(_mutation) => {
             println!("Created token creation mutation using helper");
         }
         Err(e) => {
@@ -547,25 +557,20 @@ async fn example_error_handling(
 
     match mutation.execute(graphql_client, Some(invalid_variables), None).await {
         Ok(response) => {
-            println!("Unexpected success: {:?}", response);
+            println!("Unexpected success: {}", response.data());
         }
         Err(e) => {
             println!("Expected error: {:?}", e);
             
-            // Handle different error types
-            match e {
-                knishio_client::KnishIOError::GraphQL(graphql_errors) => {
-                    println!("GraphQL errors: {:?}", graphql_errors);
-                }
-                knishio_client::KnishIOError::Network(network_error) => {
-                    println!("Network error: {:?}", network_error);
-                }
-                knishio_client::KnishIOError::Validation(validation_error) => {
-                    println!("Validation error: {:?}", validation_error);
-                }
-                _ => {
-                    println!("Other error type");
-                }
+            // Categorize the error using helper methods
+            if e.is_network_error() {
+                println!("Network error: {}", e);
+            } else if e.is_validation_error() {
+                println!("Validation error: {}", e);
+            } else if e.is_auth_error() {
+                println!("Authentication error: {}", e);
+            } else {
+                println!("Other error type: {}", e);
             }
         }
     }

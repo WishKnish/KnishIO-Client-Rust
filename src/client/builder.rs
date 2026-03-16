@@ -27,9 +27,10 @@
 //! ```
 
 use crate::client::KnishIOClient;
-use crate::graphql::{GraphQLClient, SocketConfig};
+use crate::graphql::{GraphQLClient, ClientConfig, RetryConfig, SocketConfig};
 use crate::error::{KnishIOError, Result};
 use std::collections::HashMap;
+use std::time::Duration;
 
 /// Builder for creating KnishIOClient instances with fluent API
 ///
@@ -64,6 +65,8 @@ pub struct ClientBuilder {
     max_retries: Option<u32>,
     /// Enable automatic authentication
     auto_auth: bool,
+    /// Accept invalid TLS certificates (for self-signed certs in dev)
+    insecure_tls: bool,
 }
 
 impl Default for ClientBuilder {
@@ -97,6 +100,7 @@ impl ClientBuilder {
             custom_headers: HashMap::new(),
             max_retries: None,
             auto_auth: true, // Enable auto-auth by default
+            insecure_tls: false,
         }
     }
 
@@ -334,6 +338,16 @@ impl ClientBuilder {
         self
     }
 
+    /// Accept invalid TLS certificates (for self-signed certs in local dev)
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Whether to skip TLS certificate validation
+    pub fn insecure_tls(mut self, enabled: bool) -> Self {
+        self.insecure_tls = enabled;
+        self
+    }
+
     /// Configure WebSocket settings for real-time subscriptions
     ///
     /// # Arguments
@@ -438,12 +452,40 @@ impl ClientBuilder {
         // Validate configuration
         self.validate()?;
 
-        // Create the client with validated configuration
+        // Build a pre-configured GraphQLClient if none was provided
+        let graphql_client = self.graphql_client.clone().unwrap_or_else(|| {
+            let client_config = ClientConfig {
+                max_connections: 100,
+                connect_timeout: Duration::from_secs(
+                    self.connection_timeout.unwrap_or(10),
+                ),
+                request_timeout: Duration::from_secs(
+                    self.request_timeout.unwrap_or(60),
+                ),
+                keep_alive_timeout: Duration::from_secs(90),
+                tcp_keepalive: Some(Duration::from_secs(60)),
+                insecure_tls: self.insecure_tls,
+            };
+
+            let retry_config = if let Some(max) = self.max_retries {
+                RetryConfig {
+                    max_attempts: max,
+                    ..RetryConfig::default()
+                }
+            } else {
+                RetryConfig::default()
+            };
+
+            let uri = self.uris.first().cloned().unwrap_or_default();
+            GraphQLClient::with_config(uri, client_config, retry_config)
+        });
+
+        // Create the client with the pre-configured GraphQL client
         let mut client = KnishIOClient::new(
             self.uris.clone(),
             self.cell_slug.clone(),
             self.socket_config.clone(),
-            self.graphql_client.clone(),
+            Some(graphql_client),
             Some(self.server_sdk_version),
             Some(self.logging),
         );
@@ -455,9 +497,6 @@ impl ClientBuilder {
 
         // Apply encryption setting
         client.set_encrypt(self.encryption);
-
-        // TODO: Apply additional configuration like timeouts, headers, retries
-        // These would need corresponding methods on KnishIOClient
 
         Ok(client)
     }
@@ -557,6 +596,7 @@ impl ClientBuilder {
             .request_timeout(30)
             .max_retries(1)
             .auto_auth(true)
+            .insecure_tls(true)
     }
 
     /// Create a load-balanced client configuration

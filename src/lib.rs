@@ -31,7 +31,7 @@
 //!     )?;
 //!
 //!     // Create and sign a molecule
-//!     let mut molecule = Molecule::new(
+//!     let mut molecule = Molecule::with_params(
 //!         Some("your-secret-here".to_string()),
 //!         None,
 //!         Some(wallet),

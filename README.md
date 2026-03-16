@@ -49,20 +49,37 @@ This document will explain both ways.
 
 1. Include the wrapper struct in your application code:
    ```rust
-   use knishio_client::KnishIOClient;
+   use knishio_client::{KnishIOClient, ClientBuilder};
    ```
 
-2. Instantiate the client with your node URI:
+2. Instantiate the client — either with the builder (recommended) or directly:
+
+   **Using `ClientBuilder` (recommended):**
    ```rust
-   let client = KnishIOClient::new(
+   let client = ClientBuilder::new(
        vec!["https://some.knishio.validator.node.url/graphql".to_string()],
-       Some("my-cell-slug".to_string())
-   )?;
+       "myTopSecretCode".to_string(),
+   )
+   .cell_slug("my-cell-slug".to_string())
+   .build()?;
+   ```
+
+   **Using `KnishIOClient::new()` directly:**
+   ```rust
+   let mut client = KnishIOClient::new(
+       vec!["https://some.knishio.validator.node.url/graphql".to_string()],
+       Some("my-cell-slug".to_string()),
+       None,  // socket config
+       None,  // GraphQL client
+       None,  // server SDK version
+       None,  // logging
+   );
+   client.set_secret("myTopSecretCode");
    ```
 
 3. Set your secret for authentication:
    ```rust
-   client.set_secret("myTopSecretCode")?;
+   client.set_secret("myTopSecretCode");
 
    // Note: The Rust SDK uses stored secret for cryptographic operations
    // This is equivalent to the JavaScript SDK's await client.requestAuthToken()
@@ -80,61 +97,59 @@ This document will explain both ways.
       Some("c47e20f99df190e418f0cc5ddfa2791e9ccc4eb297cfa21bd317dc0f98313b1d")
   ).await?;
 
-  if response.success() {
-      println!("{:?}", response.data()); // Raw Metadata
-  }
+  println!("{}", response); // Raw Metadata as JSON Value
   ```
 
 - Query metadata for a **Meta Asset**:
 
   ```rust
   let result = client.query_meta(
-      "Vehicle",      // meta_type
-      Some("CAR123"), // meta_id
+      "Vehicle",           // meta_type
+      Some("CAR123"),      // meta_id
       Some("LicensePlate"), // key
-      Some("1H17P"),  // value
-      true            // latest
+      Some("1H17P"),       // value
+      Some(true)           // through_atom (query via atom path)
   ).await?;
 
-  println!("{:?}", result); // Raw Metadata
+  println!("{}", result); // Raw Metadata as JSON Value
   ```
 
 - Writing new metadata for a **Meta Asset**:
 
   ```rust
-  use knishio_client::types::MetaItem;
+  use std::collections::HashMap;
+  use serde_json::json;
 
-  let metadata = vec![
-      MetaItem::new("type", "fire"),
-      MetaItem::new("weaknesses", "rock,water,electric"),
-      MetaItem::new("immunities", "ground"),
-      MetaItem::new("hp", "78"),
-      MetaItem::new("attack", "84"),
-  ];
+  let mut metadata = HashMap::new();
+  metadata.insert("type".to_string(), json!("fire"));
+  metadata.insert("weaknesses".to_string(), json!("rock,water,electric"));
+  metadata.insert("immunities".to_string(), json!("ground"));
+  metadata.insert("hp".to_string(), json!("78"));
+  metadata.insert("attack".to_string(), json!("84"));
 
   let response = client.create_meta(
       "Pokemon",      // meta_type
       "Charizard",    // meta_id
-      metadata
+      metadata,
+      None            // policy (optional)
   ).await?;
 
   if response.success() {
       println!("Metadata created successfully!");
   }
 
-  println!("{:?}", response.data()); // Raw response
+  println!("{}", response.data()); // Raw response
   ```
 
 - Query Wallets associated with a Wallet Bundle:
 
   ```rust
   let wallets = client.query_wallets(
-      "c47e20f99df190e418f0cc5ddfa2791e9ccc4eb297cfa21bd317dc0f98313b1d", // bundle_hash
+      Some("c47e20f99df190e418f0cc5ddfa2791e9ccc4eb297cfa21bd317dc0f98313b1d"), // bundle_hash
       Some("FOO"), // token (optional)
-      true         // unspent
   ).await?;
 
-  println!("{:?}", wallets); // Raw response
+  println!("{:?}", wallets); // Vec<Wallet>
   ```
 
 - Declaring new **Wallets**:
@@ -149,32 +164,34 @@ This document will explain both ways.
       println!("Wallet created successfully!");
   }
 
-  println!("{:?}", response.data()); // Raw response
+  println!("{}", response.data()); // Raw response
   ```
 
 - Issuing new **Tokens**:
 
   ```rust
-  let token_meta = vec![
-      MetaItem::new("name", "CrazyCoin"), // Public name for the token
-      MetaItem::new("fungibility", "fungible"), // Fungibility style
-      MetaItem::new("supply", "limited"), // Supply style
-      MetaItem::new("decimals", "2"), // Decimal places
-  ];
+  use std::collections::HashMap;
+  use serde_json::json;
+
+  let mut token_meta = HashMap::new();
+  token_meta.insert("name".to_string(), json!("CrazyCoin"));
+  token_meta.insert("fungibility".to_string(), json!("fungible"));
+  token_meta.insert("supply".to_string(), json!("limited"));
+  token_meta.insert("decimals".to_string(), json!("2"));
 
   let response = client.create_token(
-      "CRZY",        // Token slug (ticker symbol)
-      100000000.0,   // Initial amount to issue
-      token_meta,
-      vec![],        // units (optional, for stackable tokens)
-      None           // batch_id (optional, for stackable tokens)
+      "CRZY",                  // Token slug (ticker symbol)
+      Some(100000000.0),       // Initial amount to issue
+      Some(token_meta),        // Token metadata
+      None,                    // batch_id (optional, for stackable tokens)
+      vec![],                  // units (optional, for stackable tokens)
   ).await?;
 
   if response.success() {
       println!("Token created successfully!");
   }
 
-  println!("{:?}", response.data()); // Raw response
+  println!("{}", response.data()); // Raw response
   ```
 
 - Transferring **Tokens** to other users:
@@ -182,24 +199,27 @@ This document will explain both ways.
   ```rust
   let response = client.transfer_token(
       "7bf38257401eb3b0f20cabf5e6cf3f14c76760386473b220d95fa1c38642b61d", // Recipient's bundle hash
-      "CRZY",    // Token slug
-      100.0,     // Amount
-      vec![],    // units (optional, for stackable tokens)
-      None       // batch_id (optional, for stackable tokens)
+      "CRZY",        // Token slug
+      Some(100.0),   // Amount
+      vec![],        // units (optional, for stackable tokens)
+      None,          // batch_id (optional, for stackable tokens)
+      None,          // source_wallet (optional, auto-resolved)
   ).await?;
 
   if response.success() {
       println!("Token transferred successfully!");
   }
 
-  println!("{:?}", response.data()); // Raw response
+  println!("{}", response.data()); // Raw response
   ```
 
 - Creating a new **Rule**:
 
   ```rust
+  use serde_json::json;
+
   let rule = vec![
-      // Rule definition
+      json!({"key": "amount", "operator": "<=", "value": "1000"})
   ];
 
   let response = client.create_rule(
@@ -213,42 +233,52 @@ This document will explain both ways.
       println!("Rule created successfully!");
   }
 
-  println!("{:?}", response.data()); // Raw response
+  println!("{}", response.data()); // Raw response
   ```
 
 - Querying **Atoms**:
 
   ```rust
-  let response = client.query_atom(
-      Some("molecular_hash_here"),
-      Some("bundle_hash_here"),
-      Some(Isotope::V),
-      Some("CRZY"),
-      true,  // latest
-      15,    // limit
-      1      // offset
+  let atoms = client.query_atom(
+      None,           // molecular_hash
+      Some("bundle-hash-here"), // bundle_hash
+      None,           // position
+      None,           // wallet_address
+      Some("V"),      // isotope (as string: "V", "C", "M", "T", etc.)
+      Some("CRZY"),   // token_slug
+      None,           // batch_id
+      None,           // meta_type
+      None,           // meta_id
   ).await?;
 
-  println!("{:?}", response.data()); // Raw response
+  println!("{:?}", atoms); // Vec<Value>
   ```
 
 - Working with **Buffer Tokens**:
 
   ```rust
+  use std::collections::HashMap;
+
   // Deposit to buffer
+  let mut trade_rates = HashMap::new();
+  trade_rates.insert("OTHER_TOKEN".to_string(), 0.5);
+
   let deposit_response = client.deposit_buffer_token(
       "CRZY",          // token_slug
       100.0,           // amount
-      vec![("OTHER_TOKEN".to_string(), 0.5)] // trade_rates
+      trade_rates,     // trade_rates
+      None,            // source_wallet (optional)
   ).await?;
 
   // Withdraw from buffer
   let withdraw_response = client.withdraw_buffer_token(
       "CRZY",  // token_slug
-      50.0     // amount
+      50.0,    // amount
+      None,    // source_wallet (optional)
+      None,    // signing_wallet (optional)
   ).await?;
 
-  println!("{:?} {:?}", deposit_response.data(), withdraw_response.data());
+  println!("{} {}", deposit_response.data(), withdraw_response.data());
   ```
 
 ## Advanced Usage: Working with Molecules
@@ -259,7 +289,7 @@ For more granular control, you can work directly with Molecules:
   ```rust
   use knishio_client::Molecule;
 
-  let mut molecule = Molecule::new(
+  let mut molecule = Molecule::with_params(
       Some("secret".to_string()),
       None,                    // bundle
       Some(source_wallet),     // source_wallet
@@ -273,14 +303,14 @@ For more granular control, you can work directly with Molecules:
   ```rust
   use knishio_client::mutation::MutationProposeMolecule;
 
-  let mutation = MutationProposeMolecule::new(molecule);
+  let mutation = MutationProposeMolecule::from_molecule(molecule);
   ```
 
 - Sign and check a Molecule:
   ```rust
   molecule.sign(None, false, true)?;
 
-  if molecule.check()? {
+  if molecule.check(None)? {
       println!("Molecule validation passed!");
   } else {
       println!("Molecule validation failed!");
@@ -289,7 +319,7 @@ For more granular control, you can work directly with Molecules:
 
 - Execute a custom Query or Mutation:
   ```rust
-  let response = client.execute_query(mutation).await?;
+  let response = client.execute_query(&mutation, None).await?;
 
   if response.success() {
       println!("Molecule executed successfully!");
@@ -326,7 +356,7 @@ This method involves individually building Atoms and Molecules, triggering the s
 
 4. Build your molecule with:
    ```rust
-   let mut molecule = Molecule::new(
+   let mut molecule = Molecule::with_params(
        Some("secret".to_string()),
        None,                    // bundle (optional)
        Some(source_wallet),     // source_wallet (optional)
@@ -395,7 +425,7 @@ This method involves individually building Atoms and Molecules, triggering the s
 
 7. Make sure everything checks out by verifying the molecule:
     ```rust
-    match molecule.check() {
+    match molecule.check(None) {
         Ok(true) => {
             println!("Molecule validation passed!");
         }
@@ -413,16 +443,16 @@ This method involves individually building Atoms and Molecules, triggering the s
     use knishio_client::mutation::MutationProposeMolecule;
 
     // Build our mutation object
-    let mutation = MutationProposeMolecule::new(molecule);
+    let mutation = MutationProposeMolecule::from_molecule(molecule);
 
     // Send the mutation to the node and get a response
-    let response = client.execute_mutation(mutation).await?;
+    let response = client.execute_query(&mutation, None).await?;
     ```
 
 9. Inspect the response...
     ```rust
     // For basic queries, we look at the data property:
-    println!("{:?}", response.data());
+    println!("{}", response.data());
 
     // For mutations, check if the molecule was accepted by the ledger:
     println!("{}", if response.success() { "Success" } else { "Failed" });

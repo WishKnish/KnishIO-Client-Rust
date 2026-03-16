@@ -149,6 +149,8 @@ pub struct ClientConfig {
     pub keep_alive_timeout: Duration,
     /// TCP keep-alive settings
     pub tcp_keepalive: Option<Duration>,
+    /// Accept invalid TLS certificates (for self-signed certs in dev)
+    pub insecure_tls: bool,
 }
 
 /// Subscription handle for managing active subscriptions
@@ -226,6 +228,7 @@ impl Default for ClientConfig {
             request_timeout: Duration::from_secs(60),
             keep_alive_timeout: Duration::from_secs(90),
             tcp_keepalive: Some(Duration::from_secs(60)),
+            insecure_tls: false,
         }
     }
 }
@@ -242,18 +245,22 @@ impl GraphQLClient {
         client_config: ClientConfig,
         retry_config: RetryConfig,
     ) -> Self {
-        let http_client = Client::builder()
+        let mut builder = Client::builder()
             .timeout(client_config.request_timeout)
             .connect_timeout(client_config.connect_timeout)
             .pool_idle_timeout(client_config.keep_alive_timeout)
             .pool_max_idle_per_host(client_config.max_connections)
             .tcp_keepalive(client_config.tcp_keepalive)
-            .user_agent(format!("KnishIO-Rust-SDK/{}", env!("CARGO_PKG_VERSION")))
-            .build()
-            .unwrap_or_else(|e| {
-                eprintln!("CRITICAL: Failed to create HTTP client: {}", e);
-                Client::new()
-            });
+            .user_agent(format!("KnishIO-Rust-SDK/{}", env!("CARGO_PKG_VERSION")));
+
+        if client_config.insecure_tls {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+
+        let http_client = builder.build().unwrap_or_else(|e| {
+            eprintln!("CRITICAL: Failed to create HTTP client: {}", e);
+            Client::new()
+        });
 
         GraphQLClient {
             server_uri: server_uri.into(),
