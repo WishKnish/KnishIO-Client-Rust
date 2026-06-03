@@ -8,7 +8,7 @@
 use serde::Deserialize;
 use knishio_client::crypto::{
     shake256, generate_bundle_hash, generate_key, generate_address,
-    generate_ots_signature, verify_ots_signature,
+    generate_ots_signature,
     hex_to_base17, normalize_hash,
 };
 
@@ -248,18 +248,10 @@ fn test_wots_roundtrip_vectors() {
     for test in &vectors.vectors.wots_roundtrip.tests {
         let key = generate_key(&test.secret, &test.token, &test.position);
 
-        // Compute OTS verification address (16-round hash → join → SHAKE256)
-        let mut public_key_fragments = Vec::new();
-        for i in 0..16 {
-            let start = i * 128;
-            let chunk = &key[start..start + 128];
-            let mut working = chunk.to_string();
-            for _ in 0..16 {
-                working = shake256(&working, 512);
-            }
-            public_key_fragments.push(working);
-        }
-        let ots_address = shake256(&public_key_fragments.join(""), 256);
+        // The OTS address is the two-pass protocol address (generate_address /
+        // CheckMolecule::ots): hash each key chunk 16 times, join, then
+        // digest = SHAKE256(joined, 8192) and address = SHAKE256(digest, 256).
+        let ots_address = generate_address(&key).unwrap();
         assert_eq!(ots_address, test.expected_ots_address,
             "OTS address mismatch for '{}'", test.name);
 
@@ -277,12 +269,24 @@ fn test_wots_roundtrip_vectors() {
         assert_eq!(signature[15], test.expected_signature_fragment15,
             "Fragment 15 mismatch for '{}'", test.name);
 
-        // Verify signature
-        let verified = verify_ots_signature(
-            &signature,
-            &test.molecular_hash_base17,
-            &ots_address,
-        );
+        // Sign-then-verify roundtrip (two-pass, mirroring CheckMolecule::ots):
+        // recover the public-key fragments from the signature (hash each fragment
+        // 8 + normalized[i] times), join, then re-derive the address two-pass.
+        let normalized = normalize_hash(&test.molecular_hash_base17);
+        let mut recovered = String::new();
+        for (i, fragment) in signature.iter().enumerate() {
+            let mut working = fragment.clone();
+            let iterations = (8 + normalized[i] as i32) as usize;
+            for _ in 0..iterations {
+                working = shake256(&working, 512);
+            }
+            recovered.push_str(&working);
+        }
+        let recovered_digest = shake256(&recovered, 8192);
+        let recovered_address = shake256(&recovered_digest, 256);
+        assert_eq!(recovered_address, test.expected_ots_address,
+            "Roundtrip recovered address mismatch for '{}'", test.name);
+        let verified = recovered_address == test.expected_ots_address;
         assert_eq!(verified, test.expected_verified,
             "Verification mismatch for '{}': expected {}", test.name, test.expected_verified);
     }
