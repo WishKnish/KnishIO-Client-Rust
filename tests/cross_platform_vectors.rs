@@ -421,10 +421,10 @@ fn test_wots_signature_cross_platform() {
 
 /// Verify that a signature generated from a known private key can be verified.
 ///
-/// Note: verify_ots_signature computes the verification address by joining public
-/// key fragments and hashing with shake256(joined, 256). This differs from
-/// generate_address() which uses incremental XOF SHAKE256. We compute the
-/// expected OTS address to match verify_ots_signature's internal logic.
+/// Note: verify_ots_signature reconstructs the verification address with the two-pass
+/// derivation (digest = SHAKE256(joined, 8192); address = SHAKE256(digest, 256)),
+/// matching generate_address() and CheckMolecule::ots. We compute the expected OTS
+/// address the same way.
 #[test]
 fn test_wots_signature_verification_roundtrip() {
     let vectors = load_vectors();
@@ -433,7 +433,9 @@ fn test_wots_signature_verification_roundtrip() {
         let fragments = generate_ots_signature(&test.private_key, &test.molecular_hash).unwrap();
 
         // Compute expected OTS verification address: hash each key chunk 16 times
-        // (matching sign iterations 8-n + verify iterations 8+n = 16), join, shake256
+        // (matching sign iterations 8-n + verify iterations 8+n = 16), then derive the
+        // address two-pass: digest = SHAKE256(joined, 8192); address = SHAKE256(digest, 256)
+        // (matches generate_address / CheckMolecule::ots).
         let mut public_key_fragments = Vec::new();
         for i in 0..16 {
             let start = i * 128;
@@ -444,7 +446,9 @@ fn test_wots_signature_verification_roundtrip() {
             }
             public_key_fragments.push(working);
         }
-        let ots_address = shake256(&public_key_fragments.join(""), 256);
+        let joined = public_key_fragments.join("");
+        let digest = shake256(&joined, 8192);
+        let ots_address = shake256(&digest, 256);
 
         let verified = verify_ots_signature(&fragments, &test.molecular_hash, &ots_address);
         assert!(verified,

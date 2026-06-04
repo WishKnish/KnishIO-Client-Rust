@@ -238,10 +238,11 @@ fn patent_tv6_molecular_hash() {
 /// Uses key from TV1, molecular hash from TV6.
 /// Verifies fragment 0 matches patent value.
 ///
-/// NOTE: `verify_ots_signature()` uses a single-stage SHAKE256(joined, 256) while
-/// `generate_address()` uses two-stage: streaming XOF(8192) → hex → SHAKE256(hex, 256).
-/// These produce different "recovered" addresses by design. The patent's TV7 verifies
-/// the signature fragments themselves, not the round-trip address recovery.
+/// NOTE: `verify_ots_signature()` now reconstructs the signing address with the same
+/// two-stage derivation as `generate_address()` / `CheckMolecule::ots`
+/// (digest = SHAKE256(joined, 8192); address = SHAKE256(digest, 256)), so the
+/// verify-recovered address equals the wallet address. TV7 also checks the signature
+/// fragments themselves against the patent value.
 #[test]
 fn patent_tv7_wots_signature() {
     use knishio_client::crypto::{shake256, normalize_hash};
@@ -276,7 +277,7 @@ fn patent_tv7_wots_signature() {
     }
 
     // Compute the "recovered address" using verify_ots_signature's path
-    // (single-stage: join all public key fragments → shake256)
+    // (two-stage: join public fragments → SHAKE256(joined, 8192) → SHAKE256(digest, 256))
     let normalized = normalize_hash(molecular_hash);
     let mut public_key_fragments = Vec::new();
     let key_chunks: Vec<&str> = (0..16).map(|i| &key[i*128..(i+1)*128]).collect();
@@ -292,16 +293,19 @@ fn patent_tv7_wots_signature() {
         public_key_fragments.push(working);
     }
     let joined = public_key_fragments.join("");
-    let verify_recovered_address = shake256(&joined, 256);
+    let digest = shake256(&joined, 8192);
+    let verify_recovered_address = shake256(&digest, 256);
 
     println!("TV7 Address from generate_address():   {}", address);
     println!("TV7 Address from verify round-trip:     {}", verify_recovered_address);
     println!("TV7 Addresses match:                   {}", address == verify_recovered_address);
 
-    // NOTE: The two address computation paths use different intermediate hash sizes,
-    // so they produce different results. The patent should document the verify-recovered
-    // address separately from the generate_address wallet address.
-    // The verify path address is what verify_ots_signature actually compares against.
+    // The verify-recovered address now uses the same two-pass derivation as
+    // generate_address / CheckMolecule::ots, so they must be equal.
+    assert_eq!(
+        verify_recovered_address, address,
+        "TV7: verify-path recovered address must equal the generate_address wallet address (two-pass)"
+    );
     let valid = verify_ots_signature(&signature, molecular_hash, &verify_recovered_address);
     println!("TV7 Signature valid (verify path):     {}", valid);
     assert!(valid, "TV7: Signature must verify against verify-path recovered address");

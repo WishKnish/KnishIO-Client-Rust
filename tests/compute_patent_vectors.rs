@@ -246,10 +246,11 @@ fn compute_tv7_wots_signature() {
     assert_eq!(signature.len(), 16, "Must have 16 OTS fragments");
     assert_eq!(signature[0].len(), 128, "Each fragment must be 128 hex chars");
 
-    // Verify the signature recovers the correct address
+    // Verify the signature recovers the correct address (two-pass; matches generate_address)
     use knishio_client::crypto::verify_ots_signature;
     let verified = verify_ots_signature(&signature, &base17_hash, &address);
     println!("Signature verification against TV1 address: {}", verified);
+    assert!(verified, "verify_ots_signature must recover the TV1 wallet address (two-pass)");
 }
 
 /// Print all test vectors in a consolidated summary
@@ -338,6 +339,7 @@ fn compute_all_vectors_summary() {
 
     let verified = knishio_client::crypto::verify_ots_signature(&sig, &base17_hash, &a1);
     println!("  verified:     {}", verified);
+    assert!(verified, "verify_ots_signature must recover the TV1 wallet address (two-pass)");
 
     println!("\n============================================================");
 }

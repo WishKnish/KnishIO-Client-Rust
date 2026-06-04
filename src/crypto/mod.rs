@@ -989,6 +989,9 @@ pub fn generate_ots_signature(private_key: &str, molecular_hash: &str) -> Result
 /// Verify complete WOTS+ signature for a molecular hash
 ///
 /// Implements full OTS signature verification according to SDK Implementation Guide.
+/// The signing address is reconstructed with the two-pass protocol derivation
+/// (digest = SHAKE256(joined_public_fragments, 8192); address = SHAKE256(digest, 256)),
+/// matching `generate_address` and `CheckMolecule::ots`.
 ///
 /// # Arguments
 ///
@@ -1026,10 +1029,13 @@ pub fn verify_ots_signature(
         public_key_fragments.push(public_key_fragment);
     }
     
-    // Step 3: Hash all public key fragments together to get the signing address
-    let public_key_digest = public_key_fragments.join("");
-    let signing_address = shake256(&public_key_digest, 256); // 256 bits = 64 hex chars
-    
+    // Step 3: Hash all public key fragments together, then derive the address
+    // (two-pass, matching generate_address and CheckMolecule::ots):
+    // digest = SHAKE256(joined, 8192); address = SHAKE256(digest, 256).
+    let public_key_joined = public_key_fragments.join("");
+    let digest = shake256(&public_key_joined, 8192);
+    let signing_address = shake256(&digest, 256); // 256 bits = 64 hex chars
+
     // Step 4: Compare with expected address
     signing_address == expected_address
 }
@@ -1428,9 +1434,11 @@ mod tests {
             public_key_fragments.push(working_chunk);
         }
         
-        let public_key_digest = public_key_fragments.join("");
-        let expected_address = shake256(&public_key_digest, 256);
-        
+        // Two-pass address derivation (matches verify_ots_signature / generate_address)
+        let public_key_joined = public_key_fragments.join("");
+        let digest = shake256(&public_key_joined, 8192);
+        let expected_address = shake256(&digest, 256);
+
         // Verify signature
         let is_valid = verify_ots_signature(&ots_signature, &molecular_hash, &expected_address);
         assert!(is_valid);
@@ -1471,9 +1479,11 @@ mod tests {
             expected_public_key_fragments.push(working_chunk);
         }
         
-        let public_key_digest = expected_public_key_fragments.join("");
-        let expected_address = shake256(&public_key_digest, 256);
-        
+        // Two-pass address derivation (matches verify_ots_signature / generate_address)
+        let public_key_joined = expected_public_key_fragments.join("");
+        let digest = shake256(&public_key_joined, 8192);
+        let expected_address = shake256(&digest, 256);
+
         // Verify the signature
         let is_valid = verify_ots_signature(&ots_signature, &molecular_hash, &expected_address);
         assert!(is_valid, "OTS signature round-trip verification should pass");
@@ -1562,7 +1572,8 @@ mod tests {
         let key = generate_key(secret, "TEST", position);
         let mol_hash = hex_to_base17(&shake256("test-molecule-data", 256)).unwrap();
 
-        // Compute OTS verification address (hash each chunk 16x, join, shake256)
+        // Compute OTS verification address (hash each chunk 16x, join, then two-pass:
+        // digest = SHAKE256(joined, 8192); address = SHAKE256(digest, 256))
         let mut pub_fragments = Vec::new();
         for i in 0..16 {
             let start = i * 128;
@@ -1573,7 +1584,9 @@ mod tests {
             }
             pub_fragments.push(working);
         }
-        let address = shake256(&pub_fragments.join(""), 256);
+        let joined = pub_fragments.join("");
+        let digest = shake256(&joined, 8192);
+        let address = shake256(&digest, 256);
 
         // Sign
         let sig = generate_ots_signature(&key, &mol_hash).unwrap();
