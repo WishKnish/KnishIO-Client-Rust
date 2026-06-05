@@ -323,7 +323,8 @@ mod tests {
         let data = vec![0x48, 0x65, 0x6c, 0x6c, 0x6f];
         let options = HexOptions::new().with_grouping(2);
         let hex = Hex::to_hex(&data, Some(options));
-        assert_eq!(hex, "48 65 6c 6c 6f");
+        // grouping = 2 BYTES per group, space between groups (matches JS Hex.js)
+        assert_eq!(hex, "4865 6c6c 6f");
     }
 
     #[test]
@@ -333,7 +334,8 @@ mod tests {
             .with_grouping(2)
             .with_rowlength(2);
         let hex = Hex::to_hex(&data, Some(options));
-        assert_eq!(hex, "48 65\n6c 6c\n6f 20\n57 6f");
+        // grouping = 2 bytes/group, rowlength = 2 groups/row (matches JS Hex.js)
+        assert_eq!(hex, "4865 6c6c\n6f20 576f");
     }
 
     #[test]

@@ -846,15 +846,30 @@ mod tests {
     #[test]
     fn test_json_serialization() {
         let mut atom = Atom::new("pos", "addr", Isotope::V, "TEST");
-        atom.ots_fragment = Some("should_be_excluded".to_string());
-        
+        atom.ots_fragment = Some("sig_fragment".to_string());
+
+        // Default toJSON() INCLUDES otsFragment: the wire molecule carries the
+        // signature so the validator can verify it (matches the JS SDK wire shape;
+        // AtomJsonOptions::default().include_ots_fragments == true).
         let json = atom.toJSON().unwrap();
-        
-        // Should contain regular properties but exclude otsFragment
         assert!(json.contains("\"position\":\"pos\""));
         assert!(json.contains("\"isotope\":\"V\""));
-        assert!(!json.contains("otsFragment"));
-        assert!(!json.contains("should_be_excluded"));
+        assert!(json.contains("otsFragment"));
+        assert!(json.contains("sig_fragment"));
+
+        // The hash-normalization path (include_ots_fragments = false) excludes it.
+        let no_ots = serde_json::to_string(
+            &atom
+                .to_json(crate::types::AtomJsonOptions {
+                    include_ots_fragments: false,
+                    validate_fields: false,
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(no_ots.contains("\"position\":\"pos\""));
+        assert!(!no_ots.contains("otsFragment"));
+        assert!(!no_ots.contains("sig_fragment"));
     }
     
     #[test]

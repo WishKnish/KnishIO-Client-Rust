@@ -20,12 +20,15 @@ pub struct Meta {
 }
 
 impl Meta {
-    /// Create a new Meta with a single key-value pair
+    /// Create a new Meta representing a single `{ key, value }` pair.
     ///
-    /// Equivalent to JavaScript Meta with dynamic property assignment
+    /// Mirrors the JS rule-callback meta shape (`{ "key": ..., "value": ... }`),
+    /// so a programmatically-built Meta matches one parsed via `from_object`
+    /// and is readable through `key()` / `value()`.
     pub fn new(key: String, value: String) -> Self {
         let mut properties = HashMap::new();
-        properties.insert(key, serde_json::Value::String(value));
+        properties.insert("key".to_string(), serde_json::Value::String(key));
+        properties.insert("value".to_string(), serde_json::Value::String(value));
         Self { properties }
     }
 
@@ -93,18 +96,21 @@ impl Meta {
         serde_json::to_value(&self.properties).unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
     }
 
-    /// Legacy getter for backward compatibility
-    /// 
-    /// Returns the value of the first property if any exists
+    /// Returns the value of the `"key"` field of a `{ key, value }` rule-callback
+    /// meta (the canonical JS shape). Deterministic — reads the named field, not
+    /// an arbitrary first entry.
     pub fn key(&self) -> Option<String> {
-        self.properties.keys().next().cloned()
+        self.properties
+            .get("key")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
     }
 
-    /// Legacy getter for backward compatibility
-    ///
-    /// Returns the value of the first property if any exists
+    /// Returns the value of the `"value"` field of a `{ key, value }`
+    /// rule-callback meta (the canonical JS shape).
     pub fn value(&self) -> Option<String> {
-        self.properties.values().next()
+        self.properties
+            .get("value")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }

@@ -868,7 +868,8 @@ mod tests {
     #[test]
     fn test_key_generation() {
         let key = Wallet::generate_key("0123456789abcdef", "TEST", "position123");
-        assert_eq!(key.len(), 4096);
+        // JS generateKey returns getHash('HEX', { outputLen: 8192 }) = 2048 hex chars.
+        assert_eq!(key.len(), 2048);
         assert!(key.chars().all(|c| c.is_ascii_hexdigit()));
     }
 

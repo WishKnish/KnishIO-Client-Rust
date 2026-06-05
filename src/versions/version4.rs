@@ -341,7 +341,8 @@ mod tests {
         assert_eq!(atom.wallet_address, "addr2");
         assert_eq!(atom.isotope, Isotope::M);
         assert_eq!(atom.token, "TOKEN2");
-        assert_eq!(atom.value, Some("200.0".to_string()));
+        // f64 200.0 -> "200" via to_string(), matching JS `String(200)` (Atom.js)
+        assert_eq!(atom.value, Some("200".to_string()));
         assert_eq!(atom.batch_id, None);
         assert_eq!(atom.meta_type, None);
         assert_eq!(atom.meta_id, None);

@@ -30,8 +30,8 @@ impl Decimal {
     /// ```rust
     /// use knishio_client::utils::Decimal;
     ///
-    /// let result = Decimal::val(0.000000000000000001); // Very small number
-    /// assert_eq!(result, 0.0); // Below precision threshold
+    /// let result = Decimal::val(0.0000000000000000001); // 1e-19, below threshold
+    /// assert_eq!(result, 0.0); // |v * 1e18| < 1.0 → normalized to 0
     ///
     /// let result = Decimal::val(1.5);
     /// assert_eq!(result, 1.5); // Above threshold, returned as-is
@@ -102,9 +102,14 @@ impl Decimal {
     /// use knishio_client::utils::Decimal;
     ///
     /// assert!(Decimal::equal(1.0, 1.0));
-    /// assert!(Decimal::equal(0.1 + 0.2, 0.3)); // Handles floating-point precision
+    /// assert!(Decimal::equal(0.25 + 0.25, 0.5)); // exact in f64
     /// assert!(!Decimal::equal(1.0, 2.0));
     /// ```
+    ///
+    /// Note: comparison scales by 1e18 (the SQL decimal precision), mirroring
+    /// the JS SDK `Decimal.js` byte-for-byte. Since 1e18 > 2^53, values that are
+    /// not exactly representable in f64 carry noise — e.g. `equal(0.1 + 0.2, 0.3)`
+    /// is `false` in BOTH SDKs (parity), not a bug.
     pub fn equal(value1: f64, value2: f64) -> bool {
         Self::cmp(value1, value2, false) == 0
     }
@@ -248,9 +253,12 @@ mod tests {
 
     #[test]
     fn test_val() {
-        // Very small values should become 0
-        assert_eq!(Decimal::val(0.000000000000000001), 0.0);
-        
+        // Below the 1e-18 threshold (|v * 1e18| < 1.0) is normalized to 0
+        assert_eq!(Decimal::val(0.0000000000000000001), 0.0); // 1e-19
+        // 1e-18 is the boundary itself (|v * 1e18| == 1.0, NOT < 1.0) → unchanged,
+        // matching JS Decimal.val (Math.abs(1e-18 * 1e18) < 1 is false).
+        assert_eq!(Decimal::val(0.000000000000000001), 0.000000000000000001);
+
         // Normal values should pass through
         assert_eq!(Decimal::val(1.5), 1.5);
         assert_eq!(Decimal::val(-2.0), -2.0);
@@ -258,13 +266,17 @@ mod tests {
 
     #[test]
     fn test_cmp() {
-        // Equal values
+        // Equal values (exact in f64)
         assert_eq!(Decimal::cmp(1.0, 1.0, false), 0);
-        assert_eq!(Decimal::cmp(0.1 + 0.2, 0.3, false), 0); // Floating-point precision
-        
+        assert_eq!(Decimal::cmp(0.25 + 0.25, 0.5, false), 0);
+
+        // 0.1 + 0.2 != 0.3 at the 1e18 comparison scale — matches JS Decimal.js
+        // byte-for-byte (1e18 > 2^53, so f64 noise survives). Parity, not a bug.
+        assert_eq!(Decimal::cmp(0.1 + 0.2, 0.3, false), 1);
+
         // Greater than
         assert_eq!(Decimal::cmp(2.0, 1.0, false), 1);
-        
+
         // Less than
         assert_eq!(Decimal::cmp(1.0, 2.0, false), -1);
     }
@@ -272,7 +284,9 @@ mod tests {
     #[test]
     fn test_equal() {
         assert!(Decimal::equal(1.0, 1.0));
-        assert!(Decimal::equal(0.1 + 0.2, 0.3)); // Should handle floating-point precision
+        assert!(Decimal::equal(0.25 + 0.25, 0.5)); // exact in f64
+        // Mirrors JS Decimal.js: 0.1 + 0.2 is NOT equal to 0.3 at 1e18 scale.
+        assert!(!Decimal::equal(0.1 + 0.2, 0.3));
         assert!(!Decimal::equal(1.0, 2.0));
     }
 
@@ -299,7 +313,7 @@ mod tests {
     #[test]
     fn test_is_zero() {
         assert!(Decimal::is_zero(0.0));
-        assert!(Decimal::is_zero(0.000000000000000001)); // Below precision threshold
+        assert!(Decimal::is_zero(0.0000000000000000001)); // 1e-19, below the 1e-18 threshold
         assert!(!Decimal::is_zero(1.0));
     }
 

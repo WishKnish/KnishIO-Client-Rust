@@ -393,8 +393,10 @@ pub fn is_numeric(input: &str) -> bool {
     if input.trim().is_empty() {
         return false;
     }
-    
-    input.trim().parse::<f64>().is_ok()
+
+    // Match JS isNumeric: `!isNaN(str)` rejects "NaN" (Rust's f64 parser would
+    // otherwise accept it). JS accepts "Infinity", so we only exclude NaN.
+    input.trim().parse::<f64>().map(|n| !n.is_nan()).unwrap_or(false)
 }
 
 /// Trim whitespace from a string (convenience function)

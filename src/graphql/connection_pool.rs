@@ -217,13 +217,22 @@ impl ConnectionPool {
     }
     
     /// Start the background cleanup task
+    ///
+    /// `tokio::spawn` requires a running reactor, so guard on the current
+    /// handle: in production the pool is first touched from inside the async
+    /// GraphQL paths (a runtime is present, cleanup starts); in a sync context
+    /// (e.g. a plain `#[test]` touching `global_pool()`) we skip the spawn
+    /// instead of panicking with "no reactor running".
     fn start_cleanup_task(&self) {
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
         let pool = self.clone();
         let cleanup_interval = self.config.cleanup_interval;
-        
+
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(cleanup_interval);
-            
+
             loop {
                 interval.tick().await;
                 pool.cleanup().await;

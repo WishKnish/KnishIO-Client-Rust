@@ -471,12 +471,12 @@ pub fn reset_performance_stats() {
 
 /// Warm up the SIMD subsystem and buffer pools
 pub fn warm_up_simd() {
-    // Pre-warm the buffer pools
-    let _pool = BUFFER_POOL.lock().expect("Buffer pool poisoned");
-    
-    // Test SIMD functionality
+    // Exercise the SIMD path; this also lazily initializes and warms BUFFER_POOL
+    // via PooledBuffer::new. Do NOT hold BUFFER_POOL.lock() across this call:
+    // PooledBuffer::new re-locks the same mutex, and std::sync::Mutex is
+    // non-reentrant, so holding it here self-deadlocks (hung cargo test --lib).
     let _ = simd_shake256_optimized("warmup", 256);
-    
+
     // Reset performance stats after warmup
     reset_performance_stats();
 }
