@@ -231,11 +231,12 @@ pub fn generate_secret_with_params(seed: Option<&str>, length: usize) -> String 
 ///
 /// A 2048-character hexadecimal secret string
 pub fn generate_secret(seed: &str) -> String {
-    // Use SIMD-optimized secret generation when available
+    // Canonical secret = 2048 hex chars (1024-byte SHAKE256 squeeze), matching JS/TS/
+    // PHP/Python/Kotlin. `length` here is the hex-char count → length/2 bytes squeezed.
     if *SIMD_ENABLED {
-        simd::simd_generate_secret_optimized(seed, 1024)  // Match JavaScript test compatibility
+        simd::simd_generate_secret_optimized(seed, 2048)
     } else {
-        generate_secret_with_params(Some(seed), 1024)     // 1024 hex chars for JavaScript compatibility
+        generate_secret_with_params(Some(seed), 2048)
     }
 }
 
@@ -1152,7 +1153,7 @@ mod tests {
     #[test]
     fn test_generate_secret() {
         let secret = generate_secret("test-seed");
-        assert_eq!(secret.len(), 1024);  // Match JS SDK: outputLen (2048*2=4096 bits) = 1024 hex chars
+        assert_eq!(secret.len(), 2048);  // canonical 2048 hex chars (1024-byte SHAKE256 squeeze), all SDKs
         assert!(secret.chars().all(|c| c.is_ascii_hexdigit()));
     }
     

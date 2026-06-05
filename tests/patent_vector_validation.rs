@@ -8,7 +8,7 @@
 use serde::Deserialize;
 use knishio_client::crypto::{
     shake256, generate_bundle_hash, generate_key, generate_address,
-    generate_ots_signature,
+    generate_ots_signature, generate_secret,
     hex_to_base17, normalize_hash,
 };
 
@@ -21,6 +21,7 @@ struct PatentVectors {
 
 #[derive(Deserialize)]
 struct Vectors {
+    generate_secret: Section<GenerateSecretTest>,
     continuid_chain: Section<ContinuIdTest>,
     base17_enumeration: Section<Base17Test>,
     multi_isotope_molecule: Section<MultiIsotopeTest>,
@@ -31,6 +32,17 @@ struct Vectors {
 #[derive(Deserialize)]
 struct Section<T> {
     tests: Vec<T>,
+}
+
+// ── generateSecret (cross-SDK parity, Batch AO) ─────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GenerateSecretTest {
+    name: String,
+    seed: String,
+    length: usize,
+    expected_secret: String,
 }
 
 // ── ContinuID Chain ─────────────────────────────────────────────────────
@@ -121,6 +133,20 @@ fn load_patent_vectors() -> PatentVectors {
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
+
+/// Cross-SDK parity (Batch AO): generate_secret(seed) must produce the canonical
+/// 2048-hex secret, byte-identical to JS/TS/PHP/Python/Kotlin.
+#[test]
+fn test_generate_secret_vectors() {
+    let vectors = load_patent_vectors();
+    for test in &vectors.vectors.generate_secret.tests {
+        let secret = generate_secret(&test.seed);
+        assert_eq!(secret.len(), test.length,
+            "generate_secret('{}') length mismatch", test.seed);
+        assert_eq!(secret, test.expected_secret,
+            "generate_secret('{}') value mismatch (cross-SDK parity)", test.seed);
+    }
+}
 
 /// Patent Claims 5, 12-14: ContinuID identity relay chain
 #[test]
