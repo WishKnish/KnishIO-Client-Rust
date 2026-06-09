@@ -1033,7 +1033,9 @@ impl Molecule {
                     None,
                 )?;
 
-                // Remove tokens from source
+                // Remove tokens from source (debit the FULL balance for UTXO
+                // conservation, matching the JS/PHP/TS reference; the change is
+                // routed to the remainder atom below so V+B atoms sum to 0).
                 let source_params = AtomCreateParams {
                     isotope: Isotope::V,
                     wallet_info: Some(WalletInfo {
@@ -1042,10 +1044,12 @@ impl Molecule {
                         token: source_token.clone(),
                         batch_id: source_batch_id.clone(),
                     }),
-                    value: Some(-amount),
+                    value: None, // set below with integer-string precision
                     ..Default::default()
                 };
-                atoms.push(Atom::create(source_params));
+                let mut source_atom = Atom::create(source_params);
+                source_atom.value = Some((-source_balance_i128).to_string());
+                atoms.push(source_atom);
 
                 // Add tokens to buffer wallet
                 let buffer_params = AtomCreateParams {

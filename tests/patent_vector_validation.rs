@@ -27,6 +27,7 @@ struct Vectors {
     multi_isotope_molecule: Section<MultiIsotopeTest>,
     bigint_carry_edge: Section<BigIntEdgeTest>,
     wots_roundtrip: Section<WotsRoundtripTest>,
+    buffer_deposit_conservation: Section<BufferDepositTest>,
 }
 
 #[derive(Deserialize)]
@@ -121,6 +122,20 @@ struct WotsRoundtripTest {
     expected_verified: bool,
 }
 
+// ── Buffer deposit conservation (cross-SDK parity, Batch BF) ────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BufferDepositTest {
+    name: String,
+    source_balance: i64,
+    amount: f64,
+    expected_source_value: String,
+    expected_buffer_value: String,
+    expected_remainder_value: String,
+    expected_sum: String,
+}
+
 // ── Load canonical vectors ──────────────────────────────────────────────
 
 const PATENT_VECTORS_JSON: &str = include_str!(
@@ -145,6 +160,70 @@ fn test_generate_secret_vectors() {
             "generate_secret('{}') length mismatch", test.seed);
         assert_eq!(secret, test.expected_secret,
             "generate_secret('{}') value mismatch (cross-SDK parity)", test.seed);
+    }
+}
+
+/// Cross-SDK parity (Batch BF): init_deposit_buffer must debit the FULL source
+/// balance so a partial buffer deposit still conserves (Σ V+B = 0), matching the
+/// JS/PHP/TS reference. (Pre-fix Rust debited only -amount → source = -amount and
+/// Σ = balance-amount ≠ 0, which the validator's b_isotope check rejects.)
+#[test]
+fn test_buffer_deposit_conservation_vectors() {
+    use knishio_client::{Molecule, Wallet};
+    use std::collections::HashMap;
+
+    let vectors = load_patent_vectors();
+    let secret = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+    let bundle = generate_bundle_hash(secret);
+    let position = "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b";
+
+    for test in &vectors.vectors.buffer_deposit_conservation.tests {
+        let mut source = Wallet::create(Some(secret), None, "BUFTOK", Some(position), None)
+            .expect("create buffer source wallet");
+        source.balance = test.source_balance.to_string();
+
+        let mut mol = Molecule::with_params(
+            Some(secret.to_string()),
+            Some(bundle.clone()),
+            Some(source),
+            None, // remainder auto-derived from source (the change-routing path)
+            Some("buftest".to_string()),
+            None,
+        );
+        mol.init_deposit_buffer(test.amount, HashMap::new())
+            .expect("init_deposit_buffer");
+
+        // Inspect the wire form (isotope + value as strings), like BenchCtx does.
+        let json = serde_json::to_value(&mol).expect("serialize buffer molecule");
+        let atoms = json["atoms"].as_array().expect("atoms array");
+
+        let mut sum: i128 = 0;
+        let mut v_values: Vec<String> = Vec::new();
+        let mut b_value: Option<String> = None;
+        for a in atoms {
+            let iso = a["isotope"].as_str().unwrap_or("");
+            if iso == "V" || iso == "B" {
+                if let Some(v) = a["value"].as_str() {
+                    sum += v.parse::<i128>()
+                        .unwrap_or_else(|_| panic!("[{}] unparseable atom value '{}'", test.name, v));
+                    if iso == "V" {
+                        v_values.push(v.to_string());
+                    } else {
+                        b_value = Some(v.to_string());
+                    }
+                }
+            }
+        }
+
+        assert_eq!(sum.to_string(), test.expected_sum,
+            "[{}] V+B conservation sum must be 0", test.name);
+        // Emit order: source V (full-balance debit), buffer B (+amount), remainder V (+change).
+        assert_eq!(v_values.first().map(String::as_str), Some(test.expected_source_value.as_str()),
+            "[{}] source V-atom must debit the full balance", test.name);
+        assert_eq!(b_value.as_deref(), Some(test.expected_buffer_value.as_str()),
+            "[{}] buffer B-atom value", test.name);
+        assert_eq!(v_values.get(1).map(String::as_str), Some(test.expected_remainder_value.as_str()),
+            "[{}] remainder V-atom value", test.name);
     }
 }
 
