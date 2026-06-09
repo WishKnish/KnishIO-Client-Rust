@@ -195,7 +195,8 @@ struct BoundaryCase {
 
 // ── Load vectors at compile time ────────────────────────────────────────
 
-const VECTORS_JSON: &str = include_str!("fixtures/cross-platform-test-vectors.json");
+// Shared cross-SDK master (same source as patent_vector_validation.rs → ../../../sdks/shared-test-results/)
+const VECTORS_JSON: &str = include_str!("../../../sdks/shared-test-results/cross-platform-test-vectors.json");
 
 fn load_vectors() -> TestVectors {
     serde_json::from_str(VECTORS_JSON)
