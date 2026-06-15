@@ -141,6 +141,10 @@ struct TestSuite {
     complex_transfer: MoleculeTestResult,
     #[serde(rename = "tokenCreation")]
     token_creation: MoleculeTestResult,
+    #[serde(rename = "walletCreation")]
+    wallet_creation: MoleculeTestResult,
+    #[serde(rename = "shadowWalletClaim")]
+    shadow_wallet_claim: MoleculeTestResult,
     mlkem768: MLKEMTestResult,
     #[serde(rename = "negativeCases")]
     negative_cases: NegativeTestResult,
@@ -155,6 +159,10 @@ struct MoleculeResults {
     complex_transfer: String,
     #[serde(rename = "tokenCreation")]
     token_creation: String,
+    #[serde(rename = "walletCreation")]
+    wallet_creation: String,
+    #[serde(rename = "shadowWalletClaim")]
+    shadow_wallet_claim: String,
     mlkem768: String,
 }
 
@@ -238,6 +246,24 @@ const DEFAULT_CONFIG_JSON: &str = r#"{
       "sourcePosition": "0123456789abcdeffedcba9876543210fedcba9876543210fedcba9876543210",
       "recipientPosition": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
       "expectedMolecularHash": "01b040543ce92c0a9c68gbe3b44f3b8g10422g2fbb97ab24432ac72b3544e6bb"
+    },
+    "walletCreation": {
+      "sourceSeed": "TESTSEED",
+      "newWalletSeed": "NEWWALLETSEED",
+      "sourceToken": "USER",
+      "newToken": "TESTTOKEN",
+      "sourcePosition": "0123456789abcdeffedcba9876543210fedcba9876543210fedcba9876543210",
+      "newWalletPosition": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      "expectedMolecularHash": "03aebg2baffge2019ba0eage991bfa284a83435e7194db7gg6g9f3e399a589c8"
+    },
+    "shadowWalletClaim": {
+      "sourceSeed": "TESTSEED",
+      "claimSeed": "CLAIMSEED",
+      "sourceToken": "USER",
+      "claimToken": "TESTTOKEN",
+      "sourcePosition": "0123456789abcdeffedcba9876543210fedcba9876543210fedcba9876543210",
+      "claimPosition": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      "expectedMolecularHash": "01078e4a98c415131122559a4681b9d5ad6a49328dg9gbagc573gdef776ege0f"
     }
   }
 }"#;
@@ -400,6 +426,20 @@ impl SelfTestRunner {
                     has_remainder: None,
                     validation_error: Some("null".to_string()),
                 },
+                wallet_creation: MoleculeTestResult {
+                    passed: false,
+                    molecular_hash: String::new(),
+                    atom_count: 0,
+                    has_remainder: None,
+                    validation_error: Some("null".to_string()),
+                },
+                shadow_wallet_claim: MoleculeTestResult {
+                    passed: false,
+                    molecular_hash: String::new(),
+                    atom_count: 0,
+                    has_remainder: None,
+                    validation_error: Some("null".to_string()),
+                },
                 mlkem768: MLKEMTestResult {
                     passed: false,
                     public_key_generated: false,
@@ -419,6 +459,8 @@ impl SelfTestRunner {
                 simple_transfer: String::new(),
                 complex_transfer: String::new(),
                 token_creation: String::new(),
+                wallet_creation: String::new(),
+                shadow_wallet_claim: String::new(),
                 mlkem768: String::new(),
             },
             cross_sdk_compatible: true,
@@ -550,6 +592,8 @@ impl SelfTestRunner {
         let simple_result = self.test_simple_transfer().await?;
         let complex_result = self.test_complex_transfer().await?;
         let token_creation_result = self.test_token_creation().await?;
+        let wallet_creation_result = self.test_wallet_creation().await?;
+        let shadow_wallet_claim_result = self.test_shadow_wallet_claim().await?;
         let mlkem_result = self.test_mlkem768().await?;
         let negative_result = self.test_negative_cases().await?;
         let _cross_sdk_result = self.test_cross_sdk_validation().await?;
@@ -561,8 +605,8 @@ impl SelfTestRunner {
         self.display_summary();
 
         // Exit with appropriate code
-        let total_tests = 7;
-        let passed_tests = [crypto_result, meta_result, simple_result, complex_result, token_creation_result, mlkem_result, negative_result]
+        let total_tests = 9;
+        let passed_tests = [crypto_result, meta_result, simple_result, complex_result, token_creation_result, wallet_creation_result, shadow_wallet_claim_result, mlkem_result, negative_result]
             .iter()
             .filter(|&&x| x)
             .count();
@@ -1016,6 +1060,138 @@ impl SelfTestRunner {
         self.results.molecules.token_creation = molecule_json;
 
         self.results.tests.token_creation = MoleculeTestResult {
+            passed: is_valid,
+            molecular_hash: molecule.molecular_hash.unwrap_or_default(),
+            atom_count: molecule.atoms.len(),
+            has_remainder: None,
+            validation_error: validation_error.or_else(|| Some("null".to_string())),
+        };
+
+        Ok(is_valid)
+    }
+
+    async fn test_wallet_creation(&mut self) -> Result<bool> {
+        Logger::message("\nC2. Wallet Creation Test", colors::BLUE);
+
+        let source_seed = self.config.get_string("tests.walletCreation.sourceSeed").unwrap_or_else(|| "TESTSEED".to_string());
+        let new_wallet_seed = self.config.get_string("tests.walletCreation.newWalletSeed").unwrap_or_else(|| "NEWWALLETSEED".to_string());
+        let source_token = self.config.get_string("tests.walletCreation.sourceToken").unwrap_or_else(|| "USER".to_string());
+        let new_token = self.config.get_string("tests.walletCreation.newToken").unwrap_or_else(|| "TESTTOKEN".to_string());
+        let source_position = self.config.get_string("tests.walletCreation.sourcePosition").unwrap_or_default();
+        let new_wallet_position = self.config.get_string("tests.walletCreation.newWalletPosition").unwrap_or_default();
+
+        let source_secret = generate_secret(&source_seed);
+        let source_wallet = Wallet::new(
+            Some(&source_secret), None, Some(&source_token), None, Some(&source_position), None, Some("BASE64"),
+        ).context("Failed to create source wallet")?;
+        Logger::test("Source wallet creation", true, None);
+
+        let new_secret = generate_secret(&new_wallet_seed);
+        let new_wallet = Wallet::new(
+            Some(&new_secret), None, Some(&new_token), None, Some(&new_wallet_position), None, Some("BASE64"),
+        ).context("Failed to create new wallet")?;
+        Logger::test("New wallet creation", true, None);
+
+        let remainder_wallet = create_fixed_remainder_wallet(&source_secret, &source_token)?;
+        Logger::test("Remainder wallet creation", true, None);
+
+        let source_wallet_for_validation = source_wallet.clone();
+        let mut molecule = Molecule::with_params(
+            Some(source_secret.clone()), None, Some(source_wallet), Some(remainder_wallet), None, None,
+        );
+
+        molecule.init_wallet_creation(&new_wallet, vec![])
+            .context("Failed to initialize wallet creation")?;
+        Logger::test("Wallet creation initialization", true, None);
+
+        set_fixed_timestamps(&mut molecule);
+
+        let signature_result = molecule.sign(molecule.bundle.clone(), false, true);
+        let signed = signature_result.is_ok();
+        Logger::test("Molecule signing", signed, None);
+
+        MoleculeInspector::inspect(&molecule, "WALLET CREATION MOLECULE");
+        MoleculeInspector::diagnose_validation(&molecule, "WALLET CREATION MOLECULE");
+
+        let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
+            Ok(valid) => (valid, None),
+            Err(e) => (false, Some(format!("Signature verification failed: {}", e))),
+        };
+        Logger::test("Molecule validation", is_valid, validation_error.as_deref());
+
+        let molecule_json = match molecule.toJSON() {
+            Ok(json) => json,
+            Err(e) => { eprintln!("ERROR: Failed to serialize wallet creation molecule: {}", e); "{}".to_string() }
+        };
+        self.results.molecules.wallet_creation = molecule_json;
+
+        self.results.tests.wallet_creation = MoleculeTestResult {
+            passed: is_valid,
+            molecular_hash: molecule.molecular_hash.unwrap_or_default(),
+            atom_count: molecule.atoms.len(),
+            has_remainder: None,
+            validation_error: validation_error.or_else(|| Some("null".to_string())),
+        };
+
+        Ok(is_valid)
+    }
+
+    async fn test_shadow_wallet_claim(&mut self) -> Result<bool> {
+        Logger::message("\nC3. Shadow Wallet Claim Test", colors::BLUE);
+
+        let source_seed = self.config.get_string("tests.shadowWalletClaim.sourceSeed").unwrap_or_else(|| "TESTSEED".to_string());
+        let claim_seed = self.config.get_string("tests.shadowWalletClaim.claimSeed").unwrap_or_else(|| "CLAIMSEED".to_string());
+        let source_token = self.config.get_string("tests.shadowWalletClaim.sourceToken").unwrap_or_else(|| "USER".to_string());
+        let claim_token = self.config.get_string("tests.shadowWalletClaim.claimToken").unwrap_or_else(|| "TESTTOKEN".to_string());
+        let source_position = self.config.get_string("tests.shadowWalletClaim.sourcePosition").unwrap_or_default();
+        let claim_position = self.config.get_string("tests.shadowWalletClaim.claimPosition").unwrap_or_default();
+
+        let source_secret = generate_secret(&source_seed);
+        let source_wallet = Wallet::new(
+            Some(&source_secret), None, Some(&source_token), None, Some(&source_position), None, Some("BASE64"),
+        ).context("Failed to create source wallet")?;
+        Logger::test("Source wallet creation", true, None);
+
+        let claim_secret = generate_secret(&claim_seed);
+        let claim_wallet = Wallet::new(
+            Some(&claim_secret), None, Some(&claim_token), None, Some(&claim_position), None, Some("BASE64"),
+        ).context("Failed to create claim wallet")?;
+        Logger::test("Claim wallet creation", true, None);
+
+        let remainder_wallet = create_fixed_remainder_wallet(&source_secret, &source_token)?;
+        Logger::test("Remainder wallet creation", true, None);
+
+        let source_wallet_for_validation = source_wallet.clone();
+        let mut molecule = Molecule::with_params(
+            Some(source_secret.clone()), None, Some(source_wallet), Some(remainder_wallet), None, None,
+        );
+
+        molecule.init_shadow_wallet_claim(&claim_wallet)
+            .context("Failed to initialize shadow wallet claim")?;
+        Logger::test("Shadow wallet claim initialization", true, None);
+
+        set_fixed_timestamps(&mut molecule);
+
+        let signature_result = molecule.sign(molecule.bundle.clone(), false, true);
+        let signed = signature_result.is_ok();
+        Logger::test("Molecule signing", signed, None);
+
+        MoleculeInspector::inspect(&molecule, "SHADOW WALLET CLAIM MOLECULE");
+        MoleculeInspector::diagnose_validation(&molecule, "SHADOW WALLET CLAIM MOLECULE");
+
+        let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
+            Ok(valid) => (valid, None),
+            Err(e) => (false, Some(format!("Signature verification failed: {}", e))),
+        };
+        Logger::test("Molecule validation", is_valid, validation_error.as_deref());
+
+        let molecule_json = match molecule.toJSON() {
+            Ok(json) => json,
+            Err(e) => { eprintln!("ERROR: Failed to serialize shadow wallet claim molecule: {}", e); "{}".to_string() }
+        };
+        self.results.molecules.shadow_wallet_claim = molecule_json;
+
+        self.results.tests.shadow_wallet_claim = MoleculeTestResult {
             passed: is_valid,
             molecular_hash: molecule.molecular_hash.unwrap_or_default(),
             atom_count: molecule.atoms.len(),
@@ -1591,13 +1767,15 @@ impl SelfTestRunner {
         println!("Timestamp: {}", self.results.timestamp);
 
         // Count passed tests
-        let total_tests = 7;
+        let total_tests = 9;
         let passed_tests = [
             self.results.tests.crypto.passed,
             self.results.tests.meta_creation.passed,
             self.results.tests.simple_transfer.passed,
             self.results.tests.complex_transfer.passed,
             self.results.tests.token_creation.passed,
+            self.results.tests.wallet_creation.passed,
+            self.results.tests.shadow_wallet_claim.passed,
             self.results.tests.mlkem768.passed,
             self.results.tests.negative_cases.passed,
         ].iter().filter(|&&x| x).count();
@@ -1619,6 +1797,12 @@ impl SelfTestRunner {
             }
             if !self.results.tests.token_creation.passed {
                 println!("  - tokenCreation: Validation failed");
+            }
+            if !self.results.tests.wallet_creation.passed {
+                println!("  - walletCreation: Validation failed");
+            }
+            if !self.results.tests.shadow_wallet_claim.passed {
+                println!("  - shadowWalletClaim: Validation failed");
             }
         }
 

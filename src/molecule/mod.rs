@@ -632,23 +632,33 @@ impl Molecule {
     /// * `wallet` - Wallet to create
     /// * `atom_meta` - Wallet metadata
     pub fn init_wallet_creation(&mut self, wallet: &Wallet, atom_meta: Vec<MetaItem>) -> Result<()> {
-        let params = AtomCreateParams {
-            isotope: Isotope::C,
-            wallet_info: Some(WalletInfo {
-                position: wallet.position.clone().unwrap_or_default(),
-                address: wallet.address.clone().unwrap_or_default(),
-                token: wallet.token.clone(),
+        // Cross-SDK parity (cycle 30): mirror JS initWalletCreation — the C-atom is signed by the
+        // SOURCE wallet (position/address/token), metaId is the NEW wallet's ADDRESS, the top-level
+        // batchId is the NEW wallet's, and the meta is the user meta followed by the 7 PREFIXED
+        // wallet* keys via set_meta_wallet. + ContinuID I-atom.
+        if let Some(ref source_wallet) = self.source_wallet {
+            let mut atom_meta = AtomMeta::new(Some(atom_meta));
+            atom_meta.set_meta_wallet(wallet);
+
+            let params = AtomCreateParams {
+                isotope: Isotope::C,
+                wallet_info: Some(WalletInfo {
+                    position: source_wallet.position.clone().unwrap_or_default(),
+                    address: source_wallet.address.clone().unwrap_or_default(),
+                    token: source_wallet.token.clone(),
+                    batch_id: source_wallet.batch_id.clone(),
+                }),
+                meta_type: Some("wallet".to_string()),
+                meta_id: wallet.address.clone(),
+                meta: Some(atom_meta.meta),
                 batch_id: wallet.batch_id.clone(),
-            }),
-            meta_type: Some("wallet".to_string()),
-            meta_id: wallet.bundle.clone(),
-            meta: Some(atom_meta),
-            ..Default::default()
-        };
-        
-        self.add_atom(Atom::create(params));
-        self.add_continuid_atom()?;
-        
+                ..Default::default()
+            };
+
+            self.add_atom(Atom::create(params));
+            self.add_continuid_atom()?;
+        }
+
         Ok(())
     }
     
@@ -656,38 +666,32 @@ impl Molecule {
     /// # Arguments
     /// * `wallet` - Shadow wallet to claim
     pub fn init_shadow_wallet_claim(&mut self, wallet: &Wallet) -> Result<()> {
-        let params = AtomCreateParams {
-            isotope: Isotope::V,
-            wallet_info: Some(WalletInfo {
-                position: wallet.position.clone().unwrap_or_default(),
-                address: wallet.address.clone().unwrap_or_default(),
-                token: wallet.token.clone(),
-                batch_id: wallet.batch_id.clone(),
-            }),
-            value: None,  // Set below with String precision
-            ..Default::default()
-        };
-        let mut atom = Atom::create(params);
-        atom.value = Some(wallet.balance.clone());
-        self.add_atom(atom);
+        // Cross-SDK parity (cycle 30): mirror JS initShadowWalletClaim — a C-atom (signed by the
+        // SOURCE wallet) carrying shadowWalletClaim (=1) THEN the 7 PREFIXED wallet* keys (via
+        // set_meta_wallet), metaType 'wallet', metaId = the claimed wallet's address, top-level
+        // batchId = the claimed wallet's, + ContinuID I-atom. (Was a wrong V-atom value transfer.)
+        if let Some(ref source_wallet) = self.source_wallet {
+            let mut atom_meta = AtomMeta::new(None);
+            atom_meta.set_shadow_wallet_claim(1.0);
+            atom_meta.set_meta_wallet(wallet);
 
-        if let Some(ref remainder_wallet) = self.remainder_wallet {
-            let remainder_params = AtomCreateParams {
-                isotope: Isotope::V,
+            let params = AtomCreateParams {
+                isotope: Isotope::C,
                 wallet_info: Some(WalletInfo {
-                    position: remainder_wallet.position.clone().unwrap_or_default(),
-                    address: remainder_wallet.address.clone().unwrap_or_default(),
-                    token: remainder_wallet.token.clone(),
-                    batch_id: remainder_wallet.batch_id.clone(),
+                    position: source_wallet.position.clone().unwrap_or_default(),
+                    address: source_wallet.address.clone().unwrap_or_default(),
+                    token: source_wallet.token.clone(),
+                    batch_id: source_wallet.batch_id.clone(),
                 }),
-                value: None,  // Set below with String precision
-                meta_type: Some("walletBundle".to_string()),
-                meta_id: remainder_wallet.bundle.clone(),
+                meta_type: Some("wallet".to_string()),
+                meta_id: wallet.address.clone(),
+                meta: Some(atom_meta.meta),
+                batch_id: wallet.batch_id.clone(),
                 ..Default::default()
             };
-            let mut atom = Atom::create(remainder_params);
-            atom.value = Some(remainder_wallet.balance.clone());
-            self.add_atom(atom);
+
+            self.add_atom(Atom::create(params));
+            self.add_continuid_atom()?;
         }
 
         Ok(())
