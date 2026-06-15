@@ -339,12 +339,14 @@ impl<'a> CheckMolecule<'a> {
             return Ok(true);
         }
 
+        // B/F isotope molecules have V-atoms that don't sum to zero on their own (the B/F
+        // atom absorbs the difference), so the plain V-conservation check is skipped when a
+        // cross-isotope is present — mirroring JS CheckMolecule's `!hasCrossIsotope` gate.
+        let has_cross_isotope = !self.get_isotopes(&[Isotope::B, Isotope::F]).is_empty();
+
         let first_atom = &self.molecule.atoms[0];
 
         // Handle simple 2-atom transfer case (e.g., B-isotope deposit: V-debit + V-remainder)
-        // Only checks token match and non-negative remainder — does NOT check sum,
-        // because B/F isotope molecules have V-atoms that don't sum to zero
-        // (the B/F atom absorbs the difference)
         if first_atom.isotope == Isotope::V && isotope_v.len() == 2 {
             let end_atom = &isotope_v[isotope_v.len() - 1];
 
@@ -358,6 +360,17 @@ impl<'a> CheckMolecule<'a> {
 
             if end_value < 0.0 {
                 return Err(KnishIOError::TransferMalformed);
+            }
+
+            // A plain 2-atom V transfer (no B/F isotope to absorb the difference) must
+            // balance to zero, mirroring JS CheckMolecule.isotopeV's firstAtom+endAtom sum.
+            if !has_cross_isotope {
+                let first_value: f64 = first_atom.value.as_ref()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0.0);
+                if first_value + end_value != 0.0 {
+                    return Err(KnishIOError::TransferUnbalanced);
+                }
             }
 
             return Ok(true);
