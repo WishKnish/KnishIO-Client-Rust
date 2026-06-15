@@ -190,35 +190,34 @@ impl AtomMeta {
     ///
     /// * `wallet` - Wallet instance to extract full metadata from
     pub fn set_meta_wallet(&mut self, wallet: &crate::wallet::Wallet) -> &mut Self {
-        let mut wallet_meta = HashMap::new();
-        
-        wallet_meta.insert("walletTokenSlug".to_string(), wallet.token.clone());
-        
+        // Build in JS setMetaWallet insertion order — the molecular hash is order-sensitive,
+        // and a HashMap (merge_map) would scramble these keys (non-deterministic iteration).
+        // Empty/None values are skipped by Atom::get_hashable_values, matching JS's
+        // `meta.value !== null` skip, so gating optional fields on Some is hash-safe.
+        let mut wallet_meta: Vec<MetaItem> = Vec::new();
+
+        wallet_meta.push(MetaItem::new("walletTokenSlug", &wallet.token));
+
         if let Some(ref bundle) = wallet.bundle {
-            wallet_meta.insert("walletBundleHash".to_string(), bundle.clone());
+            wallet_meta.push(MetaItem::new("walletBundleHash", bundle));
         }
-        
         if let Some(ref address) = wallet.address {
-            wallet_meta.insert("walletAddress".to_string(), address.clone());
+            wallet_meta.push(MetaItem::new("walletAddress", address));
         }
-        
         if let Some(ref position) = wallet.position {
-            wallet_meta.insert("walletPosition".to_string(), position.clone());
+            wallet_meta.push(MetaItem::new("walletPosition", position));
         }
-        
         if let Some(ref batch_id) = wallet.batch_id {
-            wallet_meta.insert("walletBatchId".to_string(), batch_id.clone());
+            wallet_meta.push(MetaItem::new("walletBatchId", batch_id));
         }
-        
         if let Some(ref pubkey) = wallet.pubkey {
-            wallet_meta.insert("walletPubkey".to_string(), pubkey.clone());
+            wallet_meta.push(MetaItem::new("walletPubkey", pubkey));
         }
-        
         if let Some(ref characters) = wallet.characters {
-            wallet_meta.insert("walletCharacters".to_string(), characters.clone());
+            wallet_meta.push(MetaItem::new("walletCharacters", characters));
         }
 
-        self.merge_map(wallet_meta)
+        self.merge(wallet_meta)
     }
 
     /// Set shadow wallet claim metadata

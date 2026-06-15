@@ -139,6 +139,8 @@ struct TestSuite {
     simple_transfer: MoleculeTestResult,
     #[serde(rename = "complexTransfer")]
     complex_transfer: MoleculeTestResult,
+    #[serde(rename = "tokenCreation")]
+    token_creation: MoleculeTestResult,
     mlkem768: MLKEMTestResult,
     #[serde(rename = "negativeCases")]
     negative_cases: NegativeTestResult,
@@ -151,6 +153,8 @@ struct MoleculeResults {
     simple_transfer: String,
     #[serde(rename = "complexTransfer")]
     complex_transfer: String,
+    #[serde(rename = "tokenCreation")]
+    token_creation: String,
     mlkem768: String,
 }
 
@@ -180,8 +184,8 @@ const DEFAULT_CONFIG_JSON: &str = r#"{
   "tests": {
     "crypto": {
       "seed": "TESTSEED",
-      "secret": "e8ffc86d60fc6a73234a834166e7436e21df6c3209dfacc8d0bd6595707872c3799abbf7deee0f9c4b58de1fd89b9abb67a207558208d5ccf550c227d197c24e9fcc3707aeb53c4031d38392020ff72bcaa0f728aa8bc3d47d95ff0afc04d8fcdb69bff638ce56646c154fc92aa517d3c40f550d2ccacbd921724e1d94b82aed2c8e172a8a7ed5a6963f5890157fe77222b97af3787741f9d3cec0b40aec6f07ae4b2b24614f0a20e035aee0df04e176175dc100eb1b00dd7ea95c28cdec47958336945333c3bef24719ed949fa56d1541f24c725d4f374a533bf255cf22f4596147bcd1ba05abcecbe9b12095e1fdddb094616894c366498be0b5785c180100efb3c5b689fc1c01131633fe1775df52a970e9472ab7bc0c19f5742b9e9436753cd16024b2d326b763eca68c414755a0d2fdbb927f007e9413f1190578b2033a03d29387f5aea71b07a5ce80fbfd45be4a15440faadeac50e41846022894fc683a52328b470bc1860c8b038d7258f504178918502b93d84d8b0fbef3e02f89f83cb1ff033a2bdbdf2a2ba78d80c12aa8b2d6c10d76c468186bd4a4e9eacc758546bb50ed7b1ee241cc5b93ff924c7bbee6778b27789e1f9104c917fc93f735eee5b25c07a883788f3d2e0771e751c4f59b76f8426027ac2b07a2ca84534433d0a1b86cef3288e7d79e8b175a3955848cfd1dfbdcd6b5bafcf6789e56e8ef40af",
-      "bundle": "fee9c2b9a964d060eb4645c4001db805c3c4b0cc9bba12841036eba4bf44b831",
+      "secret": "e8ffc86d60fc6a73234a834166e7436e21df6c3209dfacc8d0bd6595707872c3799abbf7deee0f9c4b58de1fd89b9abb67a207558208d5ccf550c227d197c24e9fcc3707aeb53c4031d38392020ff72bcaa0f728aa8bc3d47d95ff0afc04d8fcdb69bff638ce56646c154fc92aa517d3c40f550d2ccacbd921724e1d94b82aed2c8e172a8a7ed5a6963f5890157fe77222b97af3787741f9d3cec0b40aec6f07ae4b2b24614f0a20e035aee0df04e176175dc100eb1b00dd7ea95c28cdec47958336945333c3bef24719ed949fa56d1541f24c725d4f374a533bf255cf22f4596147bcd1ba05abcecbe9b12095e1fdddb094616894c366498be0b5785c180100efb3c5b689fc1c01131633fe1775df52a970e9472ab7bc0c19f5742b9e9436753cd16024b2d326b763eca68c414755a0d2fdbb927f007e9413f1190578b2033a03d29387f5aea71b07a5ce80fbfd45be4a15440faadeac50e41846022894fc683a52328b470bc1860c8b038d7258f504178918502b93d84d8b0fbef3e02f89f83cb1ff033a2bdbdf2a2ba78d80c12aa8b2d6c10d76c468186bd4a4e9eacc758546bb50ed7b1ee241cc5b93ff924c7bbee6778b27789e1f9104c917fc93f735eee5b25c07a883788f3d2e0771e751c4f59b76f8426027ac2b07a2ca84534433d0a1b86cef3288e7d79e8b175a3955848cfd1dfbdcd6b5bafcf6789e56e8ef40af09a764147640eb10b426349f6ffc8e299cdcebffc3a9d6be362ba33fbf648bf06ea4c35890c705df479030fd1d0669d289dcbabaaf78f945c37fc69f3823dbfa99bdf3cf7bb7be8f810a7eab5167e26691642c3982aa203687d0e674154c970cfc1822f9917f2100ae8950cf0fcab074bfb578f4f6e78df490f0fd9becdba7151f2a5733cc2a3df845aa17bdc49765163d635de5c3a1c376683e622fe3e0a6092a35dfedc4bc5bc9c120d2ed06d899775bcd16417318f4b5c7ba27fdc0a442884a69e71543a13cb26762a0df4f47807924a15da7895b6c96accb09394fdf0232d922a99f4a9f95d46da7b9050eb661f3329fe98372175a82d5e5296e4a31c040da6407194251b5baa7338071d1edfc51f55ca409ffd885045e47412f97a4bbe2e73794d8b276ccb446843bbc38c7e580dc4dc2ba94556de0d80681f60d1b2953021e08a60e26685adf61eff91d9ca7daa04a72de9dc2822655648f3c0f5016967b0e8104d70add65b9b9ce98b3aaa10106f5f32133775a71ab9b006307e390b697c77bb828c3ad07bfdcc3ecf3149ac98dc8a230c281365719d67fd2450c717ad1391880d9c17cb8ba96b6254ac783aeae04f84f14829e4efc6ee73b77670cb9ea96dc73e5464bc4cf46cdd2ebe75009d9c4ce6097eab2858ef2899b3dcd147c579939f45c4ad2aa283b6e9c8ca2539abd5e2332cff851f4fa8c4767732d7977",
+      "bundle": "2b77ff69a6d2f8108250389377faa6cbd42caaefa2f966e1b68a4b3fc022c83e",
       "walletAddress": "Kk4xBpejTujcDQxuuUNVEcvvRNwRGMfLFm28p1aqv2wQ52u5X"
     },
     "metaCreation": {
@@ -224,6 +228,16 @@ const DEFAULT_CONFIG_JSON: &str = r#"{
       "token": "ENCRYPT",
       "position": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
       "plaintext": "Hello ML-KEM768 cross-platform test message!"
+    },
+    "tokenCreation": {
+      "sourceSeed": "TESTSEED",
+      "recipientSeed": "RECIPIENTSEED",
+      "amount": 1000000,
+      "sourceToken": "USER",
+      "newToken": "TESTTOKEN",
+      "sourcePosition": "0123456789abcdeffedcba9876543210fedcba9876543210fedcba9876543210",
+      "recipientPosition": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      "expectedMolecularHash": "01b040543ce92c0a9c68gbe3b44f3b8g10422g2fbb97ab24432ac72b3544e6bb"
     }
   }
 }"#;
@@ -379,6 +393,13 @@ impl SelfTestRunner {
                     has_remainder: Some(true),
                     validation_error: Some("null".to_string()),
                 },
+                token_creation: MoleculeTestResult {
+                    passed: false,
+                    molecular_hash: String::new(),
+                    atom_count: 0,
+                    has_remainder: None,
+                    validation_error: Some("null".to_string()),
+                },
                 mlkem768: MLKEMTestResult {
                     passed: false,
                     public_key_generated: false,
@@ -397,6 +418,7 @@ impl SelfTestRunner {
                 metadata: String::new(),
                 simple_transfer: String::new(),
                 complex_transfer: String::new(),
+                token_creation: String::new(),
                 mlkem768: String::new(),
             },
             cross_sdk_compatible: true,
@@ -527,6 +549,7 @@ impl SelfTestRunner {
         let meta_result = self.test_meta_creation().await?;
         let simple_result = self.test_simple_transfer().await?;
         let complex_result = self.test_complex_transfer().await?;
+        let token_creation_result = self.test_token_creation().await?;
         let mlkem_result = self.test_mlkem768().await?;
         let negative_result = self.test_negative_cases().await?;
         let _cross_sdk_result = self.test_cross_sdk_validation().await?;
@@ -538,8 +561,8 @@ impl SelfTestRunner {
         self.display_summary();
 
         // Exit with appropriate code
-        let total_tests = 6;
-        let passed_tests = [crypto_result, meta_result, simple_result, complex_result, mlkem_result, negative_result]
+        let total_tests = 7;
+        let passed_tests = [crypto_result, meta_result, simple_result, complex_result, token_creation_result, mlkem_result, negative_result]
             .iter()
             .filter(|&&x| x)
             .count();
@@ -898,6 +921,105 @@ impl SelfTestRunner {
             molecular_hash: molecule.molecular_hash.unwrap_or_default(),
             atom_count: molecule.atoms.len(),
             has_remainder: Some(true),
+            validation_error: validation_error.or_else(|| Some("null".to_string())),
+        };
+
+        Ok(is_valid)
+    }
+
+    async fn test_token_creation(&mut self) -> Result<bool> {
+        Logger::message("\nC1. Token Creation Test", colors::BLUE);
+
+        let source_seed = self.config.get_string("tests.tokenCreation.sourceSeed").unwrap_or_else(|| "TESTSEED".to_string());
+        let recipient_seed = self.config.get_string("tests.tokenCreation.recipientSeed").unwrap_or_else(|| "RECIPIENTSEED".to_string());
+        let source_token = self.config.get_string("tests.tokenCreation.sourceToken").unwrap_or_else(|| "USER".to_string());
+        let new_token = self.config.get_string("tests.tokenCreation.newToken").unwrap_or_else(|| "TESTTOKEN".to_string());
+        let source_position = self.config.get_string("tests.tokenCreation.sourcePosition").unwrap_or_default();
+        let recipient_position = self.config.get_string("tests.tokenCreation.recipientPosition").unwrap_or_default();
+        let amount = self.config.get_i64("tests.tokenCreation.amount").unwrap_or(1_000_000) as f64;
+
+        // Create source wallet (USER token)
+        let source_secret = generate_secret(&source_seed);
+        let source_wallet = Wallet::new(
+            Some(&source_secret),
+            None,
+            Some(&source_token),
+            None,
+            Some(&source_position),
+            None,
+            Some("BASE64"),
+        ).context("Failed to create source wallet")?;
+        Logger::test("Source wallet creation", true, None);
+
+        // Create recipient wallet for the new token
+        let recipient_secret = generate_secret(&recipient_seed);
+        let recipient_wallet = Wallet::new(
+            Some(&recipient_secret),
+            None,
+            Some(&new_token),
+            None,
+            Some(&recipient_position),
+            None,
+            Some("BASE64"),
+        ).context("Failed to create recipient wallet")?;
+        Logger::test("Recipient wallet creation", true, None);
+
+        // USER-token remainder so add_continuid_atom's guard keeps the canonical bbbb... wallet
+        let remainder_wallet = create_fixed_remainder_wallet(&source_secret, &source_token)?;
+        Logger::test("Remainder wallet creation", true, None);
+
+        let source_wallet_for_validation = source_wallet.clone();
+        let mut molecule = Molecule::with_params(
+            Some(source_secret.clone()),
+            None,
+            Some(source_wallet),
+            Some(remainder_wallet),
+            None,
+            None,
+        );
+
+        // User token meta in JS insertion order (name, fungibility, supply, decimals)
+        let user_meta = vec![
+            MetaItem::new("name", "Test Token"),
+            MetaItem::new("fungibility", "fungible"),
+            MetaItem::new("supply", "limited"),
+            MetaItem::new("decimals", "0"),
+        ];
+
+        molecule.init_token_creation(&recipient_wallet, amount, user_meta)
+            .context("Failed to initialize token creation")?;
+        Logger::test("Token creation initialization", true, None);
+
+        // Set fixed timestamps for deterministic testing (before signing)
+        set_fixed_timestamps(&mut molecule);
+
+        let signature_result = molecule.sign(molecule.bundle.clone(), false, true);
+        let signed = signature_result.is_ok();
+        Logger::test("Molecule signing", signed, None);
+
+        MoleculeInspector::inspect(&molecule, "TOKEN CREATION MOLECULE");
+        MoleculeInspector::diagnose_validation(&molecule, "TOKEN CREATION MOLECULE");
+
+        let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
+            Ok(valid) => (valid, None),
+            Err(e) => (false, Some(format!("Signature verification failed: {}", e))),
+        };
+        Logger::test("Molecule validation", is_valid, validation_error.as_deref());
+
+        let molecule_json = match molecule.toJSON() {
+            Ok(json) => json,
+            Err(e) => {
+                eprintln!("ERROR: Failed to serialize token creation molecule: {}", e);
+                "{}".to_string()
+            }
+        };
+        self.results.molecules.token_creation = molecule_json;
+
+        self.results.tests.token_creation = MoleculeTestResult {
+            passed: is_valid,
+            molecular_hash: molecule.molecular_hash.unwrap_or_default(),
+            atom_count: molecule.atoms.len(),
+            has_remainder: None,
             validation_error: validation_error.or_else(|| Some("null".to_string())),
         };
 
@@ -1469,12 +1591,13 @@ impl SelfTestRunner {
         println!("Timestamp: {}", self.results.timestamp);
 
         // Count passed tests
-        let total_tests = 6;
+        let total_tests = 7;
         let passed_tests = [
             self.results.tests.crypto.passed,
             self.results.tests.meta_creation.passed,
             self.results.tests.simple_transfer.passed,
             self.results.tests.complex_transfer.passed,
+            self.results.tests.token_creation.passed,
             self.results.tests.mlkem768.passed,
             self.results.tests.negative_cases.passed,
         ].iter().filter(|&&x| x).count();
@@ -1493,6 +1616,9 @@ impl SelfTestRunner {
             }
             if !self.results.tests.complex_transfer.passed {
                 println!("  - complexTransfer: Validation failed");
+            }
+            if !self.results.tests.token_creation.passed {
+                println!("  - tokenCreation: Validation failed");
             }
         }
 

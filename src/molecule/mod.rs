@@ -12,6 +12,7 @@ use crate::atom::{Atom, AtomCreateParams, WalletInfo};
 use crate::wallet::Wallet;
 use crate::crypto::{shake256, generate_bundle_hash};
 use crate::types::{Isotope, MetaItem};
+use crate::meta::AtomMeta;
 use crate::error::{KnishIOError, Result};
 use base64::{Engine as _, engine::general_purpose};
 
@@ -593,22 +594,13 @@ impl Molecule {
     /// * `meta` - Token metadata
     pub fn init_token_creation(&mut self, recipient_wallet: &Wallet, amount: f64, meta: Vec<MetaItem>) -> Result<()> {
         if let Some(ref source_wallet) = self.source_wallet {
-            // Enrich metadata with recipient wallet info (JS SDK: atomMeta.setMetaWallet)
-            // This tells the server WHERE to create the token wallet — separate from the
-            // source wallet position used for OTS signing.
-            let mut enriched_meta = meta;
-            if let Some(ref addr) = recipient_wallet.address {
-                enriched_meta.push(MetaItem::new("walletAddress", addr));
-            }
-            if let Some(ref pos) = recipient_wallet.position {
-                enriched_meta.push(MetaItem::new("walletPosition", pos));
-            }
-            if let Some(ref bun) = recipient_wallet.bundle {
-                enriched_meta.push(MetaItem::new("walletBundleHash", bun));
-            }
-            if let Some(ref pk) = recipient_wallet.pubkey {
-                enriched_meta.push(MetaItem::new("walletPubkey", pk));
-            }
+            // Build the C-atom meta via the canonical set_meta_wallet (JS SDK:
+            // new AtomMeta(meta).setMetaWallet(recipientWallet)) so the user meta is
+            // followed by the 7 PREFIXED wallet* keys in JS insertion order. This tells
+            // the server WHERE to create the token wallet — separate from the source
+            // wallet position used for OTS signing.
+            let mut atom_meta = AtomMeta::new(Some(meta));
+            atom_meta.set_meta_wallet(recipient_wallet);
 
             let params = AtomCreateParams {
                 isotope: Isotope::C,
@@ -621,12 +613,15 @@ impl Molecule {
                 value: Some(amount),
                 meta_type: Some("token".to_string()),
                 meta_id: Some(recipient_wallet.token.clone()),
-                meta: Some(enriched_meta),
+                meta: Some(atom_meta.meta),
                 batch_id: recipient_wallet.batch_id.clone(),
                 ..Default::default()
             };
 
             self.add_atom(Atom::create(params));
+
+            // Add ContinuID atom (I isotope) to match JavaScript canonical behavior
+            self.add_continuid_atom()?;
         }
 
         Ok(())
