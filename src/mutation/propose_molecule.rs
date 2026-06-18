@@ -141,8 +141,9 @@ impl Mutation for MutationProposeMolecule {
         
         let response = client.mutate(request).await?;
         
-        // Convert GraphQLResponse to our Response type
-        let json_data = response.data.unwrap_or_else(|| json!({}));
+        // Re-wrap under "data" so the response classes' `data.<Field>` data_keys navigate
+        // correctly (matches JS's full-envelope + Dot.get convention).
+        let json_data = json!({ "data": response.data });
         Ok(self.create_response(json_data))
     }
 }

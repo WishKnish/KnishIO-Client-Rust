@@ -39,9 +39,11 @@ pub trait Mutation: Query + Send + Sync {
         let request = self.create_mutation_request(variables);
         
         let response = client.mutate(request).await?;
-        
-        // Convert GraphQLResponse to our Response type
-        let json_data = response.data.unwrap_or_else(|| json!({}));
+
+        // Re-wrap under "data" so the response classes' `data.<Field>` data_keys navigate
+        // correctly (JS keeps the full envelope + Dot.get("data.X"); the prior code unwrapped
+        // response.data, leaving every "data.X" lookup to fail and fall back to the wrapper).
+        let json_data = json!({ "data": response.data });
         Ok(self.create_response(json_data))
     }
     

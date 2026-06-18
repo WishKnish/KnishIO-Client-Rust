@@ -1172,14 +1172,12 @@ impl KnishIOClient {
         if let Some(ref client) = self.client {
             let response = query.execute(client, None, None).await?;
 
-            // Extract wallet data from response
-            // The response should contain wallet balance information
+            // get_data() already navigates the data_key ("data.Balance") to the Balance wallet
+            // object, so response.data() IS that object (not a wrapper). Tolerate the legacy
+            // wrapper shape too (a nested "Balance" key) for safety.
             let response_data = response.data();
-
-            // Convert response data to Wallet
-            // ResponseBalance.payload() returns Wallet in JS implementation
-            if let Some(balance_data) = response_data.get("Balance") {
-                // Use existing from_response_data method
+            let balance_data = response_data.get("Balance").unwrap_or(response_data);
+            if balance_data.is_object() {
                 let wallet = Wallet::from_response_data(balance_data.clone())?;
                 return Ok(wallet);
             }
@@ -1416,17 +1414,34 @@ impl KnishIOClient {
         let _wallet_type = wallet_type.unwrap_or("regular");
 
         // Query balance for this token
-        let source_wallet = self.query_balance(token, None).await?;
+        let queried = self.query_balance(token, None).await?;
 
         // Check if we have enough tokens (i128 for precision-safe comparison)
-        if source_wallet.balance_as_i128() < (amount as i128) {
+        if queried.balance_as_i128() < (amount as i128) {
             return Err(KnishIOError::TransferBalance);
         }
 
         // Check for shadow wallet (no position or address)
-        if source_wallet.position.is_none() || source_wallet.address.is_none() {
+        if queried.position.is_none() || queried.address.is_none() {
             return Err(KnishIOError::WalletCredential);
         }
+
+        // The queried wallet has no secret/key (from_response_data sets secret=None), so it can't
+        // sign — re-derive OUR signing wallet at the on-ledger position from our secret (matches JS
+        // getSourceWallet: sourceWallet.key = generateKey(secret, token, position)). Same secret +
+        // token + position reproduces the registered key/address, so the OTS verifies; without this
+        // the molecule signs with no key -> "Signature malformed".
+        let secret = self.secret.clone().ok_or(KnishIOError::Unauthenticated)?;
+        let mut source_wallet = Wallet::new(
+            Some(&secret),
+            queried.bundle.as_deref(),
+            Some(token),
+            None, // derive address from the key (must reproduce the registered address)
+            queried.position.as_deref(),
+            None,
+            queried.characters.as_deref(),
+        )?;
+        source_wallet.balance = queried.balance.clone();
 
         Ok(source_wallet)
     }
@@ -1985,6 +2000,9 @@ impl KnishIOClient {
 
         // Build the molecule itself (matches JS lines 1699-1702)
         let mut molecule = Molecule::new();
+        // sign() derives the OTS key from molecule.secret (generate_key(secret, token, position));
+        // without it the signing block is skipped -> unsigned molecule -> "Signature malformed".
+        molecule.secret = Some(secret.clone());
         molecule.source_wallet = Some(source_wallet.clone());
         molecule.remainder_wallet = Some(remainder_wallet.clone());
 
@@ -3071,9 +3089,20 @@ impl KnishIOClient {
 
             // Check if successful
             if response.success() {
-                // Extract token from response payload
-                let payload = response.payload()
+                // The ProposeMolecule response carries the auth payload as a STRINGIFIED JSON
+                // string in its `payload` field, e.g.
+                // "{\"token\":\"<JWT>\",\"expiresAt\":...,\"pubkey\":...}" — parse it before
+                // extracting the token (matches JS, which JSON.parses response.payload()).
+                let pm = response.payload()
                     .ok_or(KnishIOError::InvalidResponse)?;
+                let payload_field = pm.get("payload")
+                    .ok_or(KnishIOError::InvalidResponse)?;
+                let payload: serde_json::Value = if payload_field.is_string() {
+                    serde_json::from_str(payload_field.as_str().unwrap_or(""))
+                        .map_err(|_| KnishIOError::InvalidResponse)?
+                } else {
+                    payload_field.clone()
+                };
 
                 let token_str = payload.get("token")
                     .and_then(|t| t.as_str())
@@ -3086,6 +3115,14 @@ impl KnishIOClient {
                 let pubkey = payload.get("pubkey")
                     .and_then(|p| p.as_str())
                     .map(|s| s.to_string());
+
+                // Propagate the JWT to the GraphQL client so subsequent (non-public) requests
+                // carry the X-Auth-Token header — the client's mutate()/query() read their OWN
+                // auth_token, which is otherwise never set (only the KnishIOClient field was),
+                // causing 401 on every post-auth request.
+                if let Some(ref mut client) = self.client {
+                    client.set_auth_data(token_str.clone(), pubkey.clone(), None);
+                }
 
                 // Create AuthToken (matches JS: AuthToken.create(response.payload(), wallet))
                 let auth_token = AuthToken::create(

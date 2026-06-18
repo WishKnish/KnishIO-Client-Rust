@@ -216,10 +216,14 @@ impl Wallet {
     ///
     /// Result containing the wallet instance
     pub fn from_response_data(data: serde_json::Value) -> Result<Self> {
+        // The Balance query selects `amount` (the validator's balance field); fall back to
+        // `balance` for other shapes. Reading only `balance` (absent from the Balance selection
+        // set) silently yielded 0 for every live balance query.
+        let balance_val = if !data["amount"].is_null() { &data["amount"] } else { &data["balance"] };
         // Use pattern matching for cleaner data extraction
         let (balance, token, address, bundle, position, characters, batch_id) = (
             // Accept balance as string, number, or integer from JSON
-            match &data["balance"] {
+            match balance_val {
                 v if v.is_string() => v.as_str().unwrap_or("0").to_string(),
                 v if v.is_number() => {
                     // Prefer i64 to avoid f64 precision loss, fallback to f64 for decimals
