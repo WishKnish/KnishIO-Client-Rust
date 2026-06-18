@@ -1123,7 +1123,9 @@ impl ResponsePolicy {
     /// Create new ResponsePolicy (equivalent to ResponsePolicy.js constructor)
     pub fn new(json: Value, query: Option<Value>) -> Result<Self, KnishIOError> {
         Ok(ResponsePolicy {
-            base: BaseResponse::with_query(json, query)?.with_data_key("data.Rule"),
+            // The validator exposes this query as `Policy` (queries/mod.rs); was incorrectly
+            // `data.Rule` (a different query), so get_data() never navigated to the policy object.
+            base: BaseResponse::with_query(json, query)?.with_data_key("data.Policy"),
         })
     }
     

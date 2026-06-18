@@ -38,8 +38,10 @@ pub trait Query: Send + Sync {
 
         let response = client.query(request).await?;
 
-        // Convert GraphQLResponse to our Response type
-        let json_data = response.data.unwrap_or_else(|| json!({}));
+        // Re-wrap under "data" so the response classes' `data.<Field>` data_keys navigate
+        // (matches the mutation path + JS's full-envelope Dot.get convention; get_data() then
+        // returns the inner object and the query methods use response.data() directly).
+        let json_data = json!({ "data": response.data });
         Ok(self.create_response(json_data))
     }
 }
@@ -155,8 +157,8 @@ impl Query for BaseQuery {
         // Execute the query
         match client.query(request).await {
             Ok(response) => {
-                // Convert GraphQLResponse to our Response type
-                let json_data = response.data.unwrap_or_else(|| json!({}));
+                // Re-wrap under "data" so `data.<Field>` data_keys navigate (mutation-path parity).
+                let json_data = json!({ "data": response.data });
                 let response_obj = query.create_response_raw(json_data);
                 
                 // Note: In Rust, we can't mutate self in an async trait method

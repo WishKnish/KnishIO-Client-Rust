@@ -64,7 +64,7 @@ impl Default for QueryWalletBundle {
 impl Query for QueryWalletBundle {
     /// Get the GraphQL query string (equivalent to $__query in JS)
     fn get_query(&self) -> &str {
-        r#"query( $bundleHashes: [ String! ] ) {
+        r#"query( $bundleHashes: [String!] ) {
           WalletBundle( bundleHashes: $bundleHashes ) {
             bundleHash,
             metas {

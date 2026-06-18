@@ -1217,8 +1217,11 @@ impl KnishIOClient {
             let response = query.execute(client, None, None).await?;
             let response_data = response.data();
 
-            // Extract wallet list from response
-            if let Some(wallets_data) = response_data.get("WalletList").and_then(|v| v.as_array()) {
+            // Extract wallet list from response. get_data() navigates data.Wallet -> the Vec<Wallet>
+            // array; tolerate a wrapper (a nested field) too.
+            if let Some(wallets_data) = response_data.as_array()
+                .or_else(|| response_data.get("Wallet").and_then(|v| v.as_array()))
+                .or_else(|| response_data.get("WalletList").and_then(|v| v.as_array())) {
                 let wallets: Result<Vec<Wallet>> = wallets_data
                     .iter()
                     .map(|wallet_data| Wallet::from_response_data(wallet_data.clone()))
@@ -1257,8 +1260,8 @@ impl KnishIOClient {
             let response = query.execute(client, None, None).await?;
             let response_data = response.data();
 
-            // Return WalletBundle data
-            if let Some(bundle_data) = response_data.get("WalletBundle") {
+            // Return WalletBundle data (get_data() navigates data.WalletBundle -> the object).
+            if let Some(bundle_data) = response_data.get("WalletBundle").or(Some(response_data)) {
                 return Ok(bundle_data.clone());
             }
 
@@ -1326,8 +1329,9 @@ impl KnishIOClient {
             let response = query.execute(client, None, None).await?;
             let response_data = response.data();
 
-            // Return atom array
-            if let Some(atoms_data) = response_data.get("Atom").and_then(|v| v.as_array()) {
+            // Return atom array (get_data() navigates data.Atom -> the array)
+            if let Some(atoms_data) = response_data.as_array()
+                .or_else(|| response_data.get("Atom").and_then(|v| v.as_array())) {
                 return Ok(atoms_data.clone());
             }
 
@@ -1355,8 +1359,8 @@ impl KnishIOClient {
             let response = query.execute(client, None, None).await?;
             let response_data = response.data();
 
-            // Return batch data
-            if let Some(batch_data) = response_data.get("Batch") {
+            // Return batch data (get_data() navigates data.Batch -> the object)
+            if let Some(batch_data) = response_data.get("Batch").or(Some(response_data)) {
                 return Ok(batch_data.clone());
             }
 
@@ -1384,8 +1388,13 @@ impl KnishIOClient {
             let response = query.execute(client, None, None).await?;
             let response_data = response.data();
 
-            // Return batch history array
-            if let Some(history_data) = response_data.get("BatchHistory").and_then(|v| v.as_array()) {
+            // Return batch history array. NOTE: this query's response class shares ResponseMetaBatch
+            // (data_key data.Batch) while the validator field is `BatchHistory`, so get_data() may
+            // not navigate cleanly — handle the inner array, the BatchHistory field, and the
+            // full-envelope fallback. (Not live-exercised this cycle; see report flags.)
+            if let Some(history_data) = response_data.as_array()
+                .or_else(|| response_data.get("BatchHistory").and_then(|v| v.as_array()))
+                .or_else(|| response_data.get("data").and_then(|d| d.get("BatchHistory")).and_then(|v| v.as_array())) {
                 return Ok(history_data.clone());
             }
 
@@ -1467,8 +1476,9 @@ impl KnishIOClient {
             let response = query.execute(client, None, None).await?;
             let response_data = response.data();
 
-            // Extract ContinuID wallet from response
-            if let Some(continuid_data) = response_data.get("ContinuId") {
+            // Extract ContinuID wallet (get_data() navigates data.ContinuId -> the object, or null
+            // for a genesis bundle).
+            if let Some(continuid_data) = response_data.get("ContinuId").or(Some(response_data)) {
                 if continuid_data.is_null() {
                     return Ok(None);
                 }
@@ -1503,8 +1513,9 @@ impl KnishIOClient {
             let response = query.execute(client, None, None).await?;
             let response_data = response.data();
 
-            // Return policy data
-            if let Some(policy_data) = response_data.get("Policy") {
+            // Return policy data (ResponsePolicy data_key corrected to data.Policy; get_data() ->
+            // the Policy object). Not live-exercised this cycle; see report flags.
+            if let Some(policy_data) = response_data.get("Policy").or(Some(response_data)) {
                 return Ok(policy_data.clone());
             }
 
@@ -1576,8 +1587,11 @@ impl KnishIOClient {
             let response = query.execute(client, None, None).await?;
             let response_data = response.data();
 
-            // Return activity array
-            if let Some(activity_data) = response_data.get("UserActivity").and_then(|v| v.as_array()) {
+            // Return activity array. FLAG: the validator does not currently expose UserActivity
+            // (removed server-side), so this query is non-functional regardless — brought to the
+            // same convention for consistency only. See report flags.
+            if let Some(activity_data) = response_data.as_array()
+                .or_else(|| response_data.get("UserActivity").and_then(|v| v.as_array())) {
                 return Ok(activity_data.clone());
             }
 
@@ -1623,8 +1637,10 @@ impl KnishIOClient {
             let response = query.execute(client, None, None).await?;
             let response_data = response.data();
 
-            // Return active session data
-            if let Some(session_data) = response_data.get("ActiveSession") {
+            // Return active session data. FLAG: the validator exposes `ActiveUser`, not
+            // `ActiveSession`, so this query targets a non-existent field — brought to the same
+            // convention for consistency only; alignment is a follow-up. See report flags.
+            if let Some(session_data) = response_data.get("ActiveSession").or(Some(response_data)) {
                 return Ok(session_data.clone());
             }
 
@@ -1653,8 +1669,8 @@ impl KnishIOClient {
             let response = query.execute(client, None, None).await?;
             let response_data = response.data();
 
-            // Return token data (usually an array, get first element like JS does)
-            if let Some(token_data) = response_data.get("Token") {
+            // Return token data (get_data() navigates data.Token -> the object)
+            if let Some(token_data) = response_data.get("Token").or(Some(response_data)) {
                 return Ok(token_data.clone());
             }
 
@@ -1712,7 +1728,10 @@ impl KnishIOClient {
                 let response = query.execute(client, None, None).await?;
                 let response_data = response.data();
 
-                if let Some(meta_data) = response_data.get("MetaType") {
+                // Via-atom path: ResponseMetaTypeViaAtom's data_key + the validator's MetaTypeViaAtom
+                // field don't cleanly align (3-way mismatch) — use response.data() defensively. The
+                // direct path (through_atom=false -> data.MetaType) is the clean, live-verified one.
+                if let Some(meta_data) = response_data.get("MetaType").or(Some(response_data)) {
                     return Ok(meta_data.clone());
                 }
 
@@ -1744,7 +1763,8 @@ impl KnishIOClient {
                 let response = query.execute(client, None, None).await?;
                 let response_data = response.data();
 
-                if let Some(meta_data) = response_data.get("MetaType") {
+                // Direct path: get_data() navigates data.MetaType -> the meta result.
+                if let Some(meta_data) = response_data.get("MetaType").or(Some(response_data)) {
                     return Ok(meta_data.clone());
                 }
 

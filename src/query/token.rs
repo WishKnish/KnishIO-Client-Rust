@@ -97,7 +97,7 @@ impl Default for QueryToken {
 impl Query for QueryToken {
     /// Get the GraphQL query string (equivalent to $__query in JS)
     fn get_query(&self) -> &str {
-        r#"query( $slug: String, $slugs: [ String! ], $limit: Int, $order: String ) {
+        r#"query( $slug: String, $slugs: [String!], $limit: Int, $order: String ) {
           Token( slug: $slug, slugs: $slugs, limit: $limit, order: $order ) {
             slug,
             name,

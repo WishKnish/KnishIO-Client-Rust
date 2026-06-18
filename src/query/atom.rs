@@ -233,7 +233,7 @@ impl Query for QueryAtom {
           $metaTypes: [String!],
           $metaIds: [String!],
           $indexes: [String!],
-          $filter: [ MetaFilter! ],
+          $filter: [MetaFilter!],
           $latest: Boolean,
           $queryArgs: QueryArgs,
         ) {
