@@ -2244,6 +2244,10 @@ impl KnishIOClient {
 
         // Create a molecule (matches JS lines 1860-1863)
         let mut molecule = Molecule::new();
+        // Set the molecule secret so sign() can derive the OTS key — Molecule::new() leaves it
+        // None; without this, sign() hits the no-secret branch and returns SignatureMalformed.
+        // (transfer_token sets this too; burn_tokens' path was previously unexercised.)
+        molecule.secret = Some(secret.clone());
         molecule.source_wallet = Some(source_wallet.clone());
         molecule.remainder_wallet = Some(remainder_wallet.clone());
 
@@ -2254,8 +2258,10 @@ impl KnishIOClient {
         let bundle = self.bundle.clone();
         molecule.sign(bundle, false, false)?;
 
-        // Check molecule (matches JS line 1868)
-        molecule.check(None)?;
+        // Check molecule (matches JS line 1868). Pass the source wallet so CheckMolecule::isotope_v
+        // validates the 3-atom value molecule via its sender branch (remainder = balance + (-balance)
+        // = 0 == sum). With sender=None, isotope_v rejects any 3-atom V molecule (TransferRemainder).
+        molecule.check(Some(&source_wallet))?;
 
         // Create & execute a mutation (matches JS lines 1871-1875)
         let mutation = MutationProposeMolecule::from_molecule(molecule);

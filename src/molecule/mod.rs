@@ -832,47 +832,74 @@ impl Molecule {
 
         let amount_i128 = amount as i128;
 
-        // Extract all needed data from source_wallet first
-        let (source_atom, source_balance_i128) = if let Some(ref source_wallet) = self.source_wallet {
-            let bal = source_wallet.balance_as_i128();
-            if bal - amount_i128 < 0 {
-                return Err(KnishIOError::BalanceInsufficient);
-            }
-
-            // Remove tokens from source wallet
-            let source_params = AtomCreateParams {
-                isotope: Isotope::V,
-                wallet_info: Some(WalletInfo {
+        // Extract source data before mutable borrows (i128 for precision), mirroring init_value.
+        let (source_balance_i128, source_info, token, remainder_info) = {
+            if let Some(ref source_wallet) = self.source_wallet {
+                let bal = source_wallet.balance_as_i128();
+                if bal - amount_i128 < 0 {
+                    return Err(KnishIOError::BalanceInsufficient);
+                }
+                let source_info = WalletInfo {
                     position: source_wallet.position.clone().unwrap_or_default(),
                     address: source_wallet.address.clone().unwrap_or_default(),
                     token: source_wallet.token.clone(),
                     batch_id: source_wallet.batch_id.clone(),
-                }),
-                value: Some(-amount),
-                ..Default::default()
-            };
-            (Some(Atom::create(source_params)), bal)
-        } else {
-            (None, 0_i128)
+                };
+                let token = source_wallet.token.clone();
+                let remainder_info = self.remainder_wallet.as_ref().map(|rw| WalletInfo {
+                    position: rw.position.clone().unwrap_or_default(),
+                    address: rw.address.clone().unwrap_or_default(),
+                    token: rw.token.clone(),
+                    batch_id: rw.batch_id.clone(),
+                });
+                (bal, Some(source_info), token, remainder_info)
+            } else {
+                return Ok(());
+            }
         };
 
-        // Add atoms after immutable borrow ends
-        if let Some(atom) = source_atom {
-            self.add_atom(atom);
+        if let Some(source_info) = source_info {
+            // V1: debit the ENTIRE source balance (UTXO model). Must be -balance (not -amount):
+            // the burn target gets +amount and the remainder +(balance-amount), so the three
+            // V-atoms sum to zero (validator requires exactly 3 V-atoms + sum == 0). The prior
+            // 2-atom shape (source -amount, remainder; no burn target) was rejected.
+            let source_params = AtomCreateParams {
+                isotope: Isotope::V,
+                wallet_info: Some(source_info),
+                value: None, // Set below with String precision
+                ..Default::default()
+            };
+            let mut source_atom = Atom::create(source_params);
+            source_atom.value = Some((-source_balance_i128).to_string());
+            self.add_atom(source_atom);
 
-            // Add remainder to remainder wallet
-            if let Some(ref remainder_wallet) = self.remainder_wallet {
+            // V2: credit the burn amount to the all-zeros burn address (destruction). Bundle-only
+            // target: empty position/address, meta_id = the all-zeros bundle. Mirrors JS burnToken.
+            let burn_params = AtomCreateParams {
+                isotope: Isotope::V,
+                wallet_info: Some(WalletInfo {
+                    position: String::new(),
+                    address: String::new(),
+                    token,
+                    batch_id: None,
+                }),
+                value: Some(amount),
+                meta_type: Some("walletBundle".to_string()),
+                meta_id: Some(
+                    "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+                ),
+                ..Default::default()
+            };
+            self.add_atom(Atom::create(burn_params));
+
+            // V3: remainder back to the source identity
+            if let Some(remainder_info) = remainder_info {
                 let remainder_params = AtomCreateParams {
                     isotope: Isotope::V,
-                    wallet_info: Some(WalletInfo {
-                        position: remainder_wallet.position.clone().unwrap_or_default(),
-                        address: remainder_wallet.address.clone().unwrap_or_default(),
-                        token: remainder_wallet.token.clone(),
-                        batch_id: remainder_wallet.batch_id.clone(),
-                    }),
-                    value: None,  // Set below with String precision
+                    wallet_info: Some(remainder_info),
+                    value: None, // Set below with String precision
                     meta_type: Some("walletBundle".to_string()),
-                    meta_id: remainder_wallet.bundle.clone(),
+                    meta_id: self.remainder_wallet.as_ref().and_then(|w| w.bundle.clone()),
                     ..Default::default()
                 };
                 let mut remainder_atom = Atom::create(remainder_params);
