@@ -1329,8 +1329,11 @@ impl KnishIOClient {
             let response = query.execute(client, None, None).await?;
             let response_data = response.data();
 
-            // Return atom array (get_data() navigates data.Atom -> the array)
-            if let Some(atoms_data) = response_data.as_array()
+            // The validator's Atom query returns AtomResponse { instances: [...], paginatorInfo },
+            // so get_data() (data.Atom) is that object — the atoms are under `instances`. Prefer it;
+            // fall back to a bare array / nested "Atom" for older shapes.
+            if let Some(atoms_data) = response_data.get("instances").and_then(|v| v.as_array())
+                .or_else(|| response_data.as_array())
                 .or_else(|| response_data.get("Atom").and_then(|v| v.as_array())) {
                 return Ok(atoms_data.clone());
             }
@@ -1904,19 +1907,33 @@ impl KnishIOClient {
             meta = Some(meta_map);
         }
 
-        // Creating the wallet that will receive the new tokens (matches JS lines 1187-1192)
+        // Creating the wallet that will receive the new tokens (matches JS lines 1187-1192).
+        // Wallet::new args: (secret, bundle, token, address, position, batch_id, characters) —
+        // final_batch_id belongs in the batch_id (6th) slot, NOT the address slot.
         let recipient_wallet = Wallet::new(
             Some(self.secret.as_ref().ok_or(KnishIOError::MissingSecret)?),
             Some(&self.bundle.as_ref().ok_or(KnishIOError::MissingBundle)?),
             Some(token),
-            final_batch_id.as_deref(),
-            None,
-            None,
-            None,
+            None,                       // address (derived from the key)
+            None,                       // position (auto-generated)
+            final_batch_id.as_deref(),  // batch_id
+            None,                       // characters
         )?;
 
+        // Resolve the USER source wallet (ContinuID chain head) + a remainder, and set them on the
+        // molecule. init_token_creation builds the C-atom + ContinuID I-atom FROM source_wallet, so
+        // without a source the molecule has zero atoms -> AtomsMissing (mirrors transfer_token).
+        let source_wallet = self.get_source_wallet().await?;
+        let secret = self.secret.clone().ok_or(KnishIOError::MissingSecret)?;
+        let remainder_wallet = source_wallet.create_remainder(&secret)?;
+
+        let mut molecule = Molecule::new();
+        molecule.secret = Some(secret);             // sign() derives the OTS key from molecule.secret
+        molecule.source_wallet = Some(source_wallet);
+        molecule.remainder_wallet = Some(remainder_wallet);
+
         // Create mutation (matches JS lines 1197-1199)
-        let mut mutation = MutationCreateToken::from_molecule(Molecule::new());
+        let mut mutation = MutationCreateToken::from_molecule(molecule);
 
         // Fill molecule (matches JS lines 1201-1205)
         mutation.fill_molecule(CreateTokenParams {
