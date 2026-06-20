@@ -508,7 +508,22 @@ impl Molecule {
     pub fn init_value(&mut self, recipient_wallet: &Wallet, amount: f64) -> Result<()> {
         // Extract needed values before making mutable borrows (i128 for precision)
         let amount_i128 = amount as i128;
-        let (source_balance_i128, source_wallet_info, remainder_wallet_info) = {
+
+        // Stackable transfer: carry each wallet's tokenUnits in the V-atom meta (via set_atom_wallet,
+        // mirroring JS / the cycle-67 burn fix). Gated on token_units non-empty → a fungible transfer
+        // emits NO meta, so the frozen simpleTransfer/complexTransfer parity hashes are unchanged.
+        // The client's split_units(units, remainder, Some(recipient)) sets: source.token_units = SENT,
+        // recipient.token_units = SENT, remainder.token_units = KEPT — each atom carries its own.
+        let units_meta = |w: &Wallet| -> Option<Vec<MetaItem>> {
+            if w.token_units.is_empty() {
+                None
+            } else {
+                let mut am = AtomMeta::new(None);
+                am.set_atom_wallet(w);
+                Some(am.meta)
+            }
+        };
+        let (source_balance_i128, source_wallet_info, remainder_wallet_info, source_units_meta, remainder_units_meta) = {
             if let Some(ref source_wallet) = self.source_wallet {
                 let bal = source_wallet.balance_as_i128();
                 if bal - amount_i128 < 0 {
@@ -521,6 +536,7 @@ impl Molecule {
                     token: source_wallet.token.clone(),
                     batch_id: source_wallet.batch_id.clone(),
                 };
+                let source_units_meta = units_meta(source_wallet);
 
                 let remainder_info = if let Some(ref remainder_wallet) = self.remainder_wallet {
                     Some(WalletInfo {
@@ -532,8 +548,9 @@ impl Molecule {
                 } else {
                     None
                 };
+                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(|rw| units_meta(rw));
 
-                (bal, Some(source_info), remainder_info)
+                (bal, Some(source_info), remainder_info, source_units_meta, remainder_units_meta)
             } else {
                 return Ok(());
             }
@@ -546,6 +563,7 @@ impl Molecule {
                 isotope: Isotope::V,
                 wallet_info: Some(source_info),
                 value: None,  // Set below with String precision
+                meta: source_units_meta, // tokenUnits (SENT units) for a stackable transfer; None for fungible
                 ..Default::default()
             };
             let mut source_atom = Atom::create(source_params);
@@ -564,6 +582,7 @@ impl Molecule {
                 value: Some(amount),
                 meta_type: Some("walletBundle".to_string()),
                 meta_id: recipient_wallet.bundle.clone(),
+                meta: units_meta(recipient_wallet), // tokenUnits (SENT units) for a stackable transfer; None for fungible
                 ..Default::default()
             };
             self.add_atom(Atom::create(recipient_params));
@@ -576,6 +595,7 @@ impl Molecule {
                     value: None,  // Set below with String precision
                     meta_type: Some("walletBundle".to_string()),
                     meta_id: self.remainder_wallet.as_ref().and_then(|w| w.bundle.clone()),
+                    meta: remainder_units_meta, // tokenUnits (KEPT units) for a stackable transfer; None for fungible
                     ..Default::default()
                 };
                 let mut remainder_atom = Atom::create(remainder_params);
