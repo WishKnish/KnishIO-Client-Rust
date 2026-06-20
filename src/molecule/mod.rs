@@ -833,7 +833,20 @@ impl Molecule {
         let amount_i128 = amount as i128;
 
         // Extract source data before mutable borrows (i128 for precision), mirroring init_value.
-        let (source_balance_i128, source_info, token, remainder_info) = {
+        // Stackable burn: carry the wallet's tokenUnits in the V-atom meta (via set_atom_wallet,
+        // mirroring JS). Gated on token_units non-empty → a fungible burn emits NO meta, so the
+        // frozen parity hashes are unchanged. The source atom carries the BURNED units (split_units
+        // leaves them on the source), the remainder atom carries the KEPT units.
+        let units_meta = |w: &Wallet| -> Option<Vec<MetaItem>> {
+            if w.token_units.is_empty() {
+                None
+            } else {
+                let mut am = AtomMeta::new(None);
+                am.set_atom_wallet(w);
+                Some(am.meta)
+            }
+        };
+        let (source_balance_i128, source_info, token, remainder_info, source_units_meta, remainder_units_meta) = {
             if let Some(ref source_wallet) = self.source_wallet {
                 let bal = source_wallet.balance_as_i128();
                 if bal - amount_i128 < 0 {
@@ -846,13 +859,15 @@ impl Molecule {
                     batch_id: source_wallet.batch_id.clone(),
                 };
                 let token = source_wallet.token.clone();
+                let source_units_meta = units_meta(source_wallet);
                 let remainder_info = self.remainder_wallet.as_ref().map(|rw| WalletInfo {
                     position: rw.position.clone().unwrap_or_default(),
                     address: rw.address.clone().unwrap_or_default(),
                     token: rw.token.clone(),
                     batch_id: rw.batch_id.clone(),
                 });
-                (bal, Some(source_info), token, remainder_info)
+                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(|rw| units_meta(rw));
+                (bal, Some(source_info), token, remainder_info, source_units_meta, remainder_units_meta)
             } else {
                 return Ok(());
             }
@@ -867,6 +882,7 @@ impl Molecule {
                 isotope: Isotope::V,
                 wallet_info: Some(source_info),
                 value: None, // Set below with String precision
+                meta: source_units_meta, // tokenUnits (burned units) for a stackable burn; None for fungible
                 ..Default::default()
             };
             let mut source_atom = Atom::create(source_params);
@@ -900,6 +916,7 @@ impl Molecule {
                     value: None, // Set below with String precision
                     meta_type: Some("walletBundle".to_string()),
                     meta_id: self.remainder_wallet.as_ref().and_then(|w| w.bundle.clone()),
+                    meta: remainder_units_meta, // tokenUnits (kept units) for a stackable burn; None for fungible
                     ..Default::default()
                 };
                 let mut remainder_atom = Atom::create(remainder_params);
