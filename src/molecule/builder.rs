@@ -41,6 +41,7 @@ use crate::molecule::Molecule;
 use crate::atom::Atom;
 use crate::wallet::Wallet;
 use crate::types::{Isotope, MetaItem};
+use crate::meta::AtomMeta;
 use crate::error::{KnishIOError, Result};
 
 /// Type-level states for compile-time validation
@@ -178,6 +179,10 @@ pub struct StackableTransferParams {
     pub recipient_position: String,
     pub recipient_bundle: Option<String>,
     pub batch_id: Option<String>,
+    /// Stackable/NFT unit ids to transfer. Empty = fungible (no per-unit movement).
+    /// When set, the units are split off the source (SENT) + the rest kept on the remainder
+    /// (KEPT), and emitted as `tokenUnits` meta so the validator moves per-unit ownership.
+    pub units: Vec<String>,
 }
 
 // ============================================================================
@@ -372,7 +377,9 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
     ///
     /// Builder in WithAtoms state with 2-3 V-isotope atoms added
     pub fn add_stackable_transfer(mut self, params: StackableTransferParams) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
-        let source_wallet = self.source_wallet.as_ref()
+        // Clone the wallets so we can split token_units without disturbing the builder's
+        // (which are returned for signing — signing doesn't depend on token_units).
+        let mut source_wallet = self.source_wallet.clone()
             .ok_or_else(|| KnishIOError::custom("Source wallet is required"))?;
 
         let source_balance = source_wallet.balance_as_i128();
@@ -382,8 +389,39 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
             return Err(KnishIOError::BalanceInsufficient);
         }
 
-        // Atom 1: Source debit (negative full balance)
-        let source_atom = Atom::new(
+        let remainder = source_balance - amount_i128;
+
+        // Resolve the remainder wallet (required when there's change) + split stackable units:
+        // SENT stays on source (+ recipient), KEPT goes to the remainder. Mirrors Molecule::init_value
+        // so the validator's Phase 2a moves per-unit ownership (it reads SENT from the source atom
+        // and KEPT from the remainder atom). Fungible (units empty) emits no meta — unchanged.
+        let mut remainder_wallet = if remainder > 0 {
+            Some(self.remainder_wallet.clone()
+                .ok_or_else(|| KnishIOError::custom("Remainder wallet required when transfer < source balance"))?)
+        } else {
+            None
+        };
+        if !params.units.is_empty() {
+            if let Some(ref mut rem) = remainder_wallet {
+                source_wallet.split_units(&params.units, rem, None);
+            }
+            // Full transfer (no remainder): all units are SENT; source_wallet.token_units holds them.
+        }
+
+        // tokenUnits meta from a wallet's token_units (None when empty → fungible emits nothing).
+        let units_meta = |w: &Wallet| -> Option<Vec<MetaItem>> {
+            if w.token_units.is_empty() {
+                None
+            } else {
+                let mut am = AtomMeta::new(None);
+                am.set_atom_wallet(w);
+                Some(am.meta)
+            }
+        };
+        let sent_meta = units_meta(&source_wallet);
+
+        // Atom 1: Source debit (negative full balance), carries SENT units.
+        let mut source_atom = Atom::new(
             source_wallet.position.as_deref().unwrap_or(""),
             source_wallet.address.as_deref().unwrap_or(""),
             Isotope::V,
@@ -393,14 +431,13 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
             params.batch_id.as_deref(),
             None,
             None,
-            None,
+            sent_meta.clone(),
         );
-        let mut source_atom = source_atom;
         source_atom.value = Some((-source_balance).to_string());
         self.molecule.add_atom(source_atom);
 
-        // Atom 2: Recipient credit (positive transfer amount)
-        let recipient_atom = Atom::new(
+        // Atom 2: Recipient credit (positive transfer amount), carries SENT units.
+        let mut recipient_atom = Atom::new(
             &params.recipient_position,
             &params.recipient_address,
             Isotope::V,
@@ -410,33 +447,30 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
             params.batch_id.as_deref(),
             Some("walletBundle"),
             params.recipient_bundle.as_deref(),
-            None,
+            sent_meta,
         );
-        let mut recipient_atom = recipient_atom;
         recipient_atom.value = Some(amount_i128.to_string());
         self.molecule.add_atom(recipient_atom);
 
-        // Atom 3: Remainder credit (change back to remainder wallet)
-        let remainder = source_balance - amount_i128;
+        // Atom 3: Remainder credit (change back to remainder wallet), carries KEPT units.
         if remainder > 0 {
-            let remainder_wallet = self.remainder_wallet.as_ref()
-                .ok_or_else(|| KnishIOError::custom("Remainder wallet required when transfer < source balance"))?;
-
-            let remainder_atom = Atom::new(
-                remainder_wallet.position.as_deref().unwrap_or(""),
-                remainder_wallet.address.as_deref().unwrap_or(""),
-                Isotope::V,
-                &params.token,
-            ).with_optional_fields(
-                None,
-                params.batch_id.as_deref(),
-                Some("walletBundle"),
-                remainder_wallet.bundle.as_deref(),
-                None,
-            );
-            let mut remainder_atom = remainder_atom;
-            remainder_atom.value = Some(remainder.to_string());
-            self.molecule.add_atom(remainder_atom);
+            if let Some(rem) = &remainder_wallet {
+                let kept_meta = units_meta(rem);
+                let mut remainder_atom = Atom::new(
+                    rem.position.as_deref().unwrap_or(""),
+                    rem.address.as_deref().unwrap_or(""),
+                    Isotope::V,
+                    &params.token,
+                ).with_optional_fields(
+                    None,
+                    params.batch_id.as_deref(),
+                    Some("walletBundle"),
+                    rem.bundle.as_deref(),
+                    kept_meta,
+                );
+                remainder_atom.value = Some(remainder.to_string());
+                self.molecule.add_atom(remainder_atom);
+            }
         }
 
         Ok(TypeSafeMoleculeBuilder {
@@ -1338,6 +1372,7 @@ mod tests {
                 recipient_position: recipient_wallet.position.clone().unwrap(),
                 recipient_bundle: recipient_wallet.bundle.clone(),
                 batch_id: Some("batch-001".to_string()),
+                units: vec![],
             })
             .unwrap();
 
@@ -1374,6 +1409,63 @@ mod tests {
     }
 
     #[test]
+    fn test_stackable_transfer_moves_units() {
+        use crate::token_unit::TokenUnit;
+
+        // Source holds 2 units (u1, u2), balance 2; transfer u1, keep u2.
+        let mut source_wallet =
+            Wallet::create(Some("stk-units-secret"), None, "NFT", None, None).unwrap();
+        source_wallet.set_balance_i128(2);
+        source_wallet.batch_id = Some("b-units".to_string());
+        source_wallet.token_units = vec![
+            TokenUnit::new("u1".to_string(), "Unit One".to_string(), None),
+            TokenUnit::new("u2".to_string(), "Unit Two".to_string(), None),
+        ];
+
+        let remainder_wallet =
+            Wallet::create(Some("stk-units-secret"), None, "NFT", Some("W2"), None).unwrap();
+        let recipient_wallet =
+            Wallet::create(Some("recipient-secret"), None, "NFT", None, None).unwrap();
+
+        let builder = TypeSafeMoleculeBuilder::new("stk-units-secret")
+            .with_source_wallet(source_wallet.clone())
+            .with_remainder_wallet(remainder_wallet.clone())
+            .add_stackable_transfer(StackableTransferParams {
+                token: "NFT".to_string(),
+                amount: 1.0,
+                recipient_address: recipient_wallet.address.clone().unwrap(),
+                recipient_position: recipient_wallet.position.clone().unwrap(),
+                recipient_bundle: recipient_wallet.bundle.clone(),
+                batch_id: Some("b-units".to_string()),
+                units: vec!["u1".to_string()],
+            })
+            .unwrap();
+
+        let atoms = &builder.molecule().atoms;
+        assert_eq!(atoms.len(), 3, "3 V-atoms");
+        // Conservation: -2 + 1 + 1 = 0 (full-balance debit + recipient + remainder).
+        assert_eq!(atoms[0].value, Some("-2".to_string()));
+        assert_eq!(atoms[1].value, Some("1".to_string()));
+        assert_eq!(atoms[2].value, Some("1".to_string()));
+
+        let units_of = |i: usize| atoms[i].meta.iter().find(|m| m.key == "tokenUnits").map(|m| m.value.clone());
+
+        // SENT (u1) on the source atom — and NOT the kept u2.
+        let src = units_of(0).expect("source atom carries tokenUnits");
+        assert!(src.contains("u1"), "source SENT contains u1: {}", src);
+        assert!(!src.contains("u2"), "source SENT excludes the kept u2: {}", src);
+
+        // SENT (u1) on the recipient atom too (cross-SDK wire form).
+        let rec = units_of(1).expect("recipient atom carries tokenUnits");
+        assert!(rec.contains("u1"), "recipient SENT contains u1: {}", rec);
+
+        // KEPT (u2) on the remainder atom — and NOT the sent u1.
+        let rem = units_of(2).expect("remainder atom carries tokenUnits");
+        assert!(rem.contains("u2"), "remainder KEPT contains u2: {}", rem);
+        assert!(!rem.contains("u1"), "remainder KEPT excludes the sent u1: {}", rem);
+    }
+
+    #[test]
     fn test_stackable_transfer_exact_amount() {
         // Transfer the entire balance — no remainder atom needed
         let mut source_wallet = Wallet::create(
@@ -1402,6 +1494,7 @@ mod tests {
                 recipient_position: recipient_wallet.position.clone().unwrap(),
                 recipient_bundle: None,
                 batch_id: None,
+                units: vec![],
             })
             .unwrap();
 
@@ -1431,6 +1524,7 @@ mod tests {
                 recipient_position: "W1".to_string(),
                 recipient_bundle: None,
                 batch_id: None,
+                units: vec![],
             });
 
         assert!(result.is_err(), "Should fail with insufficient balance");
@@ -1481,6 +1575,7 @@ mod tests {
                 recipient_position: recipient.position.clone().unwrap(),
                 recipient_bundle: recipient.bundle.clone(),
                 batch_id: Some("batch-v".to_string()),
+                units: vec![],
             })
             .unwrap()
             .ready_to_sign()
@@ -1585,6 +1680,7 @@ mod tests {
                 recipient_position: recipient.position.clone().unwrap(),
                 recipient_bundle: None,
                 batch_id: None,
+                units: vec![],
             })
             .unwrap()
             .ready_to_sign()
