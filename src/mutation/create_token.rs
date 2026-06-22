@@ -14,6 +14,18 @@ use crate::types::MetaItem;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// Serialize a meta value to its wire string. A JSON string yields its inner content (NOT a
+/// re-quoted `"..."`); other types (numbers, arrays) use their JSON representation. Mirrors JS,
+/// where meta string values are passed bare and the validator's `MetaItemInput.value` is a plain
+/// String. Without this, `fungibility="stackable"` reached the validator double-quoted as
+/// `"stackable"` (rejected per patent ¶0066) and `tokenUnits` was double-encoded.
+fn meta_value_to_string(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
 /// Parameters for fillMolecule (matches JS MutationCreateToken fillMolecule parameters)
 /// JS: fillMolecule({ recipientWallet, amount, meta = null })
 #[derive(Debug, Clone)]
@@ -59,7 +71,7 @@ impl MutationCreateToken {
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
             // Convert meta HashMap to Vec<MetaItem>
             let meta_items = params.meta.unwrap_or_default().into_iter()
-                .map(|(k, v)| MetaItem::new(&k, &v.to_string()))
+                .map(|(k, v)| MetaItem::new(&k, &meta_value_to_string(&v)))
                 .collect();
             
             molecule.init_token_creation(&params.recipient_wallet, params.amount, meta_items)?;

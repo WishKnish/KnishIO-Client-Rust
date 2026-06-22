@@ -40,6 +40,23 @@ pub enum RecipientType {
     Wallet(Wallet),
 }
 
+/// One destination in a multi-recipient transfer (WP line 544).
+///
+/// Provide `units` for a stackable per-unit transfer (its amount is `units.len()`), or `amount`
+/// for a fungible transfer (not both). `batch_id` is optional — a distinct one is generated per
+/// recipient when omitted, so each shadow wallet is independently claimable.
+#[derive(Debug, Clone)]
+pub struct TransferRecipient {
+    /// Recipient bundle hash (64 hex chars)
+    pub bundle_hash: String,
+    /// Fungible amount (mutually exclusive with `units`)
+    pub amount: Option<f64>,
+    /// Stackable unit ids destined for this recipient (empty = fungible)
+    pub units: Vec<String>,
+    /// Optional explicit batch id for the recipient's shadow wallet
+    pub batch_id: Option<String>,
+}
+
 /// Main KnishIO client (equivalent to KnishIOClient.js)
 /// 
 /// Provides the primary interface for interacting with KnishIO distributed ledger nodes.
@@ -1454,6 +1471,13 @@ impl KnishIOClient {
             queried.characters.as_deref(),
         )?;
         source_wallet.balance = queried.balance.clone();
+        // Preserve the queried stackable token units on the signing wallet. Wallet::new above
+        // re-derives only the key/address, so without this the source carries NO token_units and a
+        // stackable transfer silently degrades to fungible (the molecule emits no tokenUnits meta →
+        // the validator's per-unit routing no-ops → units never move). The source's batch id
+        // likewise carries over.
+        source_wallet.token_units = queried.token_units.clone();
+        source_wallet.batch_id = queried.batch_id.clone();
 
         Ok(source_wallet)
     }
@@ -2053,6 +2077,103 @@ impl KnishIOClient {
         })?;
 
         // Execute mutation (matches JS line 1716)
+        let client = self.client.as_ref()
+            .ok_or(KnishIOError::NoClient)?;
+
+        mutation.execute(client, None, None).await
+    }
+
+    /// Transfer tokens to MULTIPLE recipients in a single molecule (WP line 544).
+    ///
+    /// Each recipient receives its own amount and, for stackable tokens, its own subset of token
+    /// units; the source is fully drained and the unsent change returns via the remainder atom
+    /// (UTXO), so the V-atoms conserve. Single-recipient transfers should keep using
+    /// transfer_token(); this is its N-recipient generalization (the cycle-91 JS transferTokens).
+    ///
+    /// # Parameters
+    /// - `token`: Token slug to transfer
+    /// - `recipients`: One TransferRecipient per destination (bundle_hash + amount/units + batch)
+    /// - `source_wallet`: Source wallet (optional, queried if not provided)
+    pub async fn transfer_tokens(
+        &mut self,
+        token: &str,
+        recipients: Vec<TransferRecipient>,
+        source_wallet: Option<Wallet>,
+    ) -> Result<Box<dyn Response>> {
+        use crate::mutation::transfer_tokens::{MutationTransferTokens, MultiTransferTokensParams};
+        use crate::mutation::Mutation;
+
+        // Ensure we have authentication
+        self.ensure_authentication(None).await?;
+
+        // Per-recipient amount: units.len() for stackable, else the explicit amount
+        let mut amounts: Vec<f64> = Vec::with_capacity(recipients.len());
+        for recipient in &recipients {
+            if !recipient.units.is_empty() {
+                // Can't move stackable units AND provide an amount
+                if recipient.amount.unwrap_or(0.0) > 0.0 {
+                    return Err(KnishIOError::StackableUnitAmount);
+                }
+                amounts.push(recipient.units.len() as f64);
+            } else {
+                amounts.push(recipient.amount.unwrap_or(0.0));
+            }
+        }
+        let total: f64 = amounts.iter().sum();
+
+        // Get a source wallet (loads its token units)
+        let mut source_wallet = if let Some(wallet) = source_wallet {
+            wallet
+        } else {
+            self.query_source_wallet(token, total, None).await?
+        };
+
+        // Do you have enough tokens?
+        if source_wallet.balance_as_i128() < (total as i128) {
+            return Err(KnishIOError::TransferBalance);
+        }
+
+        // Build a shadow recipient wallet per recipient, each with its own batch ID
+        let mut recipient_wallets: Vec<Wallet> = Vec::with_capacity(recipients.len());
+        for recipient in &recipients {
+            let mut recipient_wallet = Wallet::create(
+                None,
+                Some(&recipient.bundle_hash),
+                token,
+                None,
+                None,
+            )?;
+            if let Some(ref bid) = recipient.batch_id {
+                recipient_wallet.batch_id = Some(bid.clone());
+            } else {
+                recipient_wallet.init_batch_id(Some(&source_wallet), false);
+            }
+            recipient_wallets.push(recipient_wallet);
+        }
+
+        // Create a remainder from the source wallet
+        let secret = self.secret.as_ref()
+            .ok_or(KnishIOError::MissingSecret)?;
+        let mut remainder_wallet = source_wallet.create_remainder(secret)?;
+
+        // Token units splitting (N-way): source keeps the union, each recipient its subset,
+        // remainder the kept units
+        let unit_lists: Vec<Vec<String>> = recipients.iter().map(|r| r.units.clone()).collect();
+        source_wallet.split_units_multi(&unit_lists, &mut recipient_wallets, &mut remainder_wallet);
+
+        // Build the molecule itself
+        let mut molecule = Molecule::new();
+        molecule.secret = Some(secret.clone());
+        molecule.source_wallet = Some(source_wallet.clone());
+        molecule.remainder_wallet = Some(remainder_wallet.clone());
+
+        // Create mutation + fill (multi) + execute
+        let mut mutation = MutationTransferTokens::from_molecule(molecule);
+        mutation.fill_molecule_multi(MultiTransferTokensParams {
+            recipient_wallets,
+            amounts,
+        })?;
+
         let client = self.client.as_ref()
             .ok_or(KnishIOError::NoClient)?;
 

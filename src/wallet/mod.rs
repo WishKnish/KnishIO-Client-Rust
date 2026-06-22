@@ -255,24 +255,41 @@ impl Wallet {
 
         wallet.balance = balance;
 
-        // Parse token units using iterator chain for better performance
+        // Parse token units. The GraphQL Balance response returns each unit as an OBJECT
+        // { id, name, metas } (metas is a String scalar / null on the wire), so parse the object
+        // form; tolerate the array-of-arrays wire form [id, name, metas] too (the atom-meta shape).
+        // Without the object branch, query_balance returned empty token_units, silently degrading
+        // every stackable transfer to fungible (units never moved). The unit id is what matters.
         wallet.token_units = data["tokenUnits"]
             .as_array()
             .map(|units_data| {
                 units_data
                     .iter()
-                    .filter_map(|unit_data| unit_data.as_array())
-                    .filter(|unit_array| unit_array.len() >= 2)
-                    .map(|unit_array| {
-                        let id = unit_array[0].as_str().unwrap_or("").to_string();
-                        let name = unit_array[1].as_str().map(|s| s.to_string()).unwrap_or_default();
-                        
-                        let meta = (unit_array.len() > 2)
-                            .then(|| unit_array[2].as_object())
-                            .flatten()
-                            .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
-                        
-                        TokenUnit::new(id, name, meta)
+                    .filter_map(|unit_data| {
+                        if let Some(obj) = unit_data.as_object() {
+                            let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            if id.is_empty() {
+                                return None;
+                            }
+                            let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let meta = obj.get("metas")
+                                .and_then(|v| v.as_object())
+                                .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                            Some(TokenUnit::new(id, name, meta))
+                        } else if let Some(unit_array) = unit_data.as_array() {
+                            if unit_array.len() < 2 {
+                                return None;
+                            }
+                            let id = unit_array[0].as_str().unwrap_or("").to_string();
+                            let name = unit_array[1].as_str().map(|s| s.to_string()).unwrap_or_default();
+                            let meta = (unit_array.len() > 2)
+                                .then(|| unit_array[2].as_object())
+                                .flatten()
+                                .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                            Some(TokenUnit::new(id, name, meta))
+                        } else {
+                            None
+                        }
                     })
                     .collect()
             })
@@ -472,12 +489,60 @@ impl Wallet {
 
         // Update token units using pattern matching
         self.token_units = recipient_units.clone();
-        
+
         if let Some(recipient) = recipient_wallet {
             recipient.token_units = recipient_units;
         }
-        
+
         remainder_wallet.token_units = remainder_units;
+    }
+
+    /// Split token units across MULTIPLE recipients (WP line 544).
+    ///
+    /// N-way sibling of `split_units`: the source retains the SENT union (all units leaving),
+    /// each recipient gets its own subset, and the remainder gets the KEPT units (those not
+    /// assigned to any recipient). `recipient_unit_lists` is parallel to `recipient_wallets`.
+    pub fn split_units_multi(
+        &mut self,
+        recipient_unit_lists: &[Vec<String>],
+        recipient_wallets: &mut [Wallet],
+        remainder_wallet: &mut Wallet,
+    ) {
+        use std::collections::HashSet;
+
+        // The union of all unit ids leaving the source
+        let sent_ids: HashSet<String> = recipient_unit_lists.iter().flatten().cloned().collect();
+
+        // Nothing to split (fungible transfer) — leave token units untouched
+        if sent_ids.is_empty() {
+            return;
+        }
+
+        // Each recipient gets its own subset of the source's token units
+        for (recipient, ids) in recipient_wallets.iter_mut().zip(recipient_unit_lists.iter()) {
+            recipient.token_units = self
+                .token_units
+                .iter()
+                .filter(|token_unit| ids.contains(&token_unit.id))
+                .cloned()
+                .collect();
+        }
+
+        // The remainder keeps everything not sent to any recipient (KEPT)
+        remainder_wallet.token_units = self
+            .token_units
+            .iter()
+            .filter(|token_unit| !sent_ids.contains(&token_unit.id))
+            .cloned()
+            .collect();
+
+        // The source carries the SENT union (the ownership authority the validator reads)
+        self.token_units = self
+            .token_units
+            .iter()
+            .filter(|token_unit| sent_ids.contains(&token_unit.id))
+            .cloned()
+            .collect();
     }
 
     /// Create a remainder wallet from the source wallet

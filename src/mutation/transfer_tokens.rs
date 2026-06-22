@@ -22,6 +22,15 @@ pub struct TransferTokensParams {
     pub amount: f64,
 }
 
+/// Parameters for fill_molecule_multi — a MULTI-recipient transfer (WP line 544).
+#[derive(Debug, Clone)]
+pub struct MultiTransferTokensParams {
+    /// The recipient wallets
+    pub recipient_wallets: Vec<Wallet>,
+    /// The amount per recipient (parallel to recipient_wallets)
+    pub amounts: Vec<f64>,
+}
+
 /// Mutation for moving tokens between wallets
 pub struct MutationTransferTokens {
     /// The underlying propose molecule mutation
@@ -65,10 +74,31 @@ impl MutationTransferTokens {
                 molecule.check(None)?;
             }
         }
-        
+
         Ok(())
     }
-    
+
+    /// Fill the molecule for a MULTI-recipient transfer (WP line 544) — mirror of fill_molecule.
+    pub fn fill_molecule_multi(&mut self, params: MultiTransferTokensParams) -> crate::error::Result<()> {
+        if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
+            molecule.init_values(&params.recipient_wallets, &params.amounts)?;
+
+            molecule.sign(
+                None,  // empty bundle for sign({})
+                false, // anonymous = false
+                true   // compressed = true
+            )?;
+
+            if let Some(ref source_wallet) = molecule.source_wallet {
+                molecule.check(Some(source_wallet))?;
+            } else {
+                molecule.check(None)?;
+            }
+        }
+
+        Ok(())
+    }
+
 }
 
 #[async_trait::async_trait]

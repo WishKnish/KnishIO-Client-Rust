@@ -606,7 +606,119 @@ impl Molecule {
 
         Ok(())
     }
-    
+
+    /// Multi-recipient value transfer (WP line 544: one molecule funds N recipients).
+    ///
+    /// Builds 1 source atom (full-balance debit, carrying the SENT union of all units) + one atom
+    /// per recipient (its amount + its own units, walletBundle-bonded) + 1 remainder atom (the KEPT
+    /// change). Conservation: -balance + Σ amounts + (balance - Σ amounts) == 0. Per-unit routing is
+    /// layered by Wallet::split_units_multi(...) BEFORE this — it sets the source's token_units to
+    /// the union, each recipient's to its subset, and the remainder's to the kept units. The
+    /// single-recipient init_value() is the N=1 special case; both share the units_meta gating
+    /// (a fungible transfer emits no meta, so the frozen parity hashes are unchanged).
+    ///
+    /// # Arguments
+    /// * `recipient_wallets` - Wallets to receive tokens
+    /// * `amounts` - Amount per recipient (parallel to recipient_wallets)
+    pub fn init_values(&mut self, recipient_wallets: &[Wallet], amounts: &[f64]) -> Result<()> {
+        let total: f64 = amounts.iter().sum();
+        let total_i128 = total as i128;
+
+        let units_meta = |w: &Wallet| -> Option<Vec<MetaItem>> {
+            if w.token_units.is_empty() {
+                None
+            } else {
+                let mut am = AtomMeta::new(None);
+                am.set_atom_wallet(w);
+                Some(am.meta)
+            }
+        };
+
+        let (source_balance_i128, source_wallet_info, remainder_wallet_info, source_units_meta, remainder_units_meta) = {
+            if let Some(ref source_wallet) = self.source_wallet {
+                let bal = source_wallet.balance_as_i128();
+                if bal - total_i128 < 0 {
+                    return Err(KnishIOError::BalanceInsufficient);
+                }
+
+                let source_info = WalletInfo {
+                    position: source_wallet.position.clone().unwrap_or_default(),
+                    address: source_wallet.address.clone().unwrap_or_default(),
+                    token: source_wallet.token.clone(),
+                    batch_id: source_wallet.batch_id.clone(),
+                };
+                let source_units_meta = units_meta(source_wallet);
+
+                let remainder_info = if let Some(ref remainder_wallet) = self.remainder_wallet {
+                    Some(WalletInfo {
+                        position: remainder_wallet.position.clone().unwrap_or_default(),
+                        address: remainder_wallet.address.clone().unwrap_or_default(),
+                        token: remainder_wallet.token.clone(),
+                        batch_id: remainder_wallet.batch_id.clone(),
+                    })
+                } else {
+                    None
+                };
+                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(|rw| units_meta(rw));
+
+                (bal, Some(source_info), remainder_info, source_units_meta, remainder_units_meta)
+            } else {
+                return Ok(());
+            }
+        };
+
+        if let Some(source_info) = source_wallet_info {
+            // Source: debit the FULL balance (UTXO); carries the SENT union of all units
+            let source_params = AtomCreateParams {
+                isotope: Isotope::V,
+                wallet_info: Some(source_info),
+                value: None,  // Set below with String precision
+                meta: source_units_meta, // tokenUnits (SENT union) for a stackable transfer; None for fungible
+                ..Default::default()
+            };
+            let mut source_atom = Atom::create(source_params);
+            source_atom.value = Some((-source_balance_i128).to_string());
+            self.add_atom(source_atom);
+
+            // One atom per recipient: its amount + its own units, bonded to the recipient bundle
+            for (recipient_wallet, amount) in recipient_wallets.iter().zip(amounts.iter()) {
+                let recipient_params = AtomCreateParams {
+                    isotope: Isotope::V,
+                    wallet_info: Some(WalletInfo {
+                        position: recipient_wallet.position.clone().unwrap_or_default(),
+                        address: recipient_wallet.address.clone().unwrap_or_default(),
+                        token: recipient_wallet.token.clone(),
+                        batch_id: recipient_wallet.batch_id.clone(),
+                    }),
+                    value: Some(*amount),
+                    meta_type: Some("walletBundle".to_string()),
+                    meta_id: recipient_wallet.bundle.clone(),
+                    meta: units_meta(recipient_wallet), // tokenUnits (this recipient's subset); None for fungible
+                    ..Default::default()
+                };
+                self.add_atom(Atom::create(recipient_params));
+            }
+
+            // Remainder: the change back to the sender; carries the KEPT units
+            if let Some(remainder_info) = remainder_wallet_info {
+                let remainder_params = AtomCreateParams {
+                    isotope: Isotope::V,
+                    wallet_info: Some(remainder_info),
+                    value: None,  // Set below with String precision
+                    meta_type: Some("walletBundle".to_string()),
+                    meta_id: self.remainder_wallet.as_ref().and_then(|w| w.bundle.clone()),
+                    meta: remainder_units_meta, // tokenUnits (KEPT units); None for fungible
+                    ..Default::default()
+                };
+                let mut remainder_atom = Atom::create(remainder_params);
+                remainder_atom.value = Some((source_balance_i128 - total_i128).to_string());
+                self.add_atom(remainder_atom);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Initialize token creation molecule
     /// # Arguments
     /// * `recipient_wallet` - Wallet to receive new tokens
@@ -1783,7 +1895,82 @@ mod tests {
         assert_eq!(molecule.atoms[1].value, Some("50".to_string()));
         assert_eq!(molecule.atoms[2].value, Some("50".to_string())); // remainder: 100 - 50
     }
-    
+
+    #[test]
+    fn test_init_values_multi_recipient() {
+        use crate::token_unit::TokenUnit;
+
+        // Source holds 3 units (u1,u2,u3), balance 3; transfer u1->R1, u2->R2, keep u3.
+        let mut source_wallet = Wallet::create(Some("mr-secret"), None, "STK", None, None).unwrap();
+        source_wallet.set_balance_i128(3);
+        source_wallet.batch_id = Some("b-mr".to_string());
+        source_wallet.token_units = vec![
+            TokenUnit::new("u1".to_string(), "Unit One".to_string(), None),
+            TokenUnit::new("u2".to_string(), "Unit Two".to_string(), None),
+            TokenUnit::new("u3".to_string(), "Unit Three".to_string(), None),
+        ];
+
+        let mut recipient_wallets = vec![
+            Wallet::create(Some("mr-r1-secret"), None, "STK", None, None).unwrap(),
+            Wallet::create(Some("mr-r2-secret"), None, "STK", None, None).unwrap(),
+        ];
+        let mut remainder_wallet = Wallet::create(Some("mr-secret"), None, "STK", None, None).unwrap();
+
+        // N-way split: u1->R1, u2->R2, keep u3
+        let recipient_unit_lists = vec![vec!["u1".to_string()], vec!["u2".to_string()]];
+        source_wallet.split_units_multi(&recipient_unit_lists, &mut recipient_wallets, &mut remainder_wallet);
+
+        let ids = |w: &Wallet| w.token_units.iter().map(|u| u.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&source_wallet), vec!["u1", "u2"], "source carries the SENT union");
+        assert_eq!(ids(&recipient_wallets[0]), vec!["u1"], "R1 gets u1");
+        assert_eq!(ids(&recipient_wallets[1]), vec!["u2"], "R2 gets u2");
+        assert_eq!(ids(&remainder_wallet), vec!["u3"], "remainder keeps u3");
+
+        let r1_bundle = recipient_wallets[0].bundle.clone();
+        let r2_bundle = recipient_wallets[1].bundle.clone();
+        let rem_bundle = remainder_wallet.bundle.clone();
+
+        let mut molecule = Molecule::with_params(
+            Some("mr-secret".to_string()),
+            None,
+            Some(source_wallet),
+            Some(remainder_wallet),
+            None,
+            None,
+        );
+        molecule.init_values(&recipient_wallets, &[1.0, 1.0]).unwrap();
+
+        let v_atoms: Vec<&Atom> = molecule.atoms.iter().filter(|a| a.isotope == Isotope::V).collect();
+        assert_eq!(v_atoms.len(), 4, "source + 2 recipients + remainder");
+
+        // Conservation: -3 + 1 + 1 + 1 == 0
+        let sum: i128 = v_atoms.iter()
+            .map(|a| a.value.as_ref().unwrap().parse::<i128>().unwrap())
+            .sum();
+        assert_eq!(sum, 0, "V-atoms conserve");
+
+        let units_of = |atom: &Atom| atom.meta.iter().find(|m| m.key == "tokenUnits").map(|m| m.value.clone());
+
+        // Source atom: -3, carries the SENT union (u1 + u2)
+        let source_atom = &molecule.atoms[0];
+        assert_eq!(source_atom.value, Some("-3".to_string()));
+        let src_units = units_of(source_atom).expect("source carries tokenUnits");
+        assert!(src_units.contains("u1") && src_units.contains("u2"), "source union: {}", src_units);
+
+        // Recipient atoms: +1 each, bonded to their bundle, carrying their own unit
+        let r1_atom = molecule.atoms.iter().find(|a| a.meta_id == r1_bundle).expect("R1 atom");
+        assert_eq!(r1_atom.value, Some("1".to_string()));
+        assert!(units_of(r1_atom).unwrap().contains("u1"));
+        let r2_atom = molecule.atoms.iter().find(|a| a.meta_id == r2_bundle).expect("R2 atom");
+        assert_eq!(r2_atom.value, Some("1".to_string()));
+        assert!(units_of(r2_atom).unwrap().contains("u2"));
+
+        // Remainder atom: +1, carries the KEPT u3
+        let rem_atom = molecule.atoms.iter().find(|a| a.meta_id == rem_bundle).expect("remainder atom");
+        assert_eq!(rem_atom.value, Some("1".to_string()));
+        assert!(units_of(rem_atom).unwrap().contains("u3"));
+    }
+
     #[test]
     fn test_insufficient_balance() {
         let mut source_wallet = Wallet::create(
