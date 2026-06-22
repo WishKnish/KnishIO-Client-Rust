@@ -2746,10 +2746,14 @@ impl KnishIOClient {
             batch_id: batch_id.map(|s| s.to_string()),
         };
 
-        // Create a wallet for fill_molecule (shadow wallet claims use a temporary wallet)
+        // Create a wallet for fill_molecule (shadow wallet claims use a temporary wallet).
+        // The claimed wallet MUST carry the batch_id so the validator matches/promotes the shadow
+        // by (bundle, token, batch_id); without it the C-atom's batch_id is None and the claim
+        // matches no shadow (matches JS Wallet.create({secret, token, batchId})).
         let secret = self.secret.as_deref().ok_or(KnishIOError::MissingSecret)?;
         let bundle = self.bundle.as_deref();
-        let wallet = Wallet::create(Some(secret), bundle, token, None, None)?;
+        let mut wallet = Wallet::create(Some(secret), bundle, token, None, None)?;
+        wallet.batch_id = batch_id.map(|s| s.to_string());
 
         mutation.fill_molecule(params, &wallet)?;
 

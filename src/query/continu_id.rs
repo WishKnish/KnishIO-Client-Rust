@@ -11,13 +11,19 @@ use serde_json::{json, Value};
 pub struct QueryContinuId {
     /// Bundle hash (required parameter)
     bundle: String,
+    /// Token whose ContinuID chain to resolve (defaults to "USER" — the identity chain).
+    /// Without it the validator returns the FIRST wallet of ANY token (e.g. the AUTH wallet on a
+    /// freshly-auth'd bundle), whose already-signed position a subsequent molecule would reuse →
+    /// OTS-position-reuse rejection. Mirrors C++/Python (token:"USER"); see Kotlin cycle 88.
+    token: String,
 }
 
 impl QueryContinuId {
-    /// Create a new QueryContinuId instance with bundle hash
+    /// Create a new QueryContinuId instance with bundle hash (token defaults to "USER")
     pub fn new(bundle: impl Into<String>) -> Self {
         QueryContinuId {
             bundle: bundle.into(),
+            token: "USER".to_string(),
         }
     }
 
@@ -30,14 +36,25 @@ impl QueryContinuId {
     pub fn set_bundle(&mut self, bundle: impl Into<String>) {
         self.bundle = bundle.into();
     }
+
+    /// Override the token (the ContinuID chain to resolve); defaults to "USER".
+    pub fn with_token(mut self, token: impl Into<String>) -> Self {
+        self.token = token.into();
+        self
+    }
+
+    /// Get the token
+    pub fn token(&self) -> &str {
+        &self.token
+    }
 }
 
 #[async_trait::async_trait]
 impl Query for QueryContinuId {
     /// Get the GraphQL query string (equivalent to $__query in JS)
     fn get_query(&self) -> &str {
-        r#"query ($bundle: String!) {
-          ContinuId(bundle: $bundle) {
+        r#"query ($bundle: String!, $token: String) {
+          ContinuId(bundle: $bundle, token: $token) {
             address,
             bundleHash,
             tokenSlug,
@@ -56,9 +73,10 @@ impl Query for QueryContinuId {
         if let Some(provided_vars) = variables {
             Some(provided_vars)
         } else {
-            // Use instance bundle parameter
+            // Use instance bundle + token parameters (token defaults to "USER")
             Some(json!({
-                "bundle": self.bundle
+                "bundle": self.bundle,
+                "token": self.token
             }))
         }
     }
@@ -111,6 +129,7 @@ mod tests {
         let query = QueryContinuId::new("test-bundle-hash");
         let variables = query.compiled_variables(None).unwrap();
         assert_eq!(variables["bundle"], json!("test-bundle-hash"));
+        assert_eq!(variables["token"], json!("USER"));
     }
 
     #[test]
@@ -129,7 +148,7 @@ mod tests {
         let query_string = query.get_query();
         
         // Check that the query string contains expected fields
-        assert!(query_string.contains("ContinuId(bundle: $bundle)"));
+        assert!(query_string.contains("ContinuId(bundle: $bundle, token: $token)"));
         assert!(query_string.contains("address"));
         assert!(query_string.contains("bundleHash"));
         assert!(query_string.contains("tokenSlug"));

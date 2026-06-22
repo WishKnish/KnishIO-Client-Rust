@@ -47,12 +47,13 @@ impl MutationClaimShadowWallet {
     pub fn fill_molecule(&mut self, params: ClaimShadowWalletParams, wallet: &Wallet) -> crate::error::Result<()> {
         // Call molecule's init_shadow_wallet_claim method
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
-            // Use params for JavaScript API compatibility (fillMolecule configuration)
-            if !params.token.is_empty() {
-                // Apply token configuration like JavaScript fillMolecule({token})
-                molecule.cell_slug = Some(params.token.clone());  // JavaScript parameter pattern
-            }
-            
+            // NOTE: do NOT overwrite molecule.cell_slug with params.token — the token identifies
+            // the claimed wallet (carried on `wallet`), NOT the cell. The molecule keeps the cell
+            // set by create_molecule (the client's cell, e.g. "public"); clobbering it with the
+            // token slug made the validator reject with "Cell '<token>' is not active". The token
+            // is threaded via the claimed `wallet` below (matches JS fillMolecule({token,batchId})).
+            let _ = &params.token;
+
             // Initialize shadow wallet claim for the given wallet
             molecule.init_shadow_wallet_claim(wallet)?;
             

@@ -328,11 +328,14 @@ impl Response for BaseResponse {
     }
     
     fn reason(&self) -> Option<String> {
+        // Return None when the response carries no reason/message — an accepted molecule simply
+        // has no reason. (Previously defaulted to "Invalid response from server" unconditionally,
+        // which surfaced a misleading reason on ACCEPTED transfers.) Genuine errors carry a
+        // reason/message field; callers gate on success()/status() first.
         self.get_data().get("reason")
             .or_else(|| self.get_data().get("message"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .or_else(|| Some("Invalid response from server".to_string()))
     }
     
     fn status(&self) -> Option<String> {
