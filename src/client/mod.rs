@@ -3237,6 +3237,14 @@ impl KnishIOClient {
         molecule.secret = Some(secret.to_string());
         molecule.source_wallet = Some(wallet.clone());
 
+        // Explicitly register the USER ContinuID remainder (mirror JS createMolecule), so the auth
+        // molecule's ContinuID I-atom is built deterministically rather than via add_continuid_atom's
+        // secret-fallback (which silently swallows Wallet::create errors with .ok()). The I-atom
+        // registers the bundle's ContinuID relay head on-ledger so subsequent molecules advance the
+        // chain instead of falling to fresh genesis. Carries the AUTH source's characters for parity.
+        let remainder = Wallet::create(Some(secret), None, "USER", None, wallet.characters.as_deref())?;
+        molecule.remainder_wallet = Some(remainder);
+
         // Create mutation
         if let Some(ref client) = self.client.clone() {
             let mut mutation = MutationRequestAuthorization::from_molecule(molecule);

@@ -2208,6 +2208,52 @@ mod tests {
             "I-atom should NOT have pubkey when wallet has no pubkey");
     }
 
+    /// An auth molecule (the exact shape `request_profile_auth_token` builds: secret + AUTH source,
+    /// NO explicit remainder) MUST register a ContinuID I-atom alongside the U-atom — this is the
+    /// bundle's relay-race head, what lets subsequent molecules advance the chain instead of falling
+    /// to fresh genesis. Settles the cycle-93 flag ("auth registers no I-atom"): `add_continuid_atom`'s
+    /// secret-fallback creates the USER remainder when none is set, so the I-atom IS produced. (The
+    /// cycle-107 client fix makes that remainder explicit; this molecule-layer test holds either way.)
+    #[test]
+    fn test_init_authorization_registers_continuid_atom() {
+        let secret = "test-secret";
+        // Mirror request_profile_auth_token's AUTH source wallet (Wallet::new generates a position,
+        // derives the address, and initializes ML-KEM → pubkey).
+        let auth_source = Wallet::new(
+            Some(secret), None, Some("AUTH"), None, None, None, None,
+        ).unwrap();
+        let source_pos = auth_source.position.clone().expect("AUTH source must have a position");
+
+        let mut molecule = Molecule::with_params(
+            Some(secret.to_string()),
+            None,
+            Some(auth_source),
+            None, // NO explicit remainder — exactly like request_profile_auth_token (pre-fix)
+            None,
+            None,
+        );
+
+        molecule
+            .init_authorization(vec![MetaItem::new("encrypt", "false")])
+            .unwrap();
+
+        // U-atom (the auth/OTS signer) at index 0.
+        assert_eq!(molecule.atoms[0].isotope, Isotope::U, "auth molecule must start with a U-atom");
+
+        // The ContinuID I-atom MUST be present (the cycle-93-settling assertion).
+        let i_atom = molecule.atoms.iter()
+            .find(|a| a.isotope == Isotope::I)
+            .expect("auth molecule must register a ContinuID I-atom (relay head)");
+
+        // The I-atom carries the remainder's ML-KEM pubkey (proves a real USER wallet was created,
+        // not a position-less stub) + previousPosition == the AUTH source position.
+        assert!(i_atom.meta.iter().any(|m| m.key == "pubkey"),
+            "I-atom must carry the USER remainder's pubkey (chain-verification key)");
+        let prev = i_atom.meta.iter().find(|m| m.key == "previousPosition")
+            .expect("I-atom must carry previousPosition");
+        assert_eq!(prev.value, source_pos, "previousPosition must equal the AUTH source position");
+    }
+
     #[test]
     fn test_position_format_validation() {
         // Valid: 64-char hex
