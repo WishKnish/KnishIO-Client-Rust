@@ -1,0 +1,23 @@
+# Rust SDK CI — enforces the clippy gate (cycle 111; Cargo.toml [lints.clippy] all = deny).
+# Born-enforced: the repo had no CI, so the gate was local-only/bypassable until now.
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  clippy:
+    name: clippy (lint gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (stable + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # The c111 gate: clippy::all is deny-clean. NOT `-D warnings` — unwrap/expect/panic
+      # are intentionally warn-level (a separate gradual-elimination effort), so promoting
+      # warnings to errors would fail the build on those non-bug lints.
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked
