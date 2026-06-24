@@ -61,7 +61,6 @@ impl ResponseFactory {
             "MetaType" => Ok(Box::new(ResponseMetaType::new(json, query)?)),
             "AtomsByMoleculeLookup" => Ok(Box::new(ResponseMetaTypeViaAtom::new(json, query)?)),
             "Rule" => Ok(Box::new(ResponsePolicy::new(json, query)?)),
-            "UserActivity" => Ok(Box::new(ResponseQueryUserActivity::new(json))),
             _ => {
                 // Default to base response for unknown operations
                 Ok(Box::new(BaseResponse::with_query(json, query)?))
@@ -1287,41 +1286,6 @@ impl Response for ResponseQueryActiveSession {
     fn query(&self) -> Option<&Value> { self.base.query() }
 }
 
-/// Response for QueryUserActivity (equivalent to ResponseQueryUserActivity.js)
-#[derive(Debug, Clone)]
-pub struct ResponseQueryUserActivity {
-    base: BaseResponse,
-}
-
-impl ResponseQueryUserActivity {
-    pub fn new(json: Value) -> Self {
-        ResponseQueryUserActivity {
-            base: BaseResponse::new(json).unwrap_or_else(|e| {
-                eprintln!("Response construction failed: {}", e);
-                BaseResponse::empty()
-            }).with_data_key("data.UserActivity"),
-        }
-    }
-    
-    pub fn activities(&self) -> Vec<Value> {
-        self.base.get_data()
-            .as_array().cloned()
-            .unwrap_or_default()
-    }
-}
-
-impl Response for ResponseQueryUserActivity {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
-}
-
 /// Response for RequestAuthorization (equivalent to ResponseRequestAuthorization.js)
 #[derive(Debug, Clone)]
 pub struct ResponseRequestAuthorization {
@@ -1779,7 +1743,6 @@ impl Response for ResponseWalletList {
 /// | `ResponsePolicy` | ResponsePolicy.js | `data.Rule` | Policy/rule queries |
 /// | `ResponseProposeMolecule` | ResponseProposeMolecule.js | `data.ProposeMolecule` | Molecule proposals |
 /// | `ResponseQueryActiveSession` | ResponseQueryActiveSession.js | `data.ActiveSession` | Session queries |
-/// | `ResponseQueryUserActivity` | ResponseQueryUserActivity.js | `data.UserActivity` | User activity queries |
 /// | `ResponseRequestAuthorization` | ResponseRequestAuthorization.js | `data.ProposeMolecule` | Authorization requests |
 /// | `ResponseRequestAuthorizationGuest` | ResponseRequestAuthorizationGuest.js | `data.AccessToken` | Guest auth requests |
 /// | `ResponseRequestTokens` | ResponseRequestTokens.js | `data.ProposeMolecule` | Token requests |

@@ -193,7 +193,6 @@ pub mod meta_type;
 pub mod meta_type_via_atom;
 pub mod policy;
 pub mod token;
-pub mod user_activity;
 pub mod wallet_bundle;
 pub mod wallet_list;
 
@@ -208,6 +207,5 @@ pub use meta_type::{QueryMetaType, MetaTypeValue};
 pub use meta_type_via_atom::{QueryMetaTypeViaAtom, QueryMetaTypeViaAtomParams};
 pub use policy::QueryPolicy;
 pub use token::QueryToken;
-pub use user_activity::QueryUserActivity;
 pub use wallet_bundle::QueryWalletBundle;
 pub use wallet_list::QueryWalletList;
