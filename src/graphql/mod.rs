@@ -358,7 +358,7 @@ impl GraphQLClient {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| KnishIOError::from_network_error(e))?;
+            .map_err(KnishIOError::from_network_error)?;
 
         if !response.status().is_success() {
             return Err(KnishIOError::custom(format!(
@@ -370,7 +370,7 @@ impl GraphQLClient {
         let graphql_response: GraphQLResponse = response
             .json()
             .await
-            .map_err(|e| KnishIOError::from_network_error(e))?;
+            .map_err(KnishIOError::from_network_error)?;
 
         self.format_response(graphql_response)
     }
@@ -407,7 +407,7 @@ impl GraphQLClient {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| KnishIOError::from_network_error(e))?;
+            .map_err(KnishIOError::from_network_error)?;
 
         if !response.status().is_success() {
             return Err(KnishIOError::custom(format!(
@@ -419,7 +419,7 @@ impl GraphQLClient {
         let graphql_response: GraphQLResponse = response
             .json()
             .await
-            .map_err(|e| KnishIOError::from_network_error(e))?;
+            .map_err(KnishIOError::from_network_error)?;
 
         self.format_response(graphql_response)
     }

@@ -532,11 +532,10 @@ impl WebSocketManager {
                 let subs = subscriptions.read().await;
                 if let Some(sub_info) = subs.get(&id) {
                     if let Ok(response) = serde_json::from_value::<crate::GraphQLResponse>(payload) {
-                        if let Err(_) = sub_info.callback_sender.send(response) {
-                            if debug {
+                        if sub_info.callback_sender.send(response).is_err()
+                            && debug {
                                 warn!("Failed to send data to subscription {}: receiver dropped", id);
                             }
-                        }
                     }
                 }
             }

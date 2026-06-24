@@ -1203,7 +1203,7 @@ mod tests {
         let hash = "0123456789abcdef".repeat(4); // 64 character hash
         let normalized = normalize_hash(&hash);
         assert_eq!(normalized.len(), 64);  // Match hash length: 64 chars = 64 enumerated values (matches JS SDK)
-        assert!(normalized.iter().all(|&v| v <= 8 && v >= -8));  // Values must be in range [-8, 8]
+        assert!(normalized.iter().all(|&v| (-8..=8).contains(&v)));  // Values must be in range [-8, 8]
     }
 
     #[test]
@@ -1392,7 +1392,7 @@ mod tests {
         let private_key = "c".repeat(2048); // 2048-character private key
         let molecular_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"; // 64 chars base17
         
-        let ots_signature = generate_ots_signature(&private_key, &molecular_hash).unwrap();
+        let ots_signature = generate_ots_signature(&private_key, molecular_hash).unwrap();
 
         assert_eq!(ots_signature.len(), 16); // 16 fragments
         for fragment in &ots_signature {
@@ -1400,12 +1400,12 @@ mod tests {
         }
 
         // Test deterministic behavior
-        let ots_signature2 = generate_ots_signature(&private_key, &molecular_hash).unwrap();
+        let ots_signature2 = generate_ots_signature(&private_key, molecular_hash).unwrap();
         assert_eq!(ots_signature, ots_signature2);
 
         // Test different molecular hash produces different signature
         let different_hash = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
-        let different_signature = generate_ots_signature(&private_key, &different_hash).unwrap();
+        let different_signature = generate_ots_signature(&private_key, different_hash).unwrap();
         assert_ne!(ots_signature, different_signature);
     }
     
@@ -1415,10 +1415,10 @@ mod tests {
         let molecular_hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"; // 64 chars
 
         // Generate signature
-        let ots_signature = generate_ots_signature(&private_key, &molecular_hash).unwrap();
+        let ots_signature = generate_ots_signature(&private_key, molecular_hash).unwrap();
         
         // Calculate expected address by simulating the verification process
-        let normalized_hash = normalize_hash(&molecular_hash);
+        let normalized_hash = normalize_hash(molecular_hash);
         let mut public_key_fragments = Vec::new();
         
         // Split private key into chunks and process each
@@ -1441,17 +1441,17 @@ mod tests {
         let expected_address = shake256(&digest, 256);
 
         // Verify signature
-        let is_valid = verify_ots_signature(&ots_signature, &molecular_hash, &expected_address);
+        let is_valid = verify_ots_signature(&ots_signature, molecular_hash, &expected_address);
         assert!(is_valid);
         
         // Test with wrong address
         let wrong_address = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-        let is_invalid = verify_ots_signature(&ots_signature, &molecular_hash, &wrong_address);
+        let is_invalid = verify_ots_signature(&ots_signature, molecular_hash, wrong_address);
         assert!(!is_invalid);
         
         // Test with wrong molecular hash  
         let wrong_hash = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
-        let is_invalid2 = verify_ots_signature(&ots_signature, &wrong_hash, &expected_address);
+        let is_invalid2 = verify_ots_signature(&ots_signature, wrong_hash, &expected_address);
         assert!(!is_invalid2);
     }
     
@@ -1462,10 +1462,10 @@ mod tests {
         let molecular_hash = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"; 
         
         // Generate signature
-        let ots_signature = generate_ots_signature(&private_key, &molecular_hash).unwrap();
+        let ots_signature = generate_ots_signature(&private_key, molecular_hash).unwrap();
 
         // Calculate the correct address for this key
-        let _normalized_hash = normalize_hash(&molecular_hash);
+        let _normalized_hash = normalize_hash(molecular_hash);
         let mut expected_public_key_fragments = Vec::new();
         
         for i in 0..16 {
@@ -1486,7 +1486,7 @@ mod tests {
         let expected_address = shake256(&digest, 256);
 
         // Verify the signature
-        let is_valid = verify_ots_signature(&ots_signature, &molecular_hash, &expected_address);
+        let is_valid = verify_ots_signature(&ots_signature, molecular_hash, &expected_address);
         assert!(is_valid, "OTS signature round-trip verification should pass");
     }
 

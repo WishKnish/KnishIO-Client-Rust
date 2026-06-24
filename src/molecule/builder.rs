@@ -77,6 +77,7 @@ pub struct TypeSafeMoleculeBuilder<State> {
 
 /// Parameters for creating a Value isotope atom
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct ValueAtomParams {
     pub position: String,
     pub wallet_address: String,
@@ -86,18 +87,6 @@ pub struct ValueAtomParams {
     pub meta: Option<Vec<MetaItem>>,
 }
 
-impl Default for ValueAtomParams {
-    fn default() -> Self {
-        Self {
-            position: String::new(),
-            wallet_address: String::new(),
-            token: String::new(),
-            value: None,
-            batch_id: None,
-            meta: None,
-        }
-    }
-}
 
 /// Parameters for creating a Metadata isotope atom
 #[derive(Debug, Clone)]

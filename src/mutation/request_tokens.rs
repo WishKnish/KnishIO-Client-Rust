@@ -59,7 +59,7 @@ impl MutationRequestTokens {
         // Convert HashMap to Vec<MetaItem>
         let meta_items: Vec<MetaItem> = if let Some(meta_map) = params.meta {
             meta_map.iter()
-                .map(|(k, v)| MetaItem::new(k, &v.to_string()))
+                .map(|(k, v)| MetaItem::new(k, v.to_string()))
                 .collect()
         } else {
             Vec::new()

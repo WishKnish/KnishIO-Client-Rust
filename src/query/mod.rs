@@ -74,6 +74,7 @@ impl BaseQuery {
     }
     
     /// Get the stored response (equivalent to response() in JS)
+    #[allow(clippy::borrowed_box)] // returns the stored boxed trait object by-ref; API stability
     pub fn response(&self) -> Option<&Box<dyn Response>> {
         self.response.as_ref()
     }

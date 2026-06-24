@@ -329,7 +329,7 @@ pub mod helpers {
         
         // Convert meta HashMap to Vec<MetaItem>
         let meta_items = meta.unwrap_or_default().into_iter()
-            .map(|(k, v)| crate::types::MetaItem::new(&k, &v.to_string()))
+            .map(|(k, v)| crate::types::MetaItem::new(&k, v.to_string()))
             .collect();
         
         // Initialize token creation in molecule

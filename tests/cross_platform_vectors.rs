@@ -356,7 +356,7 @@ fn test_molecular_hash_cross_platform() {
     let vectors = load_vectors();
 
     for test in &vectors.vectors.molecular_hash.tests {
-        let atoms: Vec<Atom> = test.atoms.iter().map(|a| atom_from_vector(a)).collect();
+        let atoms: Vec<Atom> = test.atoms.iter().map(atom_from_vector).collect();
         let hash = Atom::hash_atoms(&atoms, "base17")
             .unwrap_or_else(|e| panic!("hash_atoms failed for '{}': {:?}", test.name, e));
         assert_eq!(
@@ -376,7 +376,7 @@ fn test_molecular_hash_tamper_detection() {
 
     let vectors = load_vectors();
     let test = &vectors.vectors.molecular_hash.tests[0]; // single_atom_molecule
-    let atoms: Vec<Atom> = test.atoms.iter().map(|a| atom_from_vector(a)).collect();
+    let atoms: Vec<Atom> = test.atoms.iter().map(atom_from_vector).collect();
     let original_hash = Atom::hash_atoms(&atoms, "base17").unwrap();
 
     // Tamper: change the token
@@ -500,7 +500,7 @@ fn test_enumerate_hash_range_invariant() {
         let enumerated = enumerate_hash(&test.hash);
         for (i, &val) in enumerated.iter().enumerate() {
             assert!(
-                val >= -8 && val <= 8,
+                (-8..=8).contains(&val),
                 "enumerate_hash value {} at index {} out of [-8, 8] range for '{}'",
                 val, i, test.name
             );

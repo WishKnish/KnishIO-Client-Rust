@@ -14,8 +14,6 @@ use std::env;
 use std::time::{Instant, Duration};
 use anyhow::{Result, Context};
 use serde_json::{json, Value};
-use reqwest;
-use tokio;
 
 use knishio_client::{
     molecule::Molecule,
@@ -269,7 +267,7 @@ async fn test_rust_molecular_metadata_creation(client: &reqwest::Client, url: &s
     // Add metadata using Rust SDK
     let metadata_items = vec![
         MetaItem::new("test_name", "Rust SDK Integration Test"),
-        MetaItem::new("timestamp", &chrono::Utc::now().to_rfc3339()),
+        MetaItem::new("timestamp", chrono::Utc::now().to_rfc3339()),
         MetaItem::new("language", "Rust"),
         MetaItem::new("platform", "Native"),
         MetaItem::new("memory_safety", "guaranteed"),
@@ -595,8 +593,8 @@ async fn main() -> Result<()> {
     let passed_tests = tests.values().filter(|test| test["passed"].as_bool().unwrap_or(false)).count();
     
     colorlog(&format!("\nSDK: {} v{}", results["sdk"].as_str().unwrap(), results["version"].as_str().unwrap()), 1);
-    colorlog(&format!("Language: Rust (Memory Safe, Zero-Cost Abstractions)"), 1);
-    colorlog(&format!("Runtime: Tokio (Async)"), 1);
+    colorlog("Language: Rust (Memory Safe, Zero-Cost Abstractions)", 1);
+    colorlog("Runtime: Tokio (Async)", 1);
     colorlog(&format!("Server: {}", results["server"]["url"].as_str().unwrap()), 1);
     
     let color = if passed_tests == total_tests { 2 } else { 3 }; // GREEN or RED

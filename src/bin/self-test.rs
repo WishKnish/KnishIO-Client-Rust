@@ -1,5 +1,5 @@
 /*!
- * KnishIO Rust SDK Self-Test Program
+ * `KnishIO` Rust SDK Self-Test Program
  *
  * This program performs self-contained tests to validate SDK functionality
  * and ensure cross-SDK compatibility. It follows the JavaScript SDK
@@ -16,12 +16,11 @@
  * - Performance: SIMD-optimized cryptography
  */
 
-#![warn(clippy::all, clippy::pedantic)]
+#![warn(clippy::all)]
 #![forbid(unsafe_code)]
 
 use anyhow::{Context, Result};
 use serde_json::Value;
-use tokio;
 use std::fs;
 use std::time::SystemTime;
 use chrono::{DateTime, Utc};
@@ -278,7 +277,7 @@ impl ConfigLoader {
             // Try to load external config if path provided
             if std::path::Path::new(path).exists() {
                 let content = fs::read_to_string(path)
-                    .with_context(|| format!("Cannot open config file: {}", path))?;
+                    .with_context(|| format!("Cannot open config file: {path}"))?;
                 serde_json::from_str(&content)
                     .with_context(|| "Failed to parse JSON configuration")?
             } else {
@@ -296,7 +295,7 @@ impl ConfigLoader {
     }
 
     fn get_string(&self, path: &str) -> Option<String> {
-        self.get_value(path)?.as_str().map(|s| s.to_string())
+        self.get_value(path)?.as_str().map(std::string::ToString::to_string)
     }
 
     fn get_i64(&self, path: &str) -> Option<i64> {
@@ -350,7 +349,7 @@ impl MoleculeInspector {
         }
 
         let balanced = if total_value.abs() < 0.01 { "✅ BALANCED" } else { "❌ UNBALANCED" };
-        println!("  Total Value: {:.1} {}", total_value, balanced);
+        println!("  Total Value: {total_value:.1} {balanced}");
         println!("  Status: {}", molecule.status.as_deref().unwrap_or("NOT_SET"));
     }
 
@@ -485,7 +484,7 @@ impl SelfTestRunner {
             // CRITICAL FIX: Load existing Round 1 results to preserve molecules
             let shared_dir = std::env::var("KNISHIO_SHARED_RESULTS")
                 .unwrap_or_else(|_| "../shared-test-results".to_string());
-            let existing_path = format!("{}/rust-results.json", shared_dir);
+            let existing_path = format!("{shared_dir}/rust-results.json");
 
             if std::path::Path::new(&existing_path).exists() {
                 match fs::read_to_string(&existing_path) {
@@ -551,12 +550,12 @@ impl SelfTestRunner {
                                 Logger::message("✅ Preserved Round 1 molecules for cross-validation", colors::GREEN);
                             }
                             Err(e) => {
-                                Logger::message(&format!("⚠️  Could not parse existing results: {}", e), colors::YELLOW);
+                                Logger::message(&format!("⚠️  Could not parse existing results: {e}"), colors::YELLOW);
                             }
                         }
                     }
                     Err(e) => {
-                        Logger::message(&format!("⚠️  Could not read existing results: {}", e), colors::YELLOW);
+                        Logger::message(&format!("⚠️  Could not read existing results: {e}"), colors::YELLOW);
                     }
                 }
             }
@@ -639,8 +638,8 @@ impl SelfTestRunner {
         // Generate bundle hash
         let generated_bundle = generate_bundle_hash(&generated_secret);
 
-        println!("  Generated bundle: {}", generated_bundle);
-        println!("  Expected bundle: {}", expected_bundle);
+        println!("  Generated bundle: {generated_bundle}");
+        println!("  Expected bundle: {expected_bundle}");
 
         let bundle_match = generated_bundle == expected_bundle;
         Logger::test("Bundle hash generation", bundle_match, None);
@@ -734,7 +733,7 @@ impl SelfTestRunner {
         // Validate the molecule with source wallet (matching JavaScript SDK behavior)
         let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
             Ok(valid) => (valid, None),
-            Err(e) => (false, Some(format!("Signature verification failed: {}", e))),
+            Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
 
         Logger::test("Molecule validation", is_valid, validation_error.as_deref());
@@ -743,7 +742,7 @@ impl SelfTestRunner {
         let molecule_json = match molecule.toJSON() {
             Ok(json) => json,
             Err(e) => {
-                eprintln!("ERROR: Failed to serialize metadata molecule: {}", e);
+                eprintln!("ERROR: Failed to serialize metadata molecule: {e}");
                 "{}".to_string()  // Empty JSON object instead of empty string
             }
         };
@@ -837,7 +836,7 @@ impl SelfTestRunner {
         // Validate the molecule with source wallet (matching JavaScript SDK behavior)
         let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
             Ok(valid) => (valid, None),
-            Err(e) => (false, Some(format!("Signature verification failed: {}", e))),
+            Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
 
         Logger::test("Molecule validation", is_valid, validation_error.as_deref());
@@ -846,7 +845,7 @@ impl SelfTestRunner {
         let molecule_json = match molecule.toJSON() {
             Ok(json) => json,
             Err(e) => {
-                eprintln!("ERROR: Failed to serialize simple transfer molecule: {}", e);
+                eprintln!("ERROR: Failed to serialize simple transfer molecule: {e}");
                 "{}".to_string()  // Empty JSON object instead of empty string
             }
         };
@@ -944,7 +943,7 @@ impl SelfTestRunner {
         // Validate the molecule with source wallet (matching JavaScript SDK behavior)
         let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
             Ok(valid) => (valid, None),
-            Err(e) => (false, Some(format!("Signature verification failed: {}", e))),
+            Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
 
         Logger::test("Molecule validation", is_valid, validation_error.as_deref());
@@ -953,7 +952,7 @@ impl SelfTestRunner {
         let molecule_json = match molecule.toJSON() {
             Ok(json) => json,
             Err(e) => {
-                eprintln!("ERROR: Failed to serialize complex transfer molecule: {}", e);
+                eprintln!("ERROR: Failed to serialize complex transfer molecule: {e}");
                 "{}".to_string()  // Empty JSON object instead of empty string
             }
         };
@@ -1046,14 +1045,14 @@ impl SelfTestRunner {
 
         let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
             Ok(valid) => (valid, None),
-            Err(e) => (false, Some(format!("Signature verification failed: {}", e))),
+            Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
         Logger::test("Molecule validation", is_valid, validation_error.as_deref());
 
         let molecule_json = match molecule.toJSON() {
             Ok(json) => json,
             Err(e) => {
-                eprintln!("ERROR: Failed to serialize token creation molecule: {}", e);
+                eprintln!("ERROR: Failed to serialize token creation molecule: {e}");
                 "{}".to_string()
             }
         };
@@ -1115,13 +1114,13 @@ impl SelfTestRunner {
 
         let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
             Ok(valid) => (valid, None),
-            Err(e) => (false, Some(format!("Signature verification failed: {}", e))),
+            Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
         Logger::test("Molecule validation", is_valid, validation_error.as_deref());
 
         let molecule_json = match molecule.toJSON() {
             Ok(json) => json,
-            Err(e) => { eprintln!("ERROR: Failed to serialize wallet creation molecule: {}", e); "{}".to_string() }
+            Err(e) => { eprintln!("ERROR: Failed to serialize wallet creation molecule: {e}"); "{}".to_string() }
         };
         self.results.molecules.wallet_creation = molecule_json;
 
@@ -1181,13 +1180,13 @@ impl SelfTestRunner {
 
         let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
             Ok(valid) => (valid, None),
-            Err(e) => (false, Some(format!("Signature verification failed: {}", e))),
+            Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
         Logger::test("Molecule validation", is_valid, validation_error.as_deref());
 
         let molecule_json = match molecule.toJSON() {
             Ok(json) => json,
-            Err(e) => { eprintln!("ERROR: Failed to serialize shadow wallet claim molecule: {}", e); "{}".to_string() }
+            Err(e) => { eprintln!("ERROR: Failed to serialize shadow wallet claim molecule: {e}"); "{}".to_string() }
         };
         self.results.molecules.shadow_wallet_claim = molecule_json;
 
@@ -1235,7 +1234,7 @@ impl SelfTestRunner {
             Logger::test("Encryption wallet creation", true, None);
 
             // Get ML-KEM768 public key (non-deterministic)
-            let public_key = encryption_wallet.pubkey.as_ref().map(|k| k.as_str()).unwrap_or("");
+            let public_key = encryption_wallet.pubkey.as_deref().unwrap_or("");
             let public_key_generated = !public_key.is_empty();
             Logger::test("ML-KEM768 public key generation", public_key_generated, None);
 
@@ -1289,7 +1288,7 @@ impl SelfTestRunner {
         match result {
             Ok(test_passed) => Ok(test_passed),
             Err(error) => {
-                Logger::test("ML-KEM768 test", false, Some(&format!("Error: {}", error)));
+                Logger::test("ML-KEM768 test", false, Some(&format!("Error: {error}")));
 
                 self.results.tests.mlkem768 = MLKEMTestResult {
                     passed: false,
@@ -1492,7 +1491,7 @@ impl SelfTestRunner {
                 Ok(result)
             },
             Err(error) => {
-                Logger::message(&format!("  ❌ ERROR: {}", error), colors::RED);
+                Logger::message(&format!("  ❌ ERROR: {error}"), colors::RED);
 
                 self.results.tests.negative_cases = NegativeTestResult {
                     passed: false,
@@ -1530,11 +1529,11 @@ impl SelfTestRunner {
 
         // Get all JSON result files except rust-results.json
         let result_files: Vec<_> = fs::read_dir(&results_dir)?
-            .filter_map(|entry| entry.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|entry| {
                 entry.file_name()
                     .to_str()
-                    .map_or(false, |name| name.ends_with(".json") && !name.contains("rust"))
+                    .is_some_and(|name| name.ends_with(".json") && !name.contains("rust"))
             })
             .collect();
 
@@ -1569,11 +1568,11 @@ impl SelfTestRunner {
                         // Special handling for ML-KEM768 cross-SDK compatibility
                         let validation_success = match self.validate_cross_sdk_mlkem768(molecule_data).await {
                             Ok(valid) => {
-                                Logger::message(&format!("    ✅ {} encryption: PASSED", molecule_type), colors::GREEN);
+                                Logger::message(&format!("    ✅ {molecule_type} encryption: PASSED"), colors::GREEN);
                                 valid
                             }
                             Err(error) => {
-                                Logger::message(&format!("    ❌ {} encryption: FAILED - {}", molecule_type, error), colors::RED);
+                                Logger::message(&format!("    ❌ {molecule_type} encryption: FAILED - {error}"), colors::RED);
                                 false
                             }
                         };
@@ -1585,11 +1584,11 @@ impl SelfTestRunner {
                         // Standard molecule validation for non-ML-KEM768 types
                         let validation_success = match self.validate_cross_sdk_molecule(molecule_data, molecule_type).await {
                             Ok(valid) => {
-                                Logger::message(&format!("    ✅ {} molecule: PASSED", molecule_type), colors::GREEN);
+                                Logger::message(&format!("    ✅ {molecule_type} molecule: PASSED"), colors::GREEN);
                                 valid
                             }
                             Err(error) => {
-                                Logger::message(&format!("    ❌ {} molecule: FAILED - {}", molecule_type, error), colors::RED);
+                                Logger::message(&format!("    ❌ {molecule_type} molecule: FAILED - {error}"), colors::RED);
                                 false
                             }
                         };
@@ -1625,14 +1624,14 @@ impl SelfTestRunner {
 
         // Use centralized fromJSON() method for clean deserialization (matching JavaScript SDK)
         let molecule = Molecule::fromJSON(molecule_json_str)
-            .with_context(|| format!("Failed to deserialize {} molecule using centralized fromJSON()", molecule_type))?;
+            .with_context(|| format!("Failed to deserialize {molecule_type} molecule using centralized fromJSON()"))?;
 
         // Source wallet is automatically reconstructed by fromJSON() method
         let source_wallet = molecule.source_wallet.as_ref();
 
         // Use Rust SDK's native validation method
         let is_valid = molecule.check(source_wallet)
-            .with_context(|| format!("Validation failed for {} molecule", molecule_type))?;
+            .with_context(|| format!("Validation failed for {molecule_type} molecule"))?;
 
         Ok(is_valid)
     }
@@ -1712,13 +1711,13 @@ impl SelfTestRunner {
                                     Ok(encryption_compatible && self_test_valid)
                                 }
                                 Err(e) => {
-                                    println!("    ❌ Self-decryption failed: {}", e);
+                                    println!("    ❌ Self-decryption failed: {e}");
                                     Ok(false)
                                 }
                             }
                         }
                         Err(e) => {
-                            println!("    ❌ Self-encryption failed: {}", e);
+                            println!("    ❌ Self-encryption failed: {e}");
                             Ok(false)
                         }
                     }
@@ -1728,7 +1727,7 @@ impl SelfTestRunner {
                 }
             }
             Err(e) => {
-                println!("    ❌ Failed to encrypt with their public key: {}", e);
+                println!("    ❌ Failed to encrypt with their public key: {e}");
                 println!("    ❌ Public key format incompatible");
                 Ok(false)
             }
@@ -1741,16 +1740,16 @@ impl SelfTestRunner {
 
         // Ensure shared directory exists
         std::fs::create_dir_all(&shared_dir)
-            .with_context(|| format!("Failed to create shared directory: {}", shared_dir))?;
+            .with_context(|| format!("Failed to create shared directory: {shared_dir}"))?;
 
-        let results_path = format!("{}/rust-results.json", shared_dir);
+        let results_path = format!("{shared_dir}/rust-results.json");
 
         // Create JSON structure matching other SDKs exactly
         let json_output = serde_json::to_string_pretty(&self.results)
             .context("Failed to serialize results")?;
 
         fs::write(&results_path, json_output)
-            .with_context(|| format!("Cannot create results file: {}", results_path))?;
+            .with_context(|| format!("Cannot create results file: {results_path}"))?;
 
         println!("\n{}📁 Results saved to: {}{}", colors::BLUE, results_path, colors::RESET);
 

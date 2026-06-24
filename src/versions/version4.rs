@@ -117,7 +117,7 @@ impl Version4 {
         Self {
             position: Some(atom.position.clone()),
             wallet_address: Some(atom.wallet_address.clone()),
-            isotope: Some(atom.isotope.clone()),
+            isotope: Some(atom.isotope),
             token: Some(atom.token.clone()),
             // Convert Option<String> to Option<f64>
             value: atom.value.as_ref().and_then(|v| v.parse::<f64>().ok()),
@@ -153,7 +153,7 @@ impl Version4 {
         let mut atom = Atom::new(
             self.position.as_deref().unwrap_or(""),
             self.wallet_address.as_deref().unwrap_or(""),
-            self.isotope.clone().unwrap_or(Isotope::V),
+            self.isotope.unwrap_or(Isotope::V),
             self.token.as_deref().unwrap_or(""),
         );
 

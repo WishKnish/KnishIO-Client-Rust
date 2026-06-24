@@ -12,6 +12,12 @@ use serde_json::Value;
 pub struct MutationLinkIdentifier {
 }
 
+impl Default for MutationLinkIdentifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MutationLinkIdentifier {
     /// Create a new MutationLinkIdentifier instance
     pub fn new() -> Self {

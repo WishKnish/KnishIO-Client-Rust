@@ -22,12 +22,31 @@ unused_imports = "warn"              # Warn on unused imports
 unused_variables = "warn"            # Warn on unused variables
 
 [lints.clippy]
-all = "warn"                         # Enable all Clippy lints as warnings
-pedantic = "warn"                    # Enable pedantic lints
-nursery = "warn"                     # Enable experimental lints
+# `all` carries priority -1 so the lower-priority group baseline is applied first and the entries
+# below (at default priority 0) override it — without this, cargo's lint_groups_priority ambiguity
+# leaves pedantic/nursery effectively on. (cycle 111)
+all = { level = "deny", priority = -1 }   # The enforced gate — clippy::all is deny-clean (cycle 111)
+# pedantic/nursery are the subjective kitchen-sink groups (~2800 mostly-cosmetic warnings); allowed
+# so the gate is the genuinely-valuable clippy::all set, not a style firehose. priority -1 so the
+# specific restriction lints below (unwrap/expect/panic, priority 0) override these groups.
+pedantic = { level = "allow", priority = -1 }
+nursery = { level = "allow", priority = -1 }
 unwrap_used = "warn"                 # Warn on unwrap() usage - gradually move to proper error handling
 expect_used = "warn"                 # Warn on expect() usage
-panic = "warn"                       # Warn on panic!() macro usage  
+panic = "warn"                       # Warn on panic!() macro usage
+# Specific clippy::all lints allowed by design (priority 0 overrides the all group). cycle 111:
+too_many_arguments = "allow"         # several builders/ctors take many args by design
+incompatible_msrv = "allow"          # MSRV not strictly enforced; SDK targets current stable
+map_entry = "allow"                  # clippy's --fix for this is buggy here (E0382); pattern is fine
+doc_lazy_continuation = "allow"      # doc-comment list indentation (cosmetic)
+empty_line_after_doc_comments = "allow"  # doc-comment formatting (cosmetic)
+needless_range_loop = "allow"        # indexed loops in the SHAKE/hash core (crypto) — hash-load-bearing
+same_item_push = "allow"             # padding loops in the hash core — hash-load-bearing
+vec_init_then_push = "allow"         # molecule atom-array building — hash-load-bearing
+approx_constant = "allow"            # intentional decimal literals (utils/decimal) — not the exact PI const
+field_reassign_with_default = "allow"  # builder/test construction patterns
+should_implement_trait = "allow"     # deliberate API (e.g. custom from_str)
+large_enum_variant = "allow"         # deliberate layout choice
 todo = "warn"                        # Warn on TODO comments
 unimplemented = "warn"               # Warn on unimplemented!() macro
 

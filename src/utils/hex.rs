@@ -5,6 +5,7 @@
 
 /// Options for hexadecimal formatting
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct HexOptions {
     /// Number of hex bytes grouped together with spaces between groups (0 = no grouping)
     pub grouping: usize,
@@ -14,15 +15,6 @@ pub struct HexOptions {
     pub uppercase: bool,
 }
 
-impl Default for HexOptions {
-    fn default() -> Self {
-        HexOptions {
-            grouping: 0,
-            rowlength: 0,
-            uppercase: false,
-        }
-    }
-}
 
 impl HexOptions {
     /// Create new HexOptions with default values
@@ -295,7 +287,7 @@ impl Hex {
             .filter(|c| !c.is_whitespace())
             .count();
         
-        (cleaned + 1) / 2 // Round up for odd-length strings
+        cleaned.div_ceil(2) // Round up for odd-length strings
     }
 }
 

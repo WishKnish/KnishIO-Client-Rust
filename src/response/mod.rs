@@ -122,7 +122,7 @@ impl ResponseUtils {
     
     /// Check if response indicates molecular acceptance
     pub fn is_molecular_accepted(response: &dyn Response) -> bool {
-        response.success() && response.status().map_or(false, |s| s == "accepted")
+        response.success() && response.status().is_some_and(|s| s == "accepted")
     }
     
     /// Extract molecular hash from any molecular response
@@ -423,8 +423,7 @@ impl ResponseAtom {
     pub fn instances(&self) -> Vec<Value> {
         self.base.get_data()
             .get("instances")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.clone())
+            .and_then(|v| v.as_array()).cloned()
             .unwrap_or_default()
     }
     
@@ -569,7 +568,7 @@ impl Response for ResponseClaimShadowWallet {
     fn data(&self) -> &Value { self.base.data() }
     fn success(&self) -> bool { 
         self.base.success() && 
-        self.status().map_or(false, |s| s == "accepted")
+        self.status().is_some_and(|s| s == "accepted")
     }
     fn error(&self) -> Option<String> { self.base.error() }
     fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
@@ -659,7 +658,7 @@ impl Response for ResponseCreateIdentifier {
     fn data(&self) -> &Value { self.base.data() }
     fn success(&self) -> bool { 
         self.base.success() && 
-        self.status().map_or(false, |s| s == "accepted")
+        self.status().is_some_and(|s| s == "accepted")
     }
     fn error(&self) -> Option<String> { self.base.error() }
     fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
@@ -710,7 +709,7 @@ impl Response for ResponseCreateMeta {
     fn data(&self) -> &Value { self.base.data() }
     fn success(&self) -> bool { 
         self.base.success() && 
-        self.status().map_or(false, |s| s == "accepted")
+        self.status().is_some_and(|s| s == "accepted")
     }
     fn error(&self) -> Option<String> { self.base.error() }
     fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
@@ -761,7 +760,7 @@ impl Response for ResponseCreateRule {
     fn data(&self) -> &Value { self.base.data() }
     fn success(&self) -> bool { 
         self.base.success() && 
-        self.status().map_or(false, |s| s == "accepted")
+        self.status().is_some_and(|s| s == "accepted")
     }
     fn error(&self) -> Option<String> { self.base.error() }
     fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
@@ -812,7 +811,7 @@ impl Response for ResponseCreateToken {
     fn data(&self) -> &Value { self.base.data() }
     fn success(&self) -> bool { 
         self.base.success() && 
-        self.status().map_or(false, |s| s == "accepted")
+        self.status().is_some_and(|s| s == "accepted")
     }
     fn error(&self) -> Option<String> { self.base.error() }
     fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
@@ -863,7 +862,7 @@ impl Response for ResponseCreateWallet {
     fn data(&self) -> &Value { self.base.data() }
     fn success(&self) -> bool { 
         self.base.success() && 
-        self.status().map_or(false, |s| s == "accepted")
+        self.status().is_some_and(|s| s == "accepted")
     }
     fn error(&self) -> Option<String> { self.base.error() }
     fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
@@ -1000,8 +999,7 @@ impl ResponseMetaType {
     pub fn instances(&self) -> Vec<Value> {
         self.base.get_data()
             .get("instances")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.clone())
+            .and_then(|v| v.as_array()).cloned()
             .unwrap_or_default()
     }
     
@@ -1046,8 +1044,7 @@ impl ResponseMetaTypeViaAtom {
 
     pub fn atoms(&self) -> Vec<Value> {
         self.base.get_data()
-            .as_array()
-            .map(|arr| arr.clone())
+            .as_array().cloned()
             .unwrap_or_default()
     }
 
@@ -1308,8 +1305,7 @@ impl ResponseQueryUserActivity {
     
     pub fn activities(&self) -> Vec<Value> {
         self.base.get_data()
-            .as_array()
-            .map(|arr| arr.clone())
+            .as_array().cloned()
             .unwrap_or_default()
     }
 }
@@ -1361,7 +1357,7 @@ impl Response for ResponseRequestAuthorization {
     fn data(&self) -> &Value { self.base.data() }
     fn success(&self) -> bool { 
         self.base.success() && 
-        self.status().map_or(false, |s| s == "accepted")
+        self.status().is_some_and(|s| s == "accepted")
     }
     fn error(&self) -> Option<String> { self.base.error() }
     fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
@@ -1394,7 +1390,7 @@ impl ResponseRequestAuthorizationGuest {
     /// Get payload key with error handling (equivalent to payloadKey() in JS)
     pub fn payload_key(&self, key: &str) -> Result<&Value, KnishIOError> {
         let payload = self.base.get_data();
-        payload.get(key).ok_or_else(|| {
+        payload.get(key).ok_or({
             KnishIOError::InvalidResponse
         })
     }
@@ -1451,7 +1447,7 @@ impl Response for ResponseRequestAuthorizationGuest {
     fn data(&self) -> &Value { self.base.data() }
     fn success(&self) -> bool { 
         // Match JS success() logic: payload !== null
-        self.base.get_data().as_object().map_or(false, |obj| !obj.is_empty())
+        self.base.get_data().as_object().is_some_and(|obj| !obj.is_empty())
     }
     fn error(&self) -> Option<String> { self.base.error() }
     fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
@@ -1500,7 +1496,7 @@ impl Response for ResponseRequestTokens {
     fn data(&self) -> &Value { self.base.data() }
     fn success(&self) -> bool { 
         self.base.success() && 
-        self.status().map_or(false, |s| s == "accepted")
+        self.status().is_some_and(|s| s == "accepted")
     }
     fn error(&self) -> Option<String> { self.base.error() }
     fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
@@ -1551,7 +1547,7 @@ impl Response for ResponseTransferTokens {
     fn data(&self) -> &Value { self.base.data() }
     fn success(&self) -> bool { 
         self.base.success() && 
-        self.status().map_or(false, |s| s == "accepted")
+        self.status().is_some_and(|s| s == "accepted")
     }
     fn error(&self) -> Option<String> { self.base.error() }
     fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
@@ -1725,8 +1721,7 @@ impl ResponseWalletList {
     /// Get raw wallet data (for compatibility)
     pub fn wallets(&self) -> Vec<Value> {
         self.base.get_data()
-            .as_array()
-            .map(|arr| arr.clone())
+            .as_array().cloned()
             .unwrap_or_default()
     }
 }

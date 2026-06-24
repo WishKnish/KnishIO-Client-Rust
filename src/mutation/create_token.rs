@@ -71,7 +71,7 @@ impl MutationCreateToken {
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
             // Convert meta HashMap to Vec<MetaItem>
             let meta_items = params.meta.unwrap_or_default().into_iter()
-                .map(|(k, v)| MetaItem::new(&k, &meta_value_to_string(&v)))
+                .map(|(k, v)| MetaItem::new(&k, meta_value_to_string(&v)))
                 .collect();
             
             molecule.init_token_creation(&params.recipient_wallet, params.amount, meta_items)?;
@@ -100,7 +100,7 @@ impl MutationCreateToken {
         
         // Convert meta HashMap to Vec<MetaItem>
         let meta_items = params.meta.clone().unwrap_or_default().into_iter()
-            .map(|(k, v)| MetaItem::new(&k, &v.to_string()))
+            .map(|(k, v)| MetaItem::new(&k, v.to_string()))
             .collect();
         
         // Initialize token creation in molecule

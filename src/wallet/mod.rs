@@ -188,8 +188,7 @@ impl Wallet {
             // Only generate position if not provided
             if final_position.is_none() {
                 final_position = Some(Self::generate_position(64));
-            } else {
-            }
+            } 
             if let Some(secret) = secret {
                 final_bundle = Some(generate_bundle_hash(secret));
             }

@@ -48,7 +48,7 @@ impl MutationRequestAuthorization {
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
             // Convert HashMap to Vec<MetaItem>
             let meta_items: Vec<MetaItem> = params.meta.iter()
-                .map(|(k, v)| MetaItem::new(k, &v.to_string()))
+                .map(|(k, v)| MetaItem::new(k, v.to_string()))
                 .collect();
             
             molecule.init_authorization(meta_items)?;

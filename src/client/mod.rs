@@ -605,7 +605,7 @@ impl KnishIOClient {
         } else {
             // No ContinuID, create new wallet from secret
             let secret = self.secret.as_ref()
-                .ok_or_else(|| KnishIOError::MissingSecret)?;
+                .ok_or(KnishIOError::MissingSecret)?;
 
             Wallet::new(
                 Some(secret.as_str()),
@@ -621,7 +621,7 @@ impl KnishIOClient {
         // Generate wallet key if we have position
         if let Some(position) = &source_wallet.position {
             let secret = self.secret.as_ref()
-                .ok_or_else(|| KnishIOError::MissingSecret)?;
+                .ok_or(KnishIOError::MissingSecret)?;
 
             source_wallet.key = Some(Wallet::generate_key(
                 secret,
@@ -667,7 +667,7 @@ impl KnishIOClient {
 
         // Use provided or get stored secret/bundle
         let secret = secret.or_else(|| self.secret.clone())
-            .ok_or_else(|| KnishIOError::MissingSecret)?;
+            .ok_or(KnishIOError::MissingSecret)?;
         let bundle = bundle.or_else(|| self.bundle.clone());
 
         // Determine source wallet
@@ -808,7 +808,7 @@ impl KnishIOClient {
             // Convert meta HashMap to Vec<MetaItem> if provided
             let meta_items: Vec<MetaItem> = meta.unwrap_or_default()
                 .iter()
-                .map(|(k, v)| MetaItem::new(k, &v.to_string()))
+                .map(|(k, v)| MetaItem::new(k, v.to_string()))
                 .collect();
 
             // Initialize authorization on molecule
@@ -1819,7 +1819,7 @@ impl KnishIOClient {
 
         // Create new wallet (matches JS line 1013-1016)
         let new_wallet = Wallet::new(
-            Some(&self.secret.as_ref().ok_or(KnishIOError::MissingSecret)?),
+            Some(self.secret.as_ref().ok_or(KnishIOError::MissingSecret)?),
             None,
             Some(token),
             None,
@@ -1936,7 +1936,7 @@ impl KnishIOClient {
         // final_batch_id belongs in the batch_id (6th) slot, NOT the address slot.
         let recipient_wallet = Wallet::new(
             Some(self.secret.as_ref().ok_or(KnishIOError::MissingSecret)?),
-            Some(&self.bundle.as_ref().ok_or(KnishIOError::MissingBundle)?),
+            Some(self.bundle.as_ref().ok_or(KnishIOError::MissingBundle)?),
             Some(token),
             None,                       // address (derived from the key)
             None,                       // position (auto-generated)
@@ -3156,7 +3156,7 @@ impl KnishIOClient {
             }
 
             // Execute mutation
-            let response = mutation.execute(&client, Some(serde_json::Value::Object(variables)), None).await?;
+            let response = mutation.execute(client, Some(serde_json::Value::Object(variables)), None).await?;
 
             // Check if successful (matches JS: if (response.success()))
             if response.success() {
@@ -3261,7 +3261,7 @@ impl KnishIOClient {
             })?;
 
             // Execute mutation
-            let response = mutation.execute(&client, None, None).await?;
+            let response = mutation.execute(client, None, None).await?;
 
             // Check if successful
             if response.success() {

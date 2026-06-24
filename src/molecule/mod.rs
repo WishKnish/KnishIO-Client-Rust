@@ -195,11 +195,10 @@ impl Molecule {
         
         // Validate required atom properties
         for atom in &molecule.atoms {
-            if atom.isotope != Isotope::R {
-                if atom.position.is_empty() || atom.wallet_address.is_empty() {
+            if atom.isotope != Isotope::R
+                && (atom.position.is_empty() || atom.wallet_address.is_empty()) {
                     return Err(KnishIOError::AtomsMissing);
                 }
-            }
         }
         
         // Sort atoms by index
@@ -538,17 +537,13 @@ impl Molecule {
                 };
                 let source_units_meta = units_meta(source_wallet);
 
-                let remainder_info = if let Some(ref remainder_wallet) = self.remainder_wallet {
-                    Some(WalletInfo {
+                let remainder_info = self.remainder_wallet.as_ref().map(|remainder_wallet| WalletInfo {
                         position: remainder_wallet.position.clone().unwrap_or_default(),
                         address: remainder_wallet.address.clone().unwrap_or_default(),
                         token: remainder_wallet.token.clone(),
                         batch_id: remainder_wallet.batch_id.clone(),
-                    })
-                } else {
-                    None
-                };
-                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(|rw| units_meta(rw));
+                    });
+                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(&units_meta);
 
                 (bal, Some(source_info), remainder_info, source_units_meta, remainder_units_meta)
             } else {
@@ -649,17 +644,13 @@ impl Molecule {
                 };
                 let source_units_meta = units_meta(source_wallet);
 
-                let remainder_info = if let Some(ref remainder_wallet) = self.remainder_wallet {
-                    Some(WalletInfo {
+                let remainder_info = self.remainder_wallet.as_ref().map(|remainder_wallet| WalletInfo {
                         position: remainder_wallet.position.clone().unwrap_or_default(),
                         address: remainder_wallet.address.clone().unwrap_or_default(),
                         token: remainder_wallet.token.clone(),
                         batch_id: remainder_wallet.batch_id.clone(),
-                    })
-                } else {
-                    None
-                };
-                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(|rw| units_meta(rw));
+                    });
+                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(&units_meta);
 
                 (bal, Some(source_info), remainder_info, source_units_meta, remainder_units_meta)
             } else {
@@ -905,7 +896,7 @@ impl Molecule {
             // JS SDK injects token and amount into metadata (meta.token = token; meta.amount = String(amount))
             let mut enriched_meta = meta;
             enriched_meta.push(MetaItem::new("token", token));
-            enriched_meta.push(MetaItem::new("amount", &amount.to_string()));
+            enriched_meta.push(MetaItem::new("amount", amount.to_string()));
 
             let params = AtomCreateParams {
                 isotope: Isotope::T,
@@ -998,7 +989,7 @@ impl Molecule {
                     token: rw.token.clone(),
                     batch_id: rw.batch_id.clone(),
                 });
-                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(|rw| units_meta(rw));
+                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(units_meta);
                 (bal, Some(source_info), token, remainder_info, source_units_meta, remainder_units_meta)
             } else {
                 return Ok(());
@@ -1654,11 +1645,10 @@ impl Molecule {
     /// Result containing reconstructed Molecule instance
     pub fn from_json(json: &serde_json::Value, options: crate::types::MoleculeFromJsonOptions) -> crate::error::Result<Self> {
         // Validate required fields in strict mode
-        if options.strict_mode || options.validate_structure {
-            if json.get("molecularHash").is_none() || !json.get("atoms").and_then(|a| a.as_array()).map_or(false, |a| !a.is_empty()) {
+        if (options.strict_mode || options.validate_structure)
+            && (json.get("molecularHash").is_none() || !json.get("atoms").and_then(|a| a.as_array()).is_some_and(|a| !a.is_empty())) {
                 return Err(crate::error::KnishIOError::custom("Invalid molecule data: missing molecularHash or atoms array"));
             }
-        }
 
         // Create minimal molecule instance (never include secret from JSON)
         let mut molecule = Molecule::with_params(
@@ -1702,7 +1692,7 @@ impl Molecule {
             for atom_data in atoms_array {
                 let atom_options = crate::types::AtomFromJsonOptions::default();
                 let atom = Atom::from_json(atom_data, atom_options)
-                    .map_err(|e| crate::error::KnishIOError::custom(&format!("Failed to reconstruct atom: {}", e)))?;
+                    .map_err(|e| crate::error::KnishIOError::custom(format!("Failed to reconstruct atom: {}", e)))?;
                 molecule.atoms.push(atom);
             }
         }
@@ -1724,6 +1714,207 @@ impl Molecule {
 impl Default for Molecule {
     fn default() -> Self {
         Molecule::with_params(None, None, None, None, None, None)
+    }
+}
+
+/// Helper function to reconstruct wallet from JSON data for validation context
+/// 
+/// Matches the JavaScript pattern of creating wallets with proper balances
+/// for molecular validation.
+fn reconstruct_wallet_from_json(wallet_data: &serde_json::Value) -> crate::error::Result<crate::wallet::Wallet> {
+    let token = wallet_data.get("token")
+        .and_then(|t| t.as_str())
+        .unwrap_or("TEST");
+        
+    let position = wallet_data.get("position")
+        .and_then(|p| p.as_str())
+        .map(|s| s.to_string());
+        
+    let address = wallet_data.get("address")
+        .and_then(|a| a.as_str())
+        .map(|s| s.to_string());
+        
+    // Handle balance as string, integer, or float (precision-safe)
+    let balance = match wallet_data.get("balance") {
+        Some(v) if v.is_string() => v.as_str().unwrap_or("0").to_string(),
+        Some(v) if v.is_number() => {
+            if let Some(i) = v.as_i64() {
+                i.to_string()
+            } else {
+                format!("{}", v.as_f64().unwrap_or(0.0) as i128)
+            }
+        }
+        _ => "0".to_string(),
+    };
+
+    let bundle = wallet_data.get("bundle")
+        .and_then(|b| b.as_str())
+        .map(|s| s.to_string());
+
+    let batch_id = wallet_data.get("batchId")
+        .and_then(|b| b.as_str())
+        .map(|s| s.to_string());
+
+    // Provide default for characters if missing (PHP/C SDK compatibility)  
+    let characters = wallet_data.get("characters")
+        .and_then(|c| c.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| Some("BASE64".to_string())); // Default value for cross-SDK compatibility
+    
+    // Create wallet with minimal required information for validation
+    // Handle cases where bundle is missing (PHP/C SDK compatibility)
+    let mut wallet = if bundle.is_some() {
+        // Normal case: use bundle
+        crate::wallet::Wallet::create(
+            None, // secret not needed for validation
+            bundle.as_deref(),
+            token,
+            position.as_deref(), 
+            characters.as_deref(),
+        )?
+    } else {
+        // Special case: PHP/C SDKs may not include bundle in sourceWallet
+        // Create wallet using new() method directly to bypass credential validation
+        crate::wallet::Wallet::new(
+            None, // secret
+            None, // bundle (missing in PHP)
+            Some(token),
+            address.as_deref(),
+            position.as_deref(),
+            batch_id.as_deref(),
+            characters.as_deref(),
+        )?
+    };
+    
+    // Set additional properties from JSON (balance is already String)
+    wallet.balance = balance;
+    if let Some(addr) = address {
+        wallet.address = Some(addr);
+    }
+    if let Some(pos) = position {
+        wallet.position = Some(pos);
+    }
+    if let Some(batch) = batch_id {
+        wallet.batch_id = Some(batch);
+    }
+    
+    // Handle optional fields that might be missing in other SDK JSON (especially PHP/C)
+    // Set default values to ensure compatibility
+    if wallet.characters.is_none() {
+        wallet.characters = Some("BASE64".to_string());
+    }
+    
+    // Initialize empty collections for missing fields to match JavaScript structure
+    if wallet.token_units.is_empty() {
+        wallet.token_units = Vec::new(); // Already initialized as Vec::new() by default
+    }
+    
+    if wallet.trade_rates.is_empty() {
+        wallet.trade_rates = HashMap::new(); // Already initialized as HashMap::new() by default
+    }
+    
+    if wallet.molecules.is_empty() {
+        wallet.molecules = HashMap::new(); // Already initialized as HashMap::new() by default
+    }
+    
+    // Extract optional pubkey if present (might be missing in some SDKs)
+    if let Some(pubkey_val) = wallet_data.get("pubkey").and_then(|p| p.as_str()) {
+        wallet.pubkey = Some(pubkey_val.to_string());
+    }
+    
+    Ok(wallet)
+}
+
+// JavaScript-style convenience methods for cross-SDK validation
+impl Molecule {
+    /// Rust-style method (satisfies compiler warnings)
+    pub fn to_json_string(&self) -> crate::error::Result<String> {
+        self.toJSON()
+    }
+    
+    /// Rust-style method (satisfies compiler warnings)  
+    pub fn from_json_string(json: &str) -> crate::error::Result<Self> {
+        Self::fromJSON(json)
+    }
+    
+    /// JavaScript-style toJSON() convenience method
+    /// Returns JSON string directly, matching JavaScript SDK pattern
+    #[allow(non_snake_case)]
+    pub fn toJSON(&self) -> crate::error::Result<String> {
+        let options = crate::types::MoleculeJsonOptions::default();
+        let json_value = self.to_json(options)?;
+
+        let json_string = serde_json::to_string(&json_value)
+            .map_err(|e| crate::error::KnishIOError::custom(format!("JSON serialization failed: {}", e)))?;
+
+        Ok(json_string)
+    }
+    
+    /// JavaScript-style fromJSON() convenience method  
+    /// Creates Molecule instance from JSON string, matching JavaScript SDK pattern
+    #[allow(non_snake_case)]
+    pub fn fromJSON(json: &str) -> crate::error::Result<Self> {
+        let json_value: serde_json::Value = serde_json::from_str(json)
+            .map_err(|e| crate::error::KnishIOError::custom(format!("JSON parsing failed: {}", e)))?;
+        
+        // Use JavaScript-compatible default options for cross-SDK compatibility
+        let options = crate::types::MoleculeFromJsonOptions {
+            include_validation_context: true,
+            validate_structure: false, // CRITICAL: Disable strict validation for cross-SDK compatibility
+            strict_mode: false, // Critical: Allow flexibility for cross-SDK compatibility
+        };
+        
+        Self::from_json(&json_value, options)
+    }
+    
+    /// Enhanced JavaScript-style fromJSON() method with options
+    /// Matches the JavaScript SDK's fromJSON(json, options) signature exactly
+    #[allow(non_snake_case)]
+    pub fn fromJSON_with_options(json: &str, include_validation_context: bool, validate_structure: bool, strict_mode: bool) -> crate::error::Result<Self> {
+        let json_value: serde_json::Value = serde_json::from_str(json)
+            .map_err(|e| crate::error::KnishIOError::custom(format!("JSON parsing failed: {}", e)))?;
+        
+        let options = crate::types::MoleculeFromJsonOptions {
+            include_validation_context,
+            validate_structure,
+            strict_mode,
+        };
+        
+        Self::from_json(&json_value, options)
+    }
+
+    // ============================================================================
+    // Server-compatible setter methods (RS-001 support)
+    // ============================================================================
+
+    /// Set the molecular_hash field
+    pub fn set_molecular_hash(&mut self, hash: Option<String>) {
+        self.molecular_hash = hash;
+    }
+
+    /// Set the bundle field
+    pub fn set_bundle(&mut self, bundle: Option<String>) {
+        self.bundle = bundle;
+    }
+
+    /// Set the cell_slug field
+    pub fn set_cell_slug(&mut self, cell_slug: Option<String>) {
+        self.cell_slug = cell_slug;
+    }
+
+    /// Set the status field
+    pub fn set_status(&mut self, status: Option<String>) {
+        self.status = status;
+    }
+
+    /// Set the created_at field
+    pub fn set_created_at(&mut self, created_at: String) {
+        self.created_at = created_at;
+    }
+
+    /// Set parent molecule hashes for DAG linkage
+    pub fn set_parent_hashes(&mut self, hashes: Vec<String>) {
+        self.parent_hashes = hashes;
     }
 }
 
@@ -2269,207 +2460,6 @@ mod tests {
         assert!(!Wallet::is_valid_position(&format!("{}g", "a".repeat(63))));
         // Invalid: empty
         assert!(!Wallet::is_valid_position(""));
-    }
-}
-
-/// Helper function to reconstruct wallet from JSON data for validation context
-/// 
-/// Matches the JavaScript pattern of creating wallets with proper balances
-/// for molecular validation.
-fn reconstruct_wallet_from_json(wallet_data: &serde_json::Value) -> crate::error::Result<crate::wallet::Wallet> {
-    let token = wallet_data.get("token")
-        .and_then(|t| t.as_str())
-        .unwrap_or("TEST");
-        
-    let position = wallet_data.get("position")
-        .and_then(|p| p.as_str())
-        .map(|s| s.to_string());
-        
-    let address = wallet_data.get("address")
-        .and_then(|a| a.as_str())
-        .map(|s| s.to_string());
-        
-    // Handle balance as string, integer, or float (precision-safe)
-    let balance = match wallet_data.get("balance") {
-        Some(v) if v.is_string() => v.as_str().unwrap_or("0").to_string(),
-        Some(v) if v.is_number() => {
-            if let Some(i) = v.as_i64() {
-                i.to_string()
-            } else {
-                format!("{}", v.as_f64().unwrap_or(0.0) as i128)
-            }
-        }
-        _ => "0".to_string(),
-    };
-
-    let bundle = wallet_data.get("bundle")
-        .and_then(|b| b.as_str())
-        .map(|s| s.to_string());
-
-    let batch_id = wallet_data.get("batchId")
-        .and_then(|b| b.as_str())
-        .map(|s| s.to_string());
-
-    // Provide default for characters if missing (PHP/C SDK compatibility)  
-    let characters = wallet_data.get("characters")
-        .and_then(|c| c.as_str())
-        .map(|s| s.to_string())
-        .or_else(|| Some("BASE64".to_string())); // Default value for cross-SDK compatibility
-    
-    // Create wallet with minimal required information for validation
-    // Handle cases where bundle is missing (PHP/C SDK compatibility)
-    let mut wallet = if bundle.is_some() {
-        // Normal case: use bundle
-        crate::wallet::Wallet::create(
-            None, // secret not needed for validation
-            bundle.as_deref(),
-            token,
-            position.as_deref(), 
-            characters.as_deref(),
-        )?
-    } else {
-        // Special case: PHP/C SDKs may not include bundle in sourceWallet
-        // Create wallet using new() method directly to bypass credential validation
-        crate::wallet::Wallet::new(
-            None, // secret
-            None, // bundle (missing in PHP)
-            Some(token),
-            address.as_deref(),
-            position.as_deref(),
-            batch_id.as_deref(),
-            characters.as_deref(),
-        )?
-    };
-    
-    // Set additional properties from JSON (balance is already String)
-    wallet.balance = balance;
-    if let Some(addr) = address {
-        wallet.address = Some(addr);
-    }
-    if let Some(pos) = position {
-        wallet.position = Some(pos);
-    }
-    if let Some(batch) = batch_id {
-        wallet.batch_id = Some(batch);
-    }
-    
-    // Handle optional fields that might be missing in other SDK JSON (especially PHP/C)
-    // Set default values to ensure compatibility
-    if wallet.characters.is_none() {
-        wallet.characters = Some("BASE64".to_string());
-    }
-    
-    // Initialize empty collections for missing fields to match JavaScript structure
-    if wallet.token_units.is_empty() {
-        wallet.token_units = Vec::new(); // Already initialized as Vec::new() by default
-    }
-    
-    if wallet.trade_rates.is_empty() {
-        wallet.trade_rates = HashMap::new(); // Already initialized as HashMap::new() by default
-    }
-    
-    if wallet.molecules.is_empty() {
-        wallet.molecules = HashMap::new(); // Already initialized as HashMap::new() by default
-    }
-    
-    // Extract optional pubkey if present (might be missing in some SDKs)
-    if let Some(pubkey_val) = wallet_data.get("pubkey").and_then(|p| p.as_str()) {
-        wallet.pubkey = Some(pubkey_val.to_string());
-    }
-    
-    Ok(wallet)
-}
-
-// JavaScript-style convenience methods for cross-SDK validation
-impl Molecule {
-    /// Rust-style method (satisfies compiler warnings)
-    pub fn to_json_string(&self) -> crate::error::Result<String> {
-        self.toJSON()
-    }
-    
-    /// Rust-style method (satisfies compiler warnings)  
-    pub fn from_json_string(json: &str) -> crate::error::Result<Self> {
-        Self::fromJSON(json)
-    }
-    
-    /// JavaScript-style toJSON() convenience method
-    /// Returns JSON string directly, matching JavaScript SDK pattern
-    #[allow(non_snake_case)]
-    pub fn toJSON(&self) -> crate::error::Result<String> {
-        let options = crate::types::MoleculeJsonOptions::default();
-        let json_value = self.to_json(options)?;
-
-        let json_string = serde_json::to_string(&json_value)
-            .map_err(|e| crate::error::KnishIOError::custom(&format!("JSON serialization failed: {}", e)))?;
-
-        Ok(json_string)
-    }
-    
-    /// JavaScript-style fromJSON() convenience method  
-    /// Creates Molecule instance from JSON string, matching JavaScript SDK pattern
-    #[allow(non_snake_case)]
-    pub fn fromJSON(json: &str) -> crate::error::Result<Self> {
-        let json_value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|e| crate::error::KnishIOError::custom(&format!("JSON parsing failed: {}", e)))?;
-        
-        // Use JavaScript-compatible default options for cross-SDK compatibility
-        let options = crate::types::MoleculeFromJsonOptions {
-            include_validation_context: true,
-            validate_structure: false, // CRITICAL: Disable strict validation for cross-SDK compatibility
-            strict_mode: false, // Critical: Allow flexibility for cross-SDK compatibility
-        };
-        
-        Self::from_json(&json_value, options)
-    }
-    
-    /// Enhanced JavaScript-style fromJSON() method with options
-    /// Matches the JavaScript SDK's fromJSON(json, options) signature exactly
-    #[allow(non_snake_case)]
-    pub fn fromJSON_with_options(json: &str, include_validation_context: bool, validate_structure: bool, strict_mode: bool) -> crate::error::Result<Self> {
-        let json_value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|e| crate::error::KnishIOError::custom(&format!("JSON parsing failed: {}", e)))?;
-        
-        let options = crate::types::MoleculeFromJsonOptions {
-            include_validation_context,
-            validate_structure,
-            strict_mode,
-        };
-        
-        Self::from_json(&json_value, options)
-    }
-
-    // ============================================================================
-    // Server-compatible setter methods (RS-001 support)
-    // ============================================================================
-
-    /// Set the molecular_hash field
-    pub fn set_molecular_hash(&mut self, hash: Option<String>) {
-        self.molecular_hash = hash;
-    }
-
-    /// Set the bundle field
-    pub fn set_bundle(&mut self, bundle: Option<String>) {
-        self.bundle = bundle;
-    }
-
-    /// Set the cell_slug field
-    pub fn set_cell_slug(&mut self, cell_slug: Option<String>) {
-        self.cell_slug = cell_slug;
-    }
-
-    /// Set the status field
-    pub fn set_status(&mut self, status: Option<String>) {
-        self.status = status;
-    }
-
-    /// Set the created_at field
-    pub fn set_created_at(&mut self, created_at: String) {
-        self.created_at = created_at;
-    }
-
-    /// Set parent molecule hashes for DAG linkage
-    pub fn set_parent_hashes(&mut self, hashes: Vec<String>) {
-        self.parent_hashes = hashes;
     }
 }
 

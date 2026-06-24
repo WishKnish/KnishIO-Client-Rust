@@ -73,6 +73,12 @@ impl Default for PoolConfig {
     }
 }
 
+impl Default for ConnectionPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConnectionPool {
     /// Create a new connection pool with default configuration
     pub fn new() -> Self {

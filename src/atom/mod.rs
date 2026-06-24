@@ -246,7 +246,7 @@ impl Atom {
             // 3. Wrap each key-value as a single-key object in an array
             // 4. Recursively structure nested objects (meta items)
             let atom_views: Vec<serde_json::Value> = sorted_atoms.iter()
-                .map(|atom| Self::structure_atom_v4(atom))
+                .map(Self::structure_atom_v4)
                 .collect();
             shake256(&serde_json::to_string(&atom_views)?, 256)
         } else {
@@ -396,7 +396,7 @@ impl Atom {
                 }
             } else {
                 // JavaScript: value === null ? '' : String(value)
-                hashable_values.push(value.unwrap_or_else(|| String::new()));
+                hashable_values.push(value.unwrap_or_default());
             }
         }
         
@@ -495,7 +495,7 @@ impl Atom {
             let required_fields = vec!["position", "walletAddress", "isotope", "token"];
             for field in required_fields {
                 if json.get(field).and_then(|v| v.as_str()).map_or(true, |s| s.is_empty()) {
-                    return Err(KnishIOError::custom(&format!(
+                    return Err(KnishIOError::custom(format!(
                         "Required field '{}' is missing or empty", field
                     )));
                 }
@@ -518,7 +518,7 @@ impl Atom {
             .unwrap_or("V");
         
         let isotope = Isotope::from_str(isotope_str)
-            .ok_or_else(|| KnishIOError::custom(&format!("Invalid isotope: {}", isotope_str)))?;
+            .ok_or_else(|| KnishIOError::custom(format!("Invalid isotope: {}", isotope_str)))?;
 
         let token = json.get("token")
             .and_then(|v| v.as_str())
@@ -722,6 +722,120 @@ impl Atom {
 impl Default for Atom {
     fn default() -> Self {
         Atom::new("", "", Isotope::V, "")
+    }
+}
+
+// JavaScript-style convenience methods for cross-SDK validation
+impl Atom {
+    /// Rust-style method (satisfies compiler warnings)
+    pub fn to_json_string(&self) -> crate::error::Result<String> {
+        self.toJSON()
+    }
+    
+    /// Rust-style method (satisfies compiler warnings)
+    pub fn from_json_string(json: &str) -> crate::error::Result<Self> {
+        Self::fromJSON(json)
+    }
+    
+    /// JavaScript-style toJSON() convenience method
+    /// Returns JSON string directly, matching JavaScript SDK pattern  
+    #[allow(non_snake_case)]
+    pub fn toJSON(&self) -> crate::error::Result<String> {
+        let options = crate::types::AtomJsonOptions::default();
+        let json_value = self.to_json(options)?;
+        serde_json::to_string(&json_value)
+            .map_err(|e| crate::error::KnishIOError::custom(format!("JSON serialization failed: {}", e)))
+    }
+    
+    /// JavaScript-style fromJSON() convenience method
+    /// Creates Atom instance from JSON string, matching JavaScript SDK pattern
+    #[allow(non_snake_case)]
+    pub fn fromJSON(json: &str) -> crate::error::Result<Self> {
+        let json_value: serde_json::Value = serde_json::from_str(json)
+            .map_err(|e| crate::error::KnishIOError::custom(format!("JSON parsing failed: {}", e)))?;
+        let options = crate::types::AtomFromJsonOptions::default();
+        Self::from_json(&json_value, options)
+    }
+
+    /// Calculate total value for value atoms
+    ///
+    /// Matches TS Atom.calculateTotalValue(atoms) at lines 619-623
+    ///
+    /// # Parameters
+    /// - `atoms`: Array of atoms to calculate total value from
+    ///
+    /// # Returns
+    /// Sum of all value atoms with isotope 'V'
+    pub fn calculate_total_value(atoms: &[Atom]) -> f64 {
+        atoms
+            .iter()
+            .filter(|atom| atom.isotope == Isotope::V && atom.value.is_some())
+            .filter_map(|atom| {
+                atom.value.as_ref()
+                    .and_then(|v| v.parse::<f64>().ok())
+            })
+            .sum()
+    }
+
+    /// Group atoms by isotope type
+    ///
+    /// Matches TS Atom.groupByIsotope(atoms) at lines 628-639
+    ///
+    /// # Parameters
+    /// - `atoms`: Array of atoms to group
+    ///
+    /// # Returns
+    /// HashMap mapping isotope types to vectors of atoms
+    pub fn group_by_isotope(atoms: &[Atom]) -> std::collections::HashMap<String, Vec<Atom>> {
+        let mut groups: std::collections::HashMap<String, Vec<Atom>> = std::collections::HashMap::new();
+
+        for atom in atoms {
+            let isotope_key = atom.isotope.as_str().to_string();
+            groups.entry(isotope_key)
+                .or_default()
+                .push(atom.clone());
+        }
+
+        groups
+    }
+
+    // ============================================================================
+    // Server-compatible setter methods (RS-001 support)
+    // ============================================================================
+
+    /// Set the value field
+    pub fn set_value(&mut self, value: Option<String>) {
+        self.value = value;
+    }
+
+    /// Set the batch_id field
+    pub fn set_batch_id(&mut self, batch_id: Option<String>) {
+        self.batch_id = batch_id;
+    }
+
+    /// Set the meta_type field
+    pub fn set_meta_type(&mut self, meta_type: Option<String>) {
+        self.meta_type = meta_type;
+    }
+
+    /// Set the meta_id field
+    pub fn set_meta_id(&mut self, meta_id: Option<String>) {
+        self.meta_id = meta_id;
+    }
+
+    /// Set the meta field
+    pub fn set_meta(&mut self, meta: Vec<MetaItem>) {
+        self.meta = meta;
+    }
+
+    /// Set the index field
+    pub fn set_index(&mut self, index: Option<u32>) {
+        self.index = index;
+    }
+
+    /// Set the ots_fragment field
+    pub fn set_ots_fragment(&mut self, ots_fragment: Option<String>) {
+        self.ots_fragment = ots_fragment;
     }
 }
 
@@ -931,120 +1045,6 @@ mod tests {
         // Test with zero
         let zero_base17 = hex_to_base17("0").unwrap();
         assert_eq!(zero_base17, "0".repeat(64));
-    }
-}
-
-// JavaScript-style convenience methods for cross-SDK validation
-impl Atom {
-    /// Rust-style method (satisfies compiler warnings)
-    pub fn to_json_string(&self) -> crate::error::Result<String> {
-        self.toJSON()
-    }
-    
-    /// Rust-style method (satisfies compiler warnings)
-    pub fn from_json_string(json: &str) -> crate::error::Result<Self> {
-        Self::fromJSON(json)
-    }
-    
-    /// JavaScript-style toJSON() convenience method
-    /// Returns JSON string directly, matching JavaScript SDK pattern  
-    #[allow(non_snake_case)]
-    pub fn toJSON(&self) -> crate::error::Result<String> {
-        let options = crate::types::AtomJsonOptions::default();
-        let json_value = self.to_json(options)?;
-        serde_json::to_string(&json_value)
-            .map_err(|e| crate::error::KnishIOError::custom(&format!("JSON serialization failed: {}", e)))
-    }
-    
-    /// JavaScript-style fromJSON() convenience method
-    /// Creates Atom instance from JSON string, matching JavaScript SDK pattern
-    #[allow(non_snake_case)]
-    pub fn fromJSON(json: &str) -> crate::error::Result<Self> {
-        let json_value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|e| crate::error::KnishIOError::custom(&format!("JSON parsing failed: {}", e)))?;
-        let options = crate::types::AtomFromJsonOptions::default();
-        Self::from_json(&json_value, options)
-    }
-
-    /// Calculate total value for value atoms
-    ///
-    /// Matches TS Atom.calculateTotalValue(atoms) at lines 619-623
-    ///
-    /// # Parameters
-    /// - `atoms`: Array of atoms to calculate total value from
-    ///
-    /// # Returns
-    /// Sum of all value atoms with isotope 'V'
-    pub fn calculate_total_value(atoms: &[Atom]) -> f64 {
-        atoms
-            .iter()
-            .filter(|atom| atom.isotope == Isotope::V && atom.value.is_some())
-            .filter_map(|atom| {
-                atom.value.as_ref()
-                    .and_then(|v| v.parse::<f64>().ok())
-            })
-            .sum()
-    }
-
-    /// Group atoms by isotope type
-    ///
-    /// Matches TS Atom.groupByIsotope(atoms) at lines 628-639
-    ///
-    /// # Parameters
-    /// - `atoms`: Array of atoms to group
-    ///
-    /// # Returns
-    /// HashMap mapping isotope types to vectors of atoms
-    pub fn group_by_isotope(atoms: &[Atom]) -> std::collections::HashMap<String, Vec<Atom>> {
-        let mut groups: std::collections::HashMap<String, Vec<Atom>> = std::collections::HashMap::new();
-
-        for atom in atoms {
-            let isotope_key = atom.isotope.as_str().to_string();
-            groups.entry(isotope_key)
-                .or_insert_with(Vec::new)
-                .push(atom.clone());
-        }
-
-        groups
-    }
-
-    // ============================================================================
-    // Server-compatible setter methods (RS-001 support)
-    // ============================================================================
-
-    /// Set the value field
-    pub fn set_value(&mut self, value: Option<String>) {
-        self.value = value;
-    }
-
-    /// Set the batch_id field
-    pub fn set_batch_id(&mut self, batch_id: Option<String>) {
-        self.batch_id = batch_id;
-    }
-
-    /// Set the meta_type field
-    pub fn set_meta_type(&mut self, meta_type: Option<String>) {
-        self.meta_type = meta_type;
-    }
-
-    /// Set the meta_id field
-    pub fn set_meta_id(&mut self, meta_id: Option<String>) {
-        self.meta_id = meta_id;
-    }
-
-    /// Set the meta field
-    pub fn set_meta(&mut self, meta: Vec<MetaItem>) {
-        self.meta = meta;
-    }
-
-    /// Set the index field
-    pub fn set_index(&mut self, index: Option<u32>) {
-        self.index = index;
-    }
-
-    /// Set the ots_fragment field
-    pub fn set_ots_fragment(&mut self, ots_fragment: Option<String>) {
-        self.ots_fragment = ots_fragment;
     }
 }
 

@@ -14,6 +14,7 @@ use crate::error::{KnishIOError, Result};
 /// providing default policy generation and normalization functionality.
 /// This struct maintains exact compatibility with the JavaScript PolicyMeta class.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default)]
 pub struct PolicyMeta {
     /// The policy structure with read/write permissions
     pub policy: HashMap<String, HashMap<String, Vec<String>>>,
@@ -160,12 +161,12 @@ impl PolicyMeta {
         let read_policy_keys: HashSet<String> = self.policy
             .get("read")
             .map(|read_map| read_map.keys().cloned().collect())
-            .unwrap_or_else(HashSet::new);
+            .unwrap_or_default();
             
         let write_policy_keys: HashSet<String> = self.policy
             .get("write")
             .map(|write_map| write_map.keys().cloned().collect())
-            .unwrap_or_else(HashSet::new);
+            .unwrap_or_default();
 
         // Ensure read and write policy maps exist
         if !self.policy.contains_key("read") {
@@ -303,7 +304,7 @@ impl PolicyMeta {
     /// Result containing new PolicyMeta instance or error
     pub fn create_from_db(data: &serde_json::Value, meta_keys: Vec<String>) -> Result<Self> {
         let policy = if let Some(array) = data.as_array() {
-            if array.len() > 0 {
+            if !array.is_empty() {
                 array[0].clone()
             } else {
                 serde_json::Value::Object(serde_json::Map::new())
@@ -361,7 +362,7 @@ impl PolicyMeta {
     pub fn set_permissions(&mut self, action: &str, key: &str, permissions: Vec<String>) {
         self.policy
             .entry(action.to_string())
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(key.to_string(), permissions);
     }
 
@@ -412,13 +413,6 @@ impl PolicyMeta {
     }
 }
 
-impl Default for PolicyMeta {
-    fn default() -> Self {
-        Self {
-            policy: HashMap::new(),
-        }
-    }
-}
 
 impl std::fmt::Display for PolicyMeta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

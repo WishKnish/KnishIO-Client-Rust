@@ -14,6 +14,7 @@ use crate::error::{KnishIOError, Result};
 /// This struct maintains exact compatibility with the JavaScript TokenUnit class.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct TokenUnit {
     /// Unique identifier for this token unit
     pub id: String,
@@ -54,7 +55,7 @@ impl TokenUnit {
         Self {
             id,
             name,
-            metas: metas.unwrap_or_else(HashMap::new),
+            metas: metas.unwrap_or_default(),
         }
     }
 
@@ -99,13 +100,8 @@ impl TokenUnit {
             if let Some(metas_str) = metas_value.as_str() {
                 // Parse JSON string if it's a string
                 if !metas_str.is_empty() {
-                    match serde_json::from_str::<HashMap<String, serde_json::Value>>(metas_str) {
-                        Ok(parsed_metas) => parsed_metas,
-                        Err(_) => {
-                            // If parsing fails, create empty map instead
-                            HashMap::new()
-                        }
-                    }
+                    // parse failure → empty map (clippy::manual_unwrap_or_default)
+                    serde_json::from_str::<HashMap<String, serde_json::Value>>(metas_str).unwrap_or_default()
                 } else {
                     HashMap::new()
                 }
@@ -413,15 +409,6 @@ impl TokenUnit {
     }
 }
 
-impl Default for TokenUnit {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            metas: HashMap::new(),
-        }
-    }
-}
 
 impl std::fmt::Display for TokenUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

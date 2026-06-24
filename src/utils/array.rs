@@ -478,7 +478,7 @@ mod tests {
         
         // Single array case
         let arr1 = vec![1, 2, 3];
-        let result = intersect(&[arr1.clone()]);
+        let result = intersect(std::slice::from_ref(&arr1));
         assert_eq!(result, arr1);
         
         // Empty case
