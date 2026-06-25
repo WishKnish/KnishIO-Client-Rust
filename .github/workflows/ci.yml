@@ -19,5 +19,7 @@ jobs:
       # The c111 gate: clippy::all is deny-clean. NOT `-D warnings` — unwrap/expect/panic
       # are intentionally warn-level (a separate gradual-elimination effort), so promoting
       # warnings to errors would fail the build on those non-bug lints.
+      # No `--locked`: Cargo.lock is gitignored (not committed), so `--locked` errors
+      # "cannot create the lock file"; the gate is clippy lints, not lockfile reproducibility.
       - name: cargo clippy
-        run: cargo clippy --all-targets --locked
+        run: cargo clippy --all-targets
