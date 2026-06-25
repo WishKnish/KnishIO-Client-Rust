@@ -11,6 +11,7 @@ use serde::Deserialize;
 
 // Import the Rust SDK's public API
 use knishio_client::{shake256, generate_bundle_hash, Wallet, Atom};
+use knishio_client::wallet::EncryptedMessage;
 use knishio_client::types::{Isotope, MetaItem};
 use knishio_client::crypto::{
     enumerate_hash, normalize_hash,
@@ -32,6 +33,7 @@ struct Vectors {
     hash_normalization: HashNormalizationSection,
     molecular_hash: MolecularHashSection,
     wots_signature: WotsSignatureSection,
+    mlkem768: Mlkem768Section,
     edge_cases: EdgeCasesSection,
 }
 
@@ -194,6 +196,37 @@ struct BoundaryCase {
     input: String,
     input_length: usize,
     expected_hash: String,
+}
+
+// ── ML-KEM768 (post-quantum cipher convergence) ─────────────────────────
+
+#[derive(Deserialize)]
+struct Mlkem768Section {
+    keygen: Mlkem768Keygen,
+    decrypt: Mlkem768Decrypt,
+}
+
+// Keygen-from-seed is deterministic (FIPS-203) → byte-frozen pubkey, like a SHAKE vector.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Mlkem768Keygen {
+    secret: String,
+    token: String,
+    position: String,
+    expected_pubkey: String,
+}
+
+// Encapsulation is non-deterministic, but decapsulation + AES-256-GCM decrypt is deterministic →
+// one frozen {cipherText, encryptedMessage} sample must decrypt to the canonical plaintext.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Mlkem768Decrypt {
+    secret: String,
+    token: String,
+    position: String,
+    cipher_text: String,
+    encrypted_message: String,
+    expected_plaintext: String,
 }
 
 // ── Load vectors at compile time ────────────────────────────────────────
@@ -509,4 +542,58 @@ fn test_enumerate_hash_range_invariant() {
             );
         }
     }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ML-KEM768 tests (post-quantum cipher cross-SDK convergence)
+// ════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_mlkem768_keygen_cross_platform() {
+    let vectors = load_vectors();
+    let v = &vectors.vectors.mlkem768.keygen;
+
+    let wallet = Wallet::create(
+        Some(&v.secret),
+        None,
+        &v.token,
+        Some(&v.position),
+        None,
+    ).unwrap_or_else(|e| panic!("ML-KEM768 keygen wallet creation failed: {:?}", e));
+
+    // libcrux-ml-kem keygen must byte-match the @noble-derived frozen pubkey.
+    assert_eq!(
+        wallet.pubkey.as_deref(),
+        Some(v.expected_pubkey.as_str()),
+        "ML-KEM768 keygen pubkey mismatch (libcrux vs @noble frozen vector)"
+    );
+}
+
+#[tokio::test]
+async fn test_mlkem768_decrypt_cross_platform() {
+    let vectors = load_vectors();
+    let v = &vectors.vectors.mlkem768.decrypt;
+
+    let wallet = Wallet::create(
+        Some(&v.secret),
+        None,
+        &v.token,
+        Some(&v.position),
+        None,
+    ).unwrap_or_else(|e| panic!("ML-KEM768 decrypt wallet creation failed: {:?}", e));
+
+    let em = EncryptedMessage {
+        cipher_text: v.cipher_text.clone(),
+        encrypted_message: v.encrypted_message.clone(),
+    };
+
+    // libcrux decapsulation + AES-256-GCM must recover the @noble-encapsulated plaintext.
+    let plaintext = wallet.decrypt_message(&em).await
+        .unwrap_or_else(|e| panic!("ML-KEM768 decrypt failed: {:?}", e));
+
+    assert_eq!(
+        plaintext.as_str(),
+        Some(v.expected_plaintext.as_str()),
+        "ML-KEM768 decrypt plaintext mismatch (frozen @noble sample via libcrux)"
+    );
 }
