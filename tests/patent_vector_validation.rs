@@ -1,3 +1,6 @@
+// cycle 127: gated on the monorepo shared fixtures (include_str! below); cfg'd out in a
+// standalone CI checkout where they're absent. Set by build.rs.
+#![cfg(has_shared_fixtures)]
 //! Patent Appendix B: Cross-platform test vector validation
 //!
 //! Validates the canonical patent test vectors against the Rust SDK crypto functions.
