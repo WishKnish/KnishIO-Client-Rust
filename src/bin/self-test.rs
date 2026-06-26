@@ -30,6 +30,7 @@ use knishio_client::{
     Molecule, Wallet, Atom, Isotope,
     crypto::{generate_secret, generate_bundle_hash},
     types::MetaItem,
+    wallet::EncryptedMessage,
 };
 
 /* ANSI Color codes for terminal output */
@@ -1568,11 +1569,11 @@ impl SelfTestRunner {
                         // Special handling for ML-KEM768 cross-SDK compatibility
                         let validation_success = match self.validate_cross_sdk_mlkem768(molecule_data).await {
                             Ok(valid) => {
-                                Logger::message(&format!("    ✅ {molecule_type} encryption: PASSED"), colors::GREEN);
+                                Logger::message(&format!("    ✅ {molecule_type} decryption: PASSED"), colors::GREEN);
                                 valid
                             }
                             Err(error) => {
-                                Logger::message(&format!("    ❌ {molecule_type} encryption: FAILED - {error}"), colors::RED);
+                                Logger::message(&format!("    ❌ {molecule_type} decryption: FAILED - {error}"), colors::RED);
                                 false
                             }
                         };
@@ -1670,65 +1671,30 @@ impl SelfTestRunner {
             Some("BASE64"),
         )?;
 
-        // REAL TEST: Attempt to encrypt a message using their public key
-        let their_public_key = data["publicKey"].as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing publicKey in ML-KEM768 data"))?;
+        // STRONG cross-SDK check (cycle 138): decrypt THEIR encryptedData with our TESTSEED
+        // wallet (all 8 SDKs share the keypair) and assert the plaintext — real decrypt-interop,
+        // not the old weak encrypt-to-their-pubkey form.
+        let enc = &data["encryptedData"];
+        let cipher_text = enc["cipherText"].as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing cipherText in ML-KEM768 encryptedData"))?
+            .to_string();
+        let encrypted_message = enc["encryptedMessage"].as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing encryptedMessage in ML-KEM768 encryptedData"))?
+            .to_string();
 
-        let test_message = "Cross-SDK ML-KEM768 compatibility test";
-
-        // Test encryption compatibility with their public key
-        match our_wallet.encrypt_message(
-            &serde_json::json!(test_message),
-            their_public_key
-        ).await {
-            Ok(encrypted_data) => {
-                // If encryption succeeded, their public key format is compatible
-                let encryption_compatible = !encrypted_data.cipher_text.is_empty() &&
-                                          !encrypted_data.encrypted_message.is_empty();
-
-                if encryption_compatible {
-                    println!("    ✅ Successfully encrypted message with their public key");
-                    println!("    ✅ Public key format compatibility confirmed");
+        let em = EncryptedMessage { cipher_text, encrypted_message };
+        match our_wallet.decrypt_message(&em).await {
+            Ok(decrypted) => {
+                let valid = decrypted.as_str() == Some(original_plaintext);
+                if valid {
+                    println!("    ✅ Successfully decrypted their ML-KEM768 message");
                 } else {
-                    println!("    ❌ Encryption produced empty results");
+                    println!("    ❌ Decrypted plaintext mismatch");
                 }
-
-                // Additional validation: Verify we can decrypt our own test encryption
-                if let Some(our_pubkey) = &our_wallet.pubkey {
-                    match our_wallet.encrypt_message(
-                        &serde_json::json!(original_plaintext),
-                        our_pubkey
-                    ).await {
-                        Ok(self_encrypted) => {
-                            match our_wallet.decrypt_message(&self_encrypted).await {
-                                Ok(decrypted) => {
-                                    let self_test_valid = decrypted.as_str().unwrap_or("") == original_plaintext;
-                                    if self_test_valid {
-                                        println!("    ✅ Self-encryption/decryption verification passed");
-                                    } else {
-                                        println!("    ❌ Self-encryption/decryption verification failed");
-                                    }
-                                    Ok(encryption_compatible && self_test_valid)
-                                }
-                                Err(e) => {
-                                    println!("    ❌ Self-decryption failed: {e}");
-                                    Ok(false)
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("    ❌ Self-encryption failed: {e}");
-                            Ok(false)
-                        }
-                    }
-                } else {
-                    println!("    ❌ No public key available for self-test");
-                    Ok(false)
-                }
+                Ok(valid)
             }
             Err(e) => {
-                println!("    ❌ Failed to encrypt with their public key: {e}");
-                println!("    ❌ Public key format incompatible");
+                println!("    ❌ Failed to decrypt their ML-KEM768 message: {e}");
                 Ok(false)
             }
         }
