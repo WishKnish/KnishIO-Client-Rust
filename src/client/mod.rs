@@ -64,11 +64,17 @@ pub struct TransferRecipient {
 /// 
 /// # Examples
 /// 
-/// ```rust
-/// use knishio_client::KnishIOClient;
-/// 
-/// let client = KnishIOClient::new(vec!["https://api.knish.io".to_string()], None);
+/// ```no_run
+/// use knishio_client::ClientBuilder;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = ClientBuilder::new()
+///     .uri("https://api.knish.io")
+///     .build()?;
 /// // client.set_secret("your-secret-here");
+/// # let _ = client;
+/// # Ok(())
+/// # }
 /// ```
 pub struct KnishIOClient {
     /// List of KnishIO node URIs for GraphQL communication

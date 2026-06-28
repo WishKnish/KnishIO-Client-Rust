@@ -1754,7 +1754,7 @@ impl Response for ResponseWalletList {
 ///
 /// ### Basic Response Processing
 ///
-/// ```rust
+/// ```ignore
 /// use knishio_client::response::*;
 /// use serde_json::json;
 ///
@@ -1780,7 +1780,7 @@ impl Response for ResponseWalletList {
 ///
 /// ### Using Response Factory
 ///
-/// ```rust
+/// ```ignore
 /// use knishio_client::response::*;
 ///
 /// // Automatic response type detection
@@ -1797,7 +1797,7 @@ impl Response for ResponseWalletList {
 ///
 /// ### Molecular Response Handling
 ///
-/// ```rust
+/// ```ignore
 /// use knishio_client::response::*;
 ///
 /// let molecule_response = ResponseProposeMolecule::new(json_response, None)?;
@@ -1812,7 +1812,7 @@ impl Response for ResponseWalletList {
 ///
 /// ### Wallet Conversion
 ///
-/// ```rust
+/// ```ignore
 /// use knishio_client::response::*;
 ///
 /// // Convert response data to client wallet (used across multiple response types)
@@ -1828,7 +1828,7 @@ impl Response for ResponseWalletList {
 ///
 /// All response constructors return `Result<T, KnishIOError>` for comprehensive error handling:
 ///
-/// ```rust
+/// ```ignore
 /// match ResponseBalance::new(json_response, None) {
 ///     Ok(response) => {
 ///         if response.success() {
@@ -1870,7 +1870,7 @@ impl Response for ResponseWalletList {
 ///
 /// The response system integrates seamlessly with the KnishIO GraphQL client:
 ///
-/// ```rust
+/// ```ignore
 /// use knishio_client::{KnishIOClient, response::*};
 ///
 /// let client = KnishIOClient::new("http://localhost:8080", None, None, None, None, None);

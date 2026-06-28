@@ -6,9 +6,10 @@
 //!
 //! # Examples
 //!
-//! ```rust
-//! use knishio_client::client::ClientBuilder;
+//! ```no_run
+//! use knishio_client::ClientBuilder;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Basic client
 //! let client = ClientBuilder::new()
 //!     .uri("https://api.knish.io")
@@ -18,12 +19,14 @@
 //! // Advanced configuration
 //! let client = ClientBuilder::new()
 //!     .uris(vec!["https://node1.knish.io", "https://node2.knish.io"])
-//!     .secret("my-secret-key") 
+//!     .secret("my-secret-key")
 //!     .cell_slug("my-cell")
 //!     .encryption(true)
 //!     .logging(true)
 //!     .server_sdk_version(3)
 //!     .build()?;
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::client::KnishIOClient;
@@ -81,7 +84,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
-    /// use knishio_client::client::ClientBuilder;
+    /// use knishio_client::ClientBuilder;
     ///
     /// let builder = ClientBuilder::new();
     /// ```
@@ -113,6 +116,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new().uri("https://api.knish.io");
     /// ```
     pub fn uri<S: Into<String>>(mut self, uri: S) -> Self {
@@ -129,6 +133,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new()
     ///     .uris(vec!["https://node1.knish.io", "https://node2.knish.io"]);
     /// ```
@@ -146,6 +151,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new()
     ///     .uri("https://node1.knish.io")
     ///     .add_uri("https://node2.knish.io");
@@ -164,6 +170,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new().secret("my-secret-key");
     /// ```
     pub fn secret<S: Into<String>>(mut self, secret: S) -> Self {
@@ -180,6 +187,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new().cell_slug("my-cell");
     /// ```
     pub fn cell_slug<S: Into<String>>(mut self, cell_slug: S) -> Self {
@@ -196,6 +204,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new().encryption(true);
     /// ```
     pub fn encryption(mut self, enabled: bool) -> Self {
@@ -212,6 +221,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new().logging(true);
     /// ```
     pub fn logging(mut self, enabled: bool) -> Self {
@@ -228,6 +238,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new().server_sdk_version(3);
     /// ```
     pub fn server_sdk_version(mut self, version: u32) -> Self {
@@ -244,6 +255,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new().connection_timeout(30);
     /// ```
     pub fn connection_timeout(mut self, timeout_seconds: u64) -> Self {
@@ -260,6 +272,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new().request_timeout(60);
     /// ```
     pub fn request_timeout(mut self, timeout_seconds: u64) -> Self {
@@ -277,6 +290,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new()
     ///     .custom_header("X-Client-Version", "1.0.0");
     /// ```
@@ -294,11 +308,12 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// use std::collections::HashMap;
-    /// 
+    ///
     /// let mut headers = HashMap::new();
     /// headers.insert("X-Client-Version".to_string(), "1.0.0".to_string());
-    /// 
+    ///
     /// let builder = ClientBuilder::new().custom_headers(headers);
     /// ```
     pub fn custom_headers(mut self, headers: HashMap<String, String>) -> Self {
@@ -315,6 +330,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new().max_retries(3);
     /// ```
     pub fn max_retries(mut self, retries: u32) -> Self {
@@ -331,6 +347,7 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// let builder = ClientBuilder::new().auto_auth(false);
     /// ```
     pub fn auto_auth(mut self, enabled: bool) -> Self {
@@ -357,8 +374,9 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// use knishio_client::graphql::SocketConfig;
-    /// 
+    ///
     /// let socket_config = SocketConfig::default();
     /// let builder = ClientBuilder::new().socket_config(socket_config);
     /// ```
@@ -376,8 +394,9 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```rust
+    /// # use knishio_client::ClientBuilder;
     /// use knishio_client::graphql::GraphQLClient;
-    /// 
+    ///
     /// let client = GraphQLClient::new("https://api.knish.io");
     /// let builder = ClientBuilder::new().graphql_client(client);
     /// ```
@@ -440,13 +459,16 @@ impl ClientBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// use knishio_client::client::ClientBuilder;
+    /// ```no_run
+    /// use knishio_client::ClientBuilder;
     ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = ClientBuilder::new()
     ///     .uri("https://api.knish.io")
     ///     .secret("my-secret")
     ///     .build()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn build(self) -> Result<KnishIOClient> {
         // Validate configuration
@@ -509,13 +531,16 @@ impl ClientBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// use knishio_client::client::ClientBuilder;
+    /// ```no_run
+    /// use knishio_client::ClientBuilder;
     ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = ClientBuilder::new()
     ///     .uri("https://api.knish.io")
     ///     .secret("my-secret")
     ///     .build_async().await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn build_async(self) -> Result<KnishIOClient> {
         // Save values before self is moved
@@ -557,8 +582,12 @@ impl ClientBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```no_run
+    /// # use knishio_client::ClientBuilder;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = ClientBuilder::production("https://api.knish.io", "my-secret").build()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn production<S: Into<String>>(uri: S, secret: S) -> Self {
         Self::new()
@@ -582,8 +611,12 @@ impl ClientBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```no_run
+    /// # use knishio_client::ClientBuilder;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = ClientBuilder::development("http://localhost:8000", "test-secret").build()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn development<S: Into<String>>(uri: S, secret: S) -> Self {
         Self::new()
@@ -608,11 +641,15 @@ impl ClientBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```no_run
+    /// # use knishio_client::ClientBuilder;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = ClientBuilder::load_balanced(
     ///     vec!["https://node1.knish.io", "https://node2.knish.io"],
     ///     "my-secret"
     /// ).build()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn load_balanced<S: Into<String>>(uris: Vec<S>, secret: S) -> Self {
         Self::new()
@@ -635,8 +672,12 @@ impl ClientBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```no_run
+    /// # use knishio_client::ClientBuilder;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = ClientBuilder::minimal("http://localhost:8000").build()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn minimal<S: Into<String>>(uri: S) -> Self {
         Self::new()

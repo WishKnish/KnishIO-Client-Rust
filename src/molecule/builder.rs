@@ -13,26 +13,30 @@
 //!
 //! # Examples
 //!
-//! ```rust
+//! ```no_run
 //! use knishio_client::molecule::TypeSafeMoleculeBuilder;
-//! use knishio_client::{Wallet, Isotope};
+//! use knishio_client::{Wallet, ValueAtomParams};
 //!
-//! let wallet = Wallet::create("test-secret", "TEST").unwrap();
-//! 
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None).unwrap();
+//!
 //! let molecule = TypeSafeMoleculeBuilder::new("test-secret")
 //!     .with_source_wallet(wallet.clone())
 //!     .add_value_atom(ValueAtomParams {
 //!         position: "W1".to_string(),
-//!         wallet_address: wallet.address.unwrap(),
+//!         wallet_address: wallet.address.clone().unwrap(),
 //!         token: "TEST".to_string(),
 //!         value: Some(100.0),
 //!         ..Default::default()
-//!     })
-//!     .add_remainder_atom(wallet)
-//!     .ready_to_sign()
+//!     })?
+//!     .add_remainder_atom()?
+//!     .ready_to_sign()?
 //!     .sign()
 //!     .await?
 //!     .build();
+//! # let _ = molecule;
+//! # Ok(())
+//! # }
 //! ```
 
 use std::marker::PhantomData;

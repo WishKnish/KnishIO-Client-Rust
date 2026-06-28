@@ -75,7 +75,8 @@ impl Hex {
     ///     .with_grouping(2)
     ///     .with_uppercase(true);
     /// let formatted = Hex::to_hex(&data, Some(options));
-    /// assert_eq!(formatted, "48 65 6C 6C 6F");
+    /// // grouping(2) = 2 bytes (4 hex chars) per space-separated group
+    /// assert_eq!(formatted, "4865 6C6C 6F");
     /// ```
     pub fn to_hex(arr: &[u8], options: Option<HexOptions>) -> String {
         let opts = options.unwrap_or_default();

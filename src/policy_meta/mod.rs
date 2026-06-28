@@ -145,7 +145,7 @@ impl PolicyMeta {
     ///
     /// ```rust
     /// use knishio_client::policy_meta::PolicyMeta;
-    /// use serde_json::json;
+    /// use std::collections::HashMap;
     ///
     /// let mut policy_meta = PolicyMeta {
     ///     policy: HashMap::new()
