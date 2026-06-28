@@ -1295,7 +1295,10 @@ impl Molecule {
 
             let mut atoms = Vec::new();
 
-            // Remove tokens from source
+            // Remove tokens from source (debit the FULL balance for UTXO conservation, matching the
+            // canonical JS/PHP/TS reference; the change is routed to the remainder B atom below so the
+            // V+B atoms sum to 0 — conserves for PARTIAL withdraws too, not just full-balance. Was
+            // -total_amount, which only conserved on a full-balance withdraw. Mirrors init_deposit_buffer.)
             let source_params = AtomCreateParams {
                 isotope: Isotope::B,
                 wallet_info: Some(WalletInfo {
@@ -1304,12 +1307,14 @@ impl Molecule {
                     token: source_token.clone(),
                     batch_id: source_batch_id.clone(),
                 }),
-                value: Some(-total_amount),
+                value: None, // set below with integer-string precision
                 meta_type: Some("walletBundle".to_string()),
                 meta_id: source_bundle,
                 ..Default::default()
             };
-            atoms.push(Atom::create(source_params));
+            let mut source_atom = Atom::create(source_params);
+            source_atom.value = Some((-source_balance_i128).to_string());
+            atoms.push(source_atom);
 
             // Add atoms for each recipient
             for (recipient_bundle, amount) in recipients {

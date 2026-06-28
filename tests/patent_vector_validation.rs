@@ -31,6 +31,7 @@ struct Vectors {
     bigint_carry_edge: Section<BigIntEdgeTest>,
     wots_roundtrip: Section<WotsRoundtripTest>,
     buffer_deposit_conservation: Section<BufferDepositTest>,
+    buffer_withdraw_conservation: Section<BufferWithdrawTest>,
 }
 
 #[derive(Deserialize)]
@@ -139,6 +140,20 @@ struct BufferDepositTest {
     expected_sum: String,
 }
 
+// ── Buffer withdraw conservation (cross-SDK parity, cycle 148) ──────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BufferWithdrawTest {
+    name: String,
+    source_balance: i64,
+    amount: f64,
+    expected_source_value: String,
+    expected_recipient_value: String,
+    expected_remainder_value: String,
+    expected_sum: String,
+}
+
 // ── Load canonical vectors ──────────────────────────────────────────────
 
 const PATENT_VECTORS_JSON: &str = include_str!(
@@ -227,6 +242,76 @@ fn test_buffer_deposit_conservation_vectors() {
             "[{}] buffer B-atom value", test.name);
         assert_eq!(v_values.get(1).map(String::as_str), Some(test.expected_remainder_value.as_str()),
             "[{}] remainder V-atom value", test.name);
+    }
+}
+
+/// Cross-SDK parity (cycle 148): init_withdraw_buffer must debit the FULL source
+/// balance so a PARTIAL buffer withdraw still conserves (Σ V+B = 0), matching the
+/// JS/PHP/TS/Kotlin/C++ reference. (Pre-fix Rust debited only -total_amount → source =
+/// -amount and Σ = balance-amount ≠ 0 for a partial withdraw.) The withdraw analog of
+/// test_buffer_deposit_conservation_vectors. Atom order: source B (-balance), recipient
+/// V (+amount), remainder B (+(balance-amount)).
+#[test]
+fn test_buffer_withdraw_conservation_vectors() {
+    use knishio_client::{Molecule, Wallet};
+    use std::collections::HashMap;
+
+    let vectors = load_patent_vectors();
+    let secret = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+    let bundle = generate_bundle_hash(secret);
+    let position = "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b";
+
+    for test in &vectors.vectors.buffer_withdraw_conservation.tests {
+        let mut source = Wallet::create(Some(secret), None, "BUFTOK", Some(position), None)
+            .expect("create buffer source wallet");
+        source.balance = test.source_balance.to_string();
+
+        let mut mol = Molecule::with_params(
+            Some(secret.to_string()),
+            Some(bundle.clone()),
+            Some(source),
+            None, // remainder auto-derived from source (the change-routing path)
+            Some("buftest".to_string()),
+            None,
+        );
+        // Withdraw `amount` to the caller's own bundle (mirrors the client wrapper).
+        let mut recipients: HashMap<String, f64> = HashMap::new();
+        recipients.insert(bundle.clone(), test.amount);
+        mol.init_withdraw_buffer(recipients, None)
+            .expect("init_withdraw_buffer");
+
+        // Inspect the wire form (isotope + value as strings). Withdraw emits TWO B atoms
+        // (source + remainder) and ONE V atom (recipient), unlike deposit's V-B-V.
+        let json = serde_json::to_value(&mol).expect("serialize buffer molecule");
+        let atoms = json["atoms"].as_array().expect("atoms array");
+
+        let mut sum: i128 = 0;
+        let mut b_values: Vec<String> = Vec::new();
+        let mut v_values: Vec<String> = Vec::new();
+        for a in atoms {
+            let iso = a["isotope"].as_str().unwrap_or("");
+            if iso == "V" || iso == "B" {
+                if let Some(v) = a["value"].as_str() {
+                    sum += v.parse::<i128>()
+                        .unwrap_or_else(|_| panic!("[{}] unparseable atom value '{}'", test.name, v));
+                    if iso == "B" {
+                        b_values.push(v.to_string());
+                    } else {
+                        v_values.push(v.to_string());
+                    }
+                }
+            }
+        }
+
+        assert_eq!(sum.to_string(), test.expected_sum,
+            "[{}] V+B conservation sum must be 0", test.name);
+        // Emit order: source B (full-balance debit), recipient V (+amount), remainder B (+change).
+        assert_eq!(b_values.first().map(String::as_str), Some(test.expected_source_value.as_str()),
+            "[{}] source B-atom must debit the full balance", test.name);
+        assert_eq!(v_values.first().map(String::as_str), Some(test.expected_recipient_value.as_str()),
+            "[{}] recipient V-atom value", test.name);
+        assert_eq!(b_values.get(1).map(String::as_str), Some(test.expected_remainder_value.as_str()),
+            "[{}] remainder B-atom value", test.name);
     }
 }
 
