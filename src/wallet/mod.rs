@@ -666,7 +666,10 @@ impl Wallet {
         use libcrux_ml_kem::mlkem768;
         use libcrux_ml_kem::MlKemPublicKey;
         
-        // Convert recipient public key bytes to proper libcrux type
+        // ML-KEM-768 public keys are exactly 1184 bytes. A wrong-length key here almost always means
+        // the node did not advertise an ML-KEM public key in its auth `key` field (e.g. a validator
+        // predating the PQ-transport build) — return a clean typed error instead of feeding libcrux a
+        // malformed key. The Rust analogue of the other SDKs' encrypt guards (a typed error, like C).
         if recipient_pubkey_bytes.len() != 1184 {
             return Err(KnishIOError::DecryptionKey);
         }
@@ -1060,6 +1063,20 @@ mod tests {
         // Decrypt with recipient's private key
         let decrypted = recipient.decrypt_message(&encrypted).await.unwrap();
         assert_eq!(decrypted, message, "Decrypted message should match original");
+    }
+
+    // PQ-transport hardening: a stale/non-PQ node advertises a ~48-byte `key`; encrypt_message must
+    // return a clean error (not feed libcrux a malformed key). The Rust analogue of the cross-SDK guard.
+    #[tokio::test]
+    async fn test_mlkem_encrypt_rejects_non_1184_key() {
+        let sender = Wallet::create(
+            Some("sender_secret_for_testing_12345"),
+            None, "TEST", None, None,
+        ).unwrap();
+        // 48 bytes base64 — the exact length a pre-PQ validator advertised in its auth `key`.
+        let short_key = base64::engine::general_purpose::STANDARD.encode([0u8; 48]);
+        let result = sender.encrypt_message(&serde_json::json!({"q": 1}), &short_key).await;
+        assert!(result.is_err(), "encrypt_message must reject a non-1184-byte ML-KEM key");
     }
 
     #[test]
