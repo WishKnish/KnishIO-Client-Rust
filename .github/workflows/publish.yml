@@ -21,6 +21,7 @@ jobs:
   publish:
     name: build, test, publish to crates.io (Trusted Publishing)
     runs-on: ubuntu-latest
+    environment: release   # matches the crates.io trusted-publisher Environment + the repo's `release` env
     steps:
       - uses: actions/checkout@v4
 
