@@ -1,0 +1,42 @@
+# Rust SDK publish — tag-driven crates.io publish (cycle 177).
+# Push a bare semver tag (e.g. `0.9.1`) → clippy/test gate → `cargo publish`.
+# PREREQUISITE: add the repo secret `CARGO_REGISTRY_TOKEN` (a crates.io API token with publish rights
+# on `knishio-client`). Without it the publish step fails.
+name: Publish
+
+on:
+  push:
+    tags:
+      - '[0-9]*'
+
+jobs:
+  publish:
+    name: build, test, publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (stable + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # Gate — never publish a tag that doesn't lint/build/test clean.
+      - name: cargo clippy (lint gate)
+        run: cargo clippy --all-targets
+
+      - name: cargo test
+        run: cargo test
+
+      # cargo publish re-verifies the package builds from the packaged sources before upload.
+      - name: Publish to crates.io
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
