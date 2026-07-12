@@ -51,7 +51,7 @@ todo = "warn"                        # Warn on TODO comments
 unimplemented = "warn"               # Warn on unimplemented!() macro
 
 [dependencies]
-tokio = { version = "1.41", features = [
+tokio = { version = "1.47", features = [
     "rt-multi-thread",      # Multithreaded runtime
     "macros",               # #[tokio::main] and #[tokio::test]
     "sync",                 # mpsc, Mutex, RwLock
@@ -69,7 +69,7 @@ serde_json = "1.0"
 # Cryptography
 sha3 = "0.10"                    # For SHAKE256
 sha2 = "0.10"                    # For PBKDF2
-libcrux-ml-kem = "0.0.7"         # Pinned: formally verified ML-KEM (FIPS 203); upgraded 2026-02
+libcrux-ml-kem = "0.0.9"         # Pinned: formally verified ML-KEM (FIPS 203); 0.0.9 clears RUSTSEC-2026-0074 (libcrux-sha3 SHAKE)
 hex = "0.4"
 base64 = "0.22"
 pbkdf2 = "0.12"                  # Key derivation
@@ -89,15 +89,15 @@ anyhow = "1.0"
 # Async utilities
 futures = "0.3"
 futures-util = "0.3"           # Stream utilities
-tokio-tungstenite = "0.28.0"      # WebSocket support
-tungstenite = "0.28.0"            # WebSocket protocol
+tokio-tungstenite = "0.30.0"      # WebSocket support
+tungstenite = "0.30.0"            # WebSocket protocol
 
 # Logging and tracing
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 # Utilities
-rand = "0.9.2"
+rand = "0.9.3"
 chrono = { version = "0.4", features = ["serde"] }
 # Removed once_cell and lazy_static - using std::sync::LazyLock instead
 uuid = { version = "1.10", features = ["v4", "serde"] }

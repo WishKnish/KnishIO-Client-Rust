@@ -22,6 +22,11 @@ use knishio_client::{
     types::MetaItem,
 };
 
+/// Bundle-bound JWT captured after full authorization; attached as X-Auth-Token
+/// on every subsequent request (the validator's JWT gate runs before molecule
+/// validation, so anonymous ProposeMolecule is rejected).
+static AUTH_TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 const COLORS: &[&str; 9] = &[
     "\x1b[0m",  // RESET
     "\x1b[1m",  // BRIGHT
@@ -82,9 +87,11 @@ async fn execute_graphql_request(
         variables,
     };
     
-    let response = client
-        .post(url)
-        .json(&request)
+    let mut request_builder = client.post(url).json(&request);
+    if let Some(token) = AUTH_TOKEN.get() {
+        request_builder = request_builder.header("X-Auth-Token", token);
+    }
+    let response = request_builder
         .send()
         .await
         .context("HTTP request failed")?;
@@ -143,7 +150,10 @@ async fn test_server_connectivity(client: &reqwest::Client, url: &str) -> Result
         .and_then(|m| m.get("name"))
         .and_then(|n| n.as_str());
     
-    let has_valid_schema = query_type == Some("Query") && mutation_type == Some("Mutation");
+    // The Rust validator names its roots QueryRoot/Mutation (async-graphql);
+    // accept either naming so the check matches any conforming server.
+    let has_valid_schema = matches!(query_type, Some("Query") | Some("QueryRoot"))
+        && matches!(mutation_type, Some("Mutation") | Some("MutationRoot"));
     
     log_test("Rust GraphQL schema introspection", has_valid_schema, 
         if !has_valid_schema { Some("Invalid schema structure") } else { None }, 
@@ -183,54 +193,48 @@ async fn test_server_connectivity(client: &reqwest::Client, url: &str) -> Result
     Ok((has_valid_schema && has_propose_molecule, response_time))
 }
 
-async fn test_rust_authentication_token(client: &reqwest::Client, url: &str, test_secret: &str, cell_slug: &str) -> Result<(bool, u128)> {
+async fn test_rust_authentication_token(_client: &reqwest::Client, url: &str, test_secret: &str, cell_slug: &str) -> Result<(bool, u128)> {
     log_section("2. Rust Authentication Token (Tokio)");
     
     // Create Rust auth wallet
-    let auth_wallet = Wallet::create(Some(test_secret), None, "AUTH", None, None)?;
+    let _auth_wallet = Wallet::create(Some(test_secret), None, "AUTH", None, None)?;
     
     log_test("Rust auth wallet creation", true, None, None);
     
     let start_time = Instant::now();
-    
-    // Request access token using Rust async
-    let token_data = execute_graphql_request(
-        client,
-        url,
-        r#"
-        mutation RequestToken($cellSlug: String, $pubkey: String, $encrypt: Boolean) {
-            AccessToken(cellSlug: $cellSlug, pubkey: $pubkey, encrypt: $encrypt) {
-                token
-                expiresAt
-            }
-        }
-        "#,
-        json!({
-            "cellSlug": cell_slug,
-            "pubkey": auth_wallet.pubkey.as_deref().unwrap_or("rust-test-pubkey"),
-            "encrypt": false
-        })
-    ).await;
-    
+
+    // Full (profile) authorization through the SDK client — the validator's auth
+    // model requires a bundle-bound JWT for ProposeMolecule; a guest AccessToken
+    // alone is read-only.
+    let mut sdk_client = knishio_client::client::KnishIOClient::new(
+        url.to_string(),
+        Some(cell_slug.to_string()),
+        None,
+        None,
+        None,
+        None,
+    );
+    let token_result = sdk_client
+        .request_auth_token(Some(test_secret), None, Some(cell_slug), Some(false))
+        .await;
+
     let response_time = start_time.elapsed().as_millis();
-    
-    match token_data {
-        Ok(data) => {
-            let token = data
-                .get("AccessToken")
-                .and_then(|t| t.get("token"))
-                .and_then(|t| t.as_str());
-            
-            let token_success = token.is_some();
-            
+
+    match token_result {
+        Ok(auth_token) => {
+            let token_str = auth_token.get_token().to_string();
+            let token_success = !token_str.is_empty();
+
             log_test("Rust access token generation", token_success,
                 if !token_success { Some("Failed to generate token") } else { None },
                 Some(response_time));
-            
-            if let Some(token_str) = token {
+
+            if token_success {
                 colorlog(&format!("    Rust auth token: {}...", &token_str[..20.min(token_str.len())]), 7); // GRAY
+                // Attach to all subsequent raw GraphQL requests.
+                let _ = AUTH_TOKEN.set(token_str);
             }
-            
+
             Ok((token_success, response_time))
         },
         Err(e) => {

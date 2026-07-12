@@ -518,6 +518,24 @@ impl SelfTestRunner {
                                             self.results.tests.complex_transfer = complex_result;
                                         }
                                     }
+                                    // Preserve tokenCreation test
+                                    if let Some(token) = tests.get("tokenCreation") {
+                                        if let Ok(token_result) = serde_json::from_value::<MoleculeTestResult>(token.clone()) {
+                                            self.results.tests.token_creation = token_result;
+                                        }
+                                    }
+                                    // Preserve walletCreation test
+                                    if let Some(wallet) = tests.get("walletCreation") {
+                                        if let Ok(wallet_result) = serde_json::from_value::<MoleculeTestResult>(wallet.clone()) {
+                                            self.results.tests.wallet_creation = wallet_result;
+                                        }
+                                    }
+                                    // Preserve shadowWalletClaim test
+                                    if let Some(shadow) = tests.get("shadowWalletClaim") {
+                                        if let Ok(shadow_result) = serde_json::from_value::<MoleculeTestResult>(shadow.clone()) {
+                                            self.results.tests.shadow_wallet_claim = shadow_result;
+                                        }
+                                    }
                                     // Preserve mlkem768 test
                                     if let Some(mlkem) = tests.get("mlkem768") {
                                         if let Ok(mlkem_result) = serde_json::from_value::<MLKEMTestResult>(mlkem.clone()) {
@@ -542,6 +560,15 @@ impl SelfTestRunner {
                                     }
                                     if let Some(complex) = molecules.get("complexTransfer").and_then(|v| v.as_str()) {
                                         self.results.molecules.complex_transfer = complex.to_string();
+                                    }
+                                    if let Some(token) = molecules.get("tokenCreation").and_then(|v| v.as_str()) {
+                                        self.results.molecules.token_creation = token.to_string();
+                                    }
+                                    if let Some(wallet) = molecules.get("walletCreation").and_then(|v| v.as_str()) {
+                                        self.results.molecules.wallet_creation = wallet.to_string();
+                                    }
+                                    if let Some(shadow) = molecules.get("shadowWalletClaim").and_then(|v| v.as_str()) {
+                                        self.results.molecules.shadow_wallet_claim = shadow.to_string();
                                     }
                                     if let Some(mlkem) = molecules.get("mlkem768").and_then(|v| v.as_str()) {
                                         self.results.molecules.mlkem768 = mlkem.to_string();

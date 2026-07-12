@@ -23,3 +23,23 @@ jobs:
       # "cannot create the lock file"; the gate is clippy lints, not lockfile reproducibility.
       - name: cargo clippy
         run: cargo clippy --all-targets
+
+  audit:
+    name: cargo audit (dependency advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      # Cargo.lock is gitignored — resolve fresh (what consumers get), then audit
+      # that resolved graph against the RUSTSEC advisory database.
+      - name: Generate lockfile
+        run: cargo generate-lockfile
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: cargo audit
+        run: cargo audit
