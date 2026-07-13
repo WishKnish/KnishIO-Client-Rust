@@ -171,14 +171,10 @@ pub fn charset_base_convert(
     let from_base = from_base as u128;
     
     for ch in src.chars() {
-        let pos = src_chars.iter().position(|&c| c == ch);
-        if let Some(digit_val) = pos {
-            val = val.checked_mul(from_base)?
-                     .checked_add(digit_val as u128)?;
-        } else {
-            // Invalid character in source
-            return None;
-        }
+        // None = invalid character in source
+        let digit_val = src_chars.iter().position(|&c| c == ch)?;
+        val = val.checked_mul(from_base)?
+                 .checked_add(digit_val as u128)?;
     }
     
     // Convert from decimal to destination base
