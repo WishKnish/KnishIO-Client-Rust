@@ -264,7 +264,7 @@ fn patent_tv7_wots_signature() {
     // Patent expected fragment 0 (128 hex chars = 512 bits):
     let patent_fragment_0 = "5b490eb07e1492da63531ea9bc69807235a27773b485c2235ff435bc82a74cb32211749e1ac471be1d2d7a08b5a887821a259dcff7408699b29d02c3433fe754";
 
-    println!("TV7 Fragment 0 (actual):    {}", &signature[0]);
+    println!("TV7 Fragment 0 (actual):    {}", signature[0]);
     println!("TV7 Fragment 0 (patent):    {}", patent_fragment_0);
     println!("TV7 Fragment 0 match:       {}", signature[0] == patent_fragment_0);
 
