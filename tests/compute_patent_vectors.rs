@@ -239,7 +239,7 @@ fn compute_tv7_wots_signature() {
     let signature = generate_ots_signature(&key, &base17_hash).unwrap();
 
     println!("Signature fragment count: {}", signature.len());
-    println!("Fragment 0 ({} hex chars): {}", signature[0].len(), &signature[0]);
+    println!("Fragment 0 ({} hex chars): {}", signature[0].len(), signature[0]);
     println!("TV1 wallet_address: {}", address);
     println!();
 
@@ -334,7 +334,7 @@ fn compute_all_vectors_summary() {
     // TV7 — WOTS+ signature
     let sig = generate_ots_signature(&k1, &base17_hash).unwrap();
     println!("TV7 — WOTS+ Signature");
-    println!("  fragment 0:   {}", &sig[0]);
+    println!("  fragment 0:   {}", sig[0]);
     println!("  frag0 length: {} hex chars", sig[0].len());
 
     let verified = knishio_client::crypto::verify_ots_signature(&sig, &base17_hash, &a1);
