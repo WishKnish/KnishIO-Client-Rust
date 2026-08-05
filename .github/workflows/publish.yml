@@ -12,18 +12,50 @@ on:
   push:
     tags:
       - '[0-9]*'
+  # Dry run. This workflow is otherwise reachable only by pushing a tag, which publishes —
+  # so every change to it (the version gate, an action bump) would ship unexercised. A
+  # dispatch runs the gate and the full build/test path and stops before anything leaves the
+  # runner, because the publish job is guarded on `github.event_name == 'push'`.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version to dry-run the gate against, e.g. 0.9.4. Publishes NOTHING.'
+        required: true
+        type: string
 
 permissions:
   id-token: write   # OIDC for crates.io Trusted Publishing
   contents: write   # create the GitHub Release
 
 jobs:
-  publish:
-    name: build, test, publish to crates.io (Trusted Publishing)
+  # Split out of the publish job on purpose: `environment: release` is a deployment gate that
+  # can require approval, and a dry run that uploads nothing should not have to pass it.
+  verify:
+    name: verify version + lint + test
     runs-on: ubuntu-latest
-    environment: release   # matches the crates.io trusted-publisher Environment + the repo's `release` env
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      # Refuse to publish a tag the manifest does not itself claim. Shared definition with
+      # CI and with local runs — see .github/scripts/check-version.sh.
+      - name: Verify tag matches the declared SDK version
+        id: version
+        # DISPATCH_TAG arrives via env, never interpolated into the shell text — a
+        # workflow_dispatch input is attacker-controllable text and `${{ }}` inside `run:`
+        # is substituted before bash ever sees it (workflow-injection hygiene).
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ]; then
+            EXPECTED="${GITHUB_REF#refs/tags/}"
+          else
+            EXPECTED="$DISPATCH_TAG"
+          fi
+          bash .github/scripts/check-version.sh "$EXPECTED"
 
       - name: Rust toolchain (stable + clippy)
         uses: dtolnay/rust-toolchain@stable
@@ -37,6 +69,15 @@ jobs:
       - name: cargo test
         run: cargo test
 
+  publish:
+    name: publish to crates.io (Trusted Publishing)
+    needs: verify
+    if: github.event_name == 'push'   # dispatch = dry run; never publishes
+    runs-on: ubuntu-latest
+    environment: release   # matches the crates.io trusted-publisher Environment + the repo's `release` env
+    steps:
+      - uses: actions/checkout@v5
+
       # OIDC: exchange the GitHub id-token for a short-lived crates.io token (no stored secret).
       - name: Authenticate to crates.io (Trusted Publishing)
         uses: rust-lang/crates-io-auth-action@v1
@@ -49,6 +90,6 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true

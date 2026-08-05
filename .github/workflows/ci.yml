@@ -5,11 +5,25 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  # Catch version drift at commit time, not at release time.
+  #
+  # The publish workflow already refuses a tag that disagrees with the manifest, but that only
+  # fires on a tag push — so drift can sit in master until release day. This runs the same
+  # script with no expected version, asserting only that the repo agrees with itself, on every
+  # push and PR.
+  version:
+    name: version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Declared versions agree
+        run: bash .github/scripts/check-version.sh
+
   clippy:
     name: clippy (lint gate)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Rust toolchain (stable + clippy)
         uses: dtolnay/rust-toolchain@stable
@@ -28,7 +42,7 @@ jobs:
     name: cargo audit (dependency advisories)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -50,7 +64,7 @@ jobs:
     steps:
       # fetch-depth: 0 — the gate diffs against the base commit, which a shallow
       # checkout would not have.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
