@@ -104,6 +104,10 @@ impl<'a> CheckMolecule<'a> {
         self.isotope_u()?;
         self.isotope_i()?;
         self.isotope_r()?;
+        self.isotope_p()?;
+        self.isotope_a()?;
+        self.isotope_b()?;
+        self.isotope_f()?;
         self.isotope_v(sender_wallet)?;
 
         Ok(true)
@@ -329,6 +333,154 @@ impl<'a> CheckMolecule<'a> {
         Ok(true)
     }
 
+    /// Validate Peering isotope atoms
+    ///
+    /// Equivalent to CheckMolecule.isotopeP() in JavaScript
+    fn isotope_p(&self) -> Result<bool> {
+        for atom in self.get_isotopes(&[Isotope::P]) {
+            if atom.token != "USER" {
+                return Err(KnishIOError::WrongTokenType);
+            }
+
+            let metas = Meta::aggregate_meta(&atom.meta);
+
+            match metas.get("peerHost") {
+                Some(host) if !host.is_empty() => {}
+                _ => return Err(KnishIOError::MetaMissing),
+            }
+        }
+
+        Ok(true)
+    }
+
+    /// Validate Append-request isotope atoms
+    ///
+    /// Equivalent to CheckMolecule.isotopeA() in JavaScript
+    fn isotope_a(&self) -> Result<bool> {
+        for atom in self.get_isotopes(&[Isotope::A]) {
+            if atom.token != "USER" {
+                return Err(KnishIOError::WrongTokenType);
+            }
+
+            if atom.meta_type.as_deref().unwrap_or("").is_empty() {
+                return Err(KnishIOError::MetaMissing);
+            }
+
+            if atom.meta_id.as_deref().unwrap_or("").is_empty() {
+                return Err(KnishIOError::MetaMissing);
+            }
+
+            let metas = Meta::aggregate_meta(&atom.meta);
+
+            match metas.get("action") {
+                Some(action) if !action.is_empty() => {}
+                _ => return Err(KnishIOError::MetaMissing),
+            }
+        }
+
+        Ok(true)
+    }
+
+    /// Validate Buffer/Exchange isotope atoms
+    ///
+    /// Equivalent to CheckMolecule.isotopeB() in JavaScript.
+    ///
+    /// Buffer molecules are cross-isotope: their V atoms do not balance on their own
+    /// because a B atom absorbs the difference. `isotope_v` therefore skips its V-only
+    /// conservation checks whenever B (or F) atoms are present, and conservation is
+    /// enforced here instead, over the combined V+B set.
+    fn isotope_b(&self) -> Result<bool> {
+        let isotope_b = self.get_isotopes(&[Isotope::B]);
+
+        if isotope_b.is_empty() {
+            return Ok(true);
+        }
+
+        for atom in &isotope_b {
+            // B atoms must reference a wallet bundle
+            if atom.meta_type.as_deref() != Some("walletBundle") {
+                return Err(KnishIOError::MetaMissing);
+            }
+
+            if atom.meta_id.as_deref().unwrap_or("").is_empty() {
+                return Err(KnishIOError::MetaMissing);
+            }
+
+            // Value must be parseable as a number
+            let value: f64 = match atom.value.as_ref().map(|v| v.parse::<f64>()) {
+                Some(Ok(parsed)) if !parsed.is_nan() => parsed,
+                _ => return Err(KnishIOError::TransferMalformed),
+            };
+            let _ = value;
+        }
+
+        // V+B balance conservation: sum of all V and B atom values must equal zero
+        let v_atoms = self.get_isotopes(&[Isotope::V]);
+        if !v_atoms.is_empty() {
+            let sum: f64 = v_atoms.iter().chain(isotope_b.iter())
+                .filter_map(|a| a.value.as_ref().and_then(|v| v.parse::<f64>().ok()))
+                .filter(|v| !v.is_nan())
+                .sum();
+
+            if sum != 0.0 {
+                return Err(KnishIOError::TransferUnbalanced);
+            }
+        }
+
+        Ok(true)
+    }
+
+    /// Validate Fusion/NFT isotope atoms
+    ///
+    /// Equivalent to CheckMolecule.isotopeF() in JavaScript.
+    ///
+    /// Mirrors `isotope_b` and additionally forbids negative values. Must stay paired with
+    /// the `has_cross_isotope` gate in `isotope_v`, which is keyed on B *or* F: without
+    /// this check an F-isotope molecule would skip V-only conservation with nothing
+    /// validating V+F conservation in its place.
+    fn isotope_f(&self) -> Result<bool> {
+        let isotope_f = self.get_isotopes(&[Isotope::F]);
+
+        if isotope_f.is_empty() {
+            return Ok(true);
+        }
+
+        for atom in &isotope_f {
+            // F atoms must reference a wallet bundle
+            if atom.meta_type.as_deref() != Some("walletBundle") {
+                return Err(KnishIOError::MetaMissing);
+            }
+
+            if atom.meta_id.as_deref().unwrap_or("").is_empty() {
+                return Err(KnishIOError::MetaMissing);
+            }
+
+            let value: f64 = match atom.value.as_ref().map(|v| v.parse::<f64>()) {
+                Some(Ok(parsed)) if !parsed.is_nan() => parsed,
+                _ => return Err(KnishIOError::TransferMalformed),
+            };
+
+            if value < 0.0 {
+                return Err(KnishIOError::TransferMalformed);
+            }
+        }
+
+        // V+F balance conservation: sum of all V and F atom values must equal zero
+        let v_atoms = self.get_isotopes(&[Isotope::V]);
+        if !v_atoms.is_empty() {
+            let sum: f64 = v_atoms.iter().chain(isotope_f.iter())
+                .filter_map(|a| a.value.as_ref().and_then(|v| v.parse::<f64>().ok()))
+                .filter(|v| !v.is_nan())
+                .sum();
+
+            if sum != 0.0 {
+                return Err(KnishIOError::TransferUnbalanced);
+            }
+        }
+
+        Ok(true)
+    }
+
     /// Validate Value isotope atoms (transfer validation)
     ///
     /// Equivalent to CheckMolecule.isotopeV() in JavaScript
@@ -346,8 +498,17 @@ impl<'a> CheckMolecule<'a> {
 
         let first_atom = &self.molecule.atoms[0];
 
-        // Handle simple 2-atom transfer case (e.g., B-isotope deposit: V-debit + V-remainder)
-        if first_atom.isotope == Isotope::V && isotope_v.len() == 2 {
+        // Handle simple 2-atom transfer case (plain V-debit + V-remainder).
+        //
+        // Gated on !has_cross_isotope to mirror JS CheckMolecule.js:507. A buffer deposit
+        // is [V, B, V] — two V atoms with a V first atom — so it would otherwise enter this
+        // branch and return early. That happened to yield the right answer, but by a
+        // shape coincidence rather than by the cross-isotope rule; a withdraw ([B, V, B])
+        // has the same conservation semantics and does not match this shape at all.
+        // Skipping the branch entirely for B/F molecules makes both directions take the
+        // same path, which is what makes the behaviour isotope-driven instead of
+        // shape-driven.
+        if !has_cross_isotope && first_atom.isotope == Isotope::V && isotope_v.len() == 2 {
             let end_atom = &isotope_v[isotope_v.len() - 1];
 
             if first_atom.token != end_atom.token {
@@ -416,8 +577,15 @@ impl<'a> CheckMolecule<'a> {
             sum += value;
         }
 
-        // All atoms must sum to zero for a balanced transaction
-        if sum != 0.0 {
+        // V-only conservation: all V atoms must sum to zero (skip for B/F cross-isotope,
+        // where the balancing atom is a different isotope and conservation is enforced by
+        // isotope_b()/isotope_f() instead).
+        //
+        // This gate was missing, which is what rejected buffer WITHDRAWALS: a withdraw is
+        // [B, V, B], so its first atom is B, it never enters the two-V branch above, and it
+        // fell through to here where a lone V atom cannot sum to zero. Deposits ([V, B, V])
+        // entered that branch and returned early, so only one direction ever failed.
+        if !has_cross_isotope && sum != 0.0 {
             return Err(KnishIOError::TransferUnbalanced);
         }
 
@@ -439,7 +607,8 @@ impl<'a> CheckMolecule<'a> {
             }
 
             // Does the remainder match what should be there in the source wallet, if provided?
-            if remainder != sum {
+            // Skip for cross-isotope (B/F) — conservation is validated by isotope_b()/isotope_f()
+            if !has_cross_isotope && remainder != sum {
                 return Err(KnishIOError::TransferRemainder);
             }
         } else if value != 0.0 {
@@ -898,5 +1067,170 @@ mod tests {
         };
         assert!(report.verified);
         assert!(report.molecules.is_empty());
+    }
+
+    // ---------------------------------------------------------------------
+    // Cross-isotope validators (isotope_a / isotope_b / isotope_f / isotope_p)
+    //
+    // These assert on the SPECIFIC error variant, not merely that something
+    // errored. A validator that is never observed rejecting is indistinguishable
+    // from one that does not exist — and an assertion that accepts any error can
+    // pass on an unrelated guard firing first.
+    // ---------------------------------------------------------------------
+
+    use crate::types::MetaItem;
+
+    /// Build a checkable molecule from atoms. A non-null molecular_hash is required
+    /// or CheckMolecule::new rejects before any isotope method can run.
+    fn checkable(atoms: Vec<Atom>) -> Molecule {
+        let mut molecule = Molecule::new();
+        molecule.molecular_hash = Some("0".repeat(64));
+        molecule.atoms = atoms;
+        molecule
+    }
+
+    fn v_atom(value: f64, address: &str, index: u32) -> Atom {
+        Atom::create(AtomCreateParams {
+            isotope: Isotope::V,
+            position: Some("pos".to_string()),
+            wallet_address: Some(address.to_string()),
+            token: Some("TESTTOKEN".to_string()),
+            value: Some(value),
+            index: Some(index),
+            ..Default::default()
+        })
+    }
+
+    fn bundle_atom(isotope: Isotope, value: f64, meta_type: Option<&str>, meta_id: Option<&str>) -> Atom {
+        Atom::create(AtomCreateParams {
+            isotope,
+            position: Some("pos".to_string()),
+            wallet_address: Some("addr".to_string()),
+            token: Some("TESTTOKEN".to_string()),
+            value: Some(value),
+            meta_type: meta_type.map(|s| s.to_string()),
+            meta_id: meta_id.map(|s| s.to_string()),
+            index: Some(0),
+            ..Default::default()
+        })
+    }
+
+    fn user_atom(isotope: Isotope, token: &str, meta_type: Option<&str>, meta_id: Option<&str>, meta: Vec<MetaItem>) -> Atom {
+        Atom::create(AtomCreateParams {
+            isotope,
+            position: Some("pos".to_string()),
+            wallet_address: Some("addr".to_string()),
+            token: Some(token.to_string()),
+            meta_type: meta_type.map(|s| s.to_string()),
+            meta_id: meta_id.map(|s| s.to_string()),
+            meta: Some(meta),
+            index: Some(0),
+            ..Default::default()
+        })
+    }
+
+    fn meta_item(key: &str, value: &str) -> MetaItem {
+        MetaItem { key: key.to_string(), value: value.to_string() }
+    }
+
+    #[test]
+    fn test_isotope_b_rejects_wrong_meta_type() {
+        let molecule = checkable(vec![bundle_atom(Isotope::B, 5.0, Some("wrongType"), Some("b1"))]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_b().unwrap_err(), KnishIOError::MetaMissing));
+    }
+
+    #[test]
+    fn test_isotope_b_rejects_missing_meta_id() {
+        let molecule = checkable(vec![bundle_atom(Isotope::B, 5.0, Some("walletBundle"), None)]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_b().unwrap_err(), KnishIOError::MetaMissing));
+    }
+
+    #[test]
+    fn test_isotope_b_rejects_unbalanced_v_plus_b() {
+        let molecule = checkable(vec![
+            v_atom(-100.0, "src", 0),
+            bundle_atom(Isotope::B, 30.0, Some("walletBundle"), Some("b1")),
+        ]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_b().unwrap_err(), KnishIOError::TransferUnbalanced));
+    }
+
+    #[test]
+    fn test_isotope_b_accepts_balanced_v_plus_b() {
+        // The buffer deposit shape: V(-100) -> B(+30) -> V(+70)
+        let molecule = checkable(vec![
+            v_atom(-100.0, "src", 0),
+            bundle_atom(Isotope::B, 30.0, Some("walletBundle"), Some("b1")),
+            v_atom(70.0, "rem", 2),
+        ]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(checker.isotope_b().is_ok());
+    }
+
+    #[test]
+    fn test_isotope_f_rejects_negative_value() {
+        let molecule = checkable(vec![bundle_atom(Isotope::F, -5.0, Some("walletBundle"), Some("f1"))]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_f().unwrap_err(), KnishIOError::TransferMalformed));
+    }
+
+    #[test]
+    fn test_isotope_f_rejects_unbalanced_v_plus_f() {
+        let molecule = checkable(vec![
+            v_atom(-100.0, "src", 0),
+            bundle_atom(Isotope::F, 30.0, Some("walletBundle"), Some("f1")),
+        ]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_f().unwrap_err(), KnishIOError::TransferUnbalanced));
+    }
+
+    #[test]
+    fn test_isotope_a_rejects_non_user_token() {
+        let molecule = checkable(vec![user_atom(Isotope::A, "NOTUSER", Some("t"), Some("i"), vec![meta_item("action", "x")])]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_a().unwrap_err(), KnishIOError::WrongTokenType));
+    }
+
+    #[test]
+    fn test_isotope_a_rejects_missing_action_meta() {
+        let molecule = checkable(vec![user_atom(Isotope::A, "USER", Some("t"), Some("i"), vec![])]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_a().unwrap_err(), KnishIOError::MetaMissing));
+    }
+
+    #[test]
+    fn test_isotope_p_rejects_non_user_token() {
+        let molecule = checkable(vec![user_atom(Isotope::P, "NOTUSER", None, None, vec![meta_item("peerHost", "h")])]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_p().unwrap_err(), KnishIOError::WrongTokenType));
+    }
+
+    #[test]
+    fn test_isotope_p_rejects_missing_peer_host() {
+        let molecule = checkable(vec![user_atom(Isotope::P, "USER", None, None, vec![])]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_p().unwrap_err(), KnishIOError::MetaMissing));
+    }
+
+    /// The cross-isotope bypass must not become a blanket exemption: a plain V-only
+    /// transfer that does not conserve value must still be rejected.
+    #[test]
+    fn test_bypass_not_over_broad_two_atom() {
+        let molecule = checkable(vec![v_atom(-100.0, "src", 0), v_atom(30.0, "dst", 1)]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_v(None).unwrap_err(), KnishIOError::TransferUnbalanced));
+    }
+
+    #[test]
+    fn test_bypass_not_over_broad_three_atom() {
+        let molecule = checkable(vec![
+            v_atom(-100.0, "src", 0),
+            v_atom(30.0, "d1", 1),
+            v_atom(10.0, "d2", 2),
+        ]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_v(None).unwrap_err(), KnishIOError::TransferUnbalanced));
     }
 }

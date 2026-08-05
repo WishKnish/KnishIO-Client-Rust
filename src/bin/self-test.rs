@@ -21,6 +21,7 @@
 
 use anyhow::{Context, Result};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::time::SystemTime;
 use chrono::{DateTime, Utc};
@@ -68,6 +69,91 @@ fn create_fixed_remainder_wallet(secret: &str, token: &str) -> Result<Wallet> {
     )?)
 }
 
+/// Build a VALID buffer molecule (deposit or withdraw) via the SDK's own
+/// `init_deposit_buffer`/`init_withdraw_buffer` builders, apply a single
+/// `tamper` mutation from a `buffer_conservation_negative` vector, re-sign,
+/// and report whether verification rejected it.
+///
+/// Mirrors the vector's `recipe` exactly: hand-assembling atoms gets refused
+/// by unrelated checks (atom index, self-transfer) before conservation is
+/// ever evaluated, so only builder + tamper + re-sign actually exercises
+/// isotope_b()/isotope_f(). Returns `(rejected, reason)` where `reason` is
+/// the actual error variant (or "ACCEPTED" if verification wrongly passed) —
+/// callers must confirm the reason implicates conservation/metaType, not an
+/// unrelated check, or the case is passing for the wrong reason.
+async fn run_negative_buffer_case(secret: &str, token: &str, tv: &Value) -> Result<(bool, String)> {
+    let build_from = tv["buildFrom"].as_str().unwrap_or("");
+    let balance = tv["sourceBalance"].as_i64().unwrap_or(0) as i128;
+    let amount = tv["amount"].as_i64().unwrap_or(0);
+    let tamper = &tv["tamper"];
+    let target = tamper["target"].as_str().unwrap_or("");
+    let field = tamper["field"].as_str().unwrap_or("");
+    let to = tamper["to"].as_str().unwrap_or("");
+
+    let mut source_wallet = Wallet::new(Some(secret), None, Some(token), None, None, None, Some("BASE64"))?;
+    source_wallet.set_balance_i128(balance);
+    let verify_wallet = source_wallet.clone();
+
+    let mut molecule = match build_from {
+        "deposit" => {
+            let remainder_wallet = Wallet::new(Some(secret), None, Some(token), None, None, None, Some("BASE64"))?;
+            let mut m = Molecule::with_params(
+                Some(secret.to_string()), None, Some(source_wallet.clone()), Some(remainder_wallet), None, None,
+            );
+            m.init_deposit_buffer(amount as f64, HashMap::new())?;
+            m
+        }
+        "withdraw" => {
+            let recipient_bundle = source_wallet.bundle.clone().unwrap_or_default();
+            let mut m = Molecule::with_params(
+                Some(secret.to_string()), None, Some(source_wallet.clone()), Some(source_wallet.clone()), None, None,
+            );
+            let mut recipients = HashMap::new();
+            recipients.insert(recipient_bundle, amount as f64);
+            m.init_withdraw_buffer(recipients, None)?;
+            m
+        }
+        other => return Err(anyhow::anyhow!("unknown buildFrom '{other}'")),
+    };
+    set_fixed_timestamps(&mut molecule);
+
+    // Select the first/last atom of the target isotope, in emission order —
+    // exactly as the vector's `recipe` field specifies.
+    let isotope = match target {
+        "firstV" | "lastV" => Isotope::V,
+        "firstB" | "lastB" => Isotope::B,
+        other => return Err(anyhow::anyhow!("unknown tamper target '{other}'")),
+    };
+    let matching: Vec<usize> = molecule.atoms.iter().enumerate()
+        .filter(|(_, a)| a.isotope == isotope)
+        .map(|(i, _)| i)
+        .collect();
+    let idx = if target.starts_with("first") {
+        *matching.first().ok_or_else(|| anyhow::anyhow!("no {:?} atoms in molecule to tamper (target {target})", isotope))?
+    } else {
+        *matching.last().ok_or_else(|| anyhow::anyhow!("no {:?} atoms in molecule to tamper (target {target})", isotope))?
+    };
+    match field {
+        "value" => molecule.atoms[idx].value = Some(to.to_string()),
+        "metaType" => molecule.atoms[idx].meta_type = Some(to.to_string()),
+        other => return Err(anyhow::anyhow!("unknown tamper field '{other}'")),
+    }
+
+    // Re-sign over the tampered atoms: recomputes molecular_hash + OTS fragments
+    // so the molecule is internally consistent and only the tampered conservation
+    // invariant (or metaType) is wrong — not the hash/signature.
+    molecule.sign(molecule.bundle.clone(), false, true)?;
+
+    let verify_result = molecule.verify_with_wallet(&verify_wallet).await;
+    let reason = match &verify_result {
+        Ok(true) => "ACCEPTED (expected rejection)".to_string(),
+        Ok(false) => "verify_with_wallet() returned false".to_string(),
+        Err(e) => format!("{e}"),
+    };
+    let rejected = !matches!(verify_result, Ok(true));
+    Ok((rejected, reason))
+}
+
 /* Test result structures matching JavaScript SDK format */
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct CryptoTestResult {
@@ -92,6 +178,22 @@ struct MoleculeTestResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "hasRemainder")]
     has_remainder: Option<bool>,
+    #[serde(rename = "validationError")]
+    validation_error: Option<String>,
+}
+
+/// Result of the vector-driven buffer-family (B-isotope) test: deposit + withdraw
+/// conservation cases against the shared canonical-patent-vectors.json. `skipped` is
+/// tracked as a distinct state from `passed` — a missing fixture is neither a pass nor
+/// a failure; conflating them is exactly the false-green this struct exists to prevent.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct BufferFamilyTestResult {
+    passed: bool,
+    skipped: bool,
+    #[serde(rename = "molecularHash")]
+    molecular_hash: String,
+    #[serde(rename = "atomCount")]
+    atom_count: usize,
     #[serde(rename = "validationError")]
     validation_error: Option<String>,
 }
@@ -124,10 +226,29 @@ struct TestResults {
     sdk: String,
     version: String,
     timestamp: String,
+    /// Run identity. shared-test-results/ holds one mutable file per SDK with no record of
+    /// which run wrote it, so a later standalone run silently replaces the evidence an
+    /// already-published report was built from.
+    #[serde(rename = "runId")]
+    run_id: Option<String>,
     tests: TestSuite,
     molecules: MoleculeResults,
     #[serde(rename = "crossSdkCompatible")]
     cross_sdk_compatible: bool,
+    /// Coverage behind the verdict. `cross_sdk_compatible` alone cannot distinguish
+    /// "validated seven peers, all passed" from "validated nothing and so found no
+    /// failures" — both used to serialise as true.
+    #[serde(rename = "crossValidation")]
+    cross_validation: CrossValidationCoverage,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct CrossValidationCoverage {
+    ran: bool,
+    #[serde(rename = "targetsExpected")]
+    targets_expected: usize,
+    #[serde(rename = "targetsValidated")]
+    targets_validated: usize,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -145,6 +266,8 @@ struct TestSuite {
     wallet_creation: MoleculeTestResult,
     #[serde(rename = "shadowWalletClaim")]
     shadow_wallet_claim: MoleculeTestResult,
+    #[serde(rename = "bufferFamily")]
+    buffer_family: BufferFamilyTestResult,
     mlkem768: MLKEMTestResult,
     #[serde(rename = "negativeCases")]
     negative_cases: NegativeTestResult,
@@ -440,6 +563,13 @@ impl SelfTestRunner {
                     has_remainder: None,
                     validation_error: Some("null".to_string()),
                 },
+                buffer_family: BufferFamilyTestResult {
+                    passed: false,
+                    skipped: false,
+                    molecular_hash: String::new(),
+                    atom_count: 0,
+                    validation_error: Some("null".to_string()),
+                },
                 mlkem768: MLKEMTestResult {
                     passed: false,
                     public_key_generated: false,
@@ -463,7 +593,17 @@ impl SelfTestRunner {
                 shadow_wallet_claim: String::new(),
                 mlkem768: String::new(),
             },
-            cross_sdk_compatible: true,
+            // Starts false. This was `true`, making "fully cross-SDK compatible" the
+            // default state before a single peer molecule had been examined — so every
+            // early return out of test_cross_sdk_validation published a pass. A verdict
+            // must be earned; the safe default for a check that has not run is "failed".
+            cross_sdk_compatible: false,
+            run_id: std::env::var("KNISHIO_RUN_ID").ok().filter(|s| !s.is_empty()),
+            cross_validation: CrossValidationCoverage {
+                ran: false,
+                targets_expected: 0,
+                targets_validated: 0,
+            },
         };
 
         Ok(Self { config, results })
@@ -534,6 +674,13 @@ impl SelfTestRunner {
                                     if let Some(shadow) = tests.get("shadowWalletClaim") {
                                         if let Ok(shadow_result) = serde_json::from_value::<MoleculeTestResult>(shadow.clone()) {
                                             self.results.tests.shadow_wallet_claim = shadow_result;
+                                        }
+                                    }
+                                    // Preserve bufferFamily test (Round 2 must not clobber the
+                                    // vector-driven deposit/withdraw coverage from Round 1)
+                                    if let Some(buffer) = tests.get("bufferFamily") {
+                                        if let Ok(buffer_result) = serde_json::from_value::<BufferFamilyTestResult>(buffer.clone()) {
+                                            self.results.tests.buffer_family = buffer_result;
                                         }
                                     }
                                     // Preserve mlkem768 test
@@ -621,6 +768,7 @@ impl SelfTestRunner {
         let token_creation_result = self.test_token_creation().await?;
         let wallet_creation_result = self.test_wallet_creation().await?;
         let shadow_wallet_claim_result = self.test_shadow_wallet_claim().await?;
+        let buffer_family_result = self.test_buffer_family().await?;
         let mlkem_result = self.test_mlkem768().await?;
         let negative_result = self.test_negative_cases().await?;
         let _cross_sdk_result = self.test_cross_sdk_validation().await?;
@@ -632,8 +780,8 @@ impl SelfTestRunner {
         self.display_summary();
 
         // Exit with appropriate code
-        let total_tests = 9;
-        let passed_tests = [crypto_result, meta_result, simple_result, complex_result, token_creation_result, wallet_creation_result, shadow_wallet_claim_result, mlkem_result, negative_result]
+        let total_tests = 10;
+        let passed_tests = [crypto_result, meta_result, simple_result, complex_result, token_creation_result, wallet_creation_result, shadow_wallet_claim_result, buffer_family_result, mlkem_result, negative_result]
             .iter()
             .filter(|&&x| x)
             .count();
@@ -1229,6 +1377,212 @@ impl SelfTestRunner {
         Ok(is_valid)
     }
 
+    // Buffer family (B-isotope) builders + the isotope_b()/isotope_f() conservation checks —
+    // VECTOR-DRIVEN against the shared canonical-patent-vectors.json, matching the other SDKs
+    // (JS/TS/PHP/C++/Kotlin/Python). For each buffer_deposit_conservation / buffer_withdraw_conservation
+    // case we build + sign the molecule and assert: atom shape/values match the vector, the V+B sum == 0
+    // (full-balance debit conserves even for a PARTIAL op), AND molecule.verify_with_wallet() accepts
+    // the molecule (matching the JS reference test's molecule.check(sourceWallet) call). Molecular
+    // hashes are NOT frozen (random positions). Reads the vendored fixture; SKIPS if absent (standalone
+    // CI), or FAILS if KNISHIO_REQUIRE_VECTORS=true (an orchestrated cross-SDK run where the vectors
+    // are mandatory — silently skipping parity coverage is the false-green this gate exists to stop).
+    async fn test_buffer_family(&mut self) -> Result<bool> {
+        Logger::message("\nB1. Buffer Family Test (deposit + withdraw, vector-driven)", colors::BLUE);
+
+        let mut candidates: Vec<String> = Vec::new();
+        if let Ok(p) = std::env::var("KNISHIO_CANONICAL_VECTORS") { candidates.push(p); }
+        candidates.push("tests/fixtures/canonical-patent-vectors.json".to_string());
+        if let Ok(sd) = std::env::var("KNISHIO_SHARED_RESULTS") {
+            candidates.push(format!("{sd}/canonical-patent-vectors.json"));
+        }
+
+        let content = candidates.iter().find_map(|p| fs::read_to_string(p).ok());
+        let Some(content) = content else {
+            let must_have = std::env::var("KNISHIO_REQUIRE_VECTORS").unwrap_or_default() == "true";
+            self.results.tests.buffer_family = BufferFamilyTestResult {
+                passed: false,
+                skipped: !must_have,
+                molecular_hash: String::new(),
+                atom_count: 0,
+                validation_error: Some("canonical-patent-vectors.json absent".to_string()),
+            };
+            if must_have {
+                Logger::message("  FAILED: canonical-patent-vectors.json absent (KNISHIO_REQUIRE_VECTORS=true)", colors::RED);
+                return Ok(false);
+            }
+            Logger::message("  SKIPPED: canonical-patent-vectors.json absent (standalone CI)", colors::YELLOW);
+            return Ok(true); // skip, not fail — recorded as skipped, never counted as a pass
+        };
+
+        let vectors: Value = serde_json::from_str(&content)
+            .context("Failed to parse canonical-patent-vectors.json")?;
+        let v = vectors.get("vectors").context("Missing 'vectors' key")?;
+
+        let secret = generate_secret("buffer-family-self-test-seed");
+        let token = "BUFTOK";
+        let mut all_pass = true;
+        let mut last_hash = String::new();
+        let mut atom_total = 0usize;
+
+        // ---- DEPOSIT: V (source -balance) -> B (buffer +amount) -> V (remainder +(balance-amount)) ----
+        let deposit_tests = v.get("buffer_deposit_conservation")
+            .and_then(|d| d.get("tests"))
+            .and_then(|t| t.as_array())
+            .context("Missing buffer_deposit_conservation.tests")?;
+        for tv in deposit_tests {
+            let name = tv["name"].as_str().unwrap_or("");
+            let balance = tv["sourceBalance"].as_i64().unwrap_or(0) as i128;
+            let amount = tv["amount"].as_i64().unwrap_or(0);
+
+            let mut source_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"))?;
+            source_wallet.set_balance_i128(balance);
+            let source_wallet_for_validation = source_wallet.clone();
+            let remainder_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"))?;
+
+            let mut molecule = Molecule::with_params(
+                Some(secret.clone()), None, Some(source_wallet), Some(remainder_wallet), None, None,
+            );
+            molecule.init_deposit_buffer(amount as f64, HashMap::new())?;
+            set_fixed_timestamps(&mut molecule);
+            molecule.sign(molecule.bundle.clone(), false, true)?;
+
+            let sum: i128 = molecule.atoms.iter()
+                .filter(|a| a.isotope == Isotope::V || a.isotope == Isotope::B)
+                .map(|a| a.value.as_deref().unwrap_or("0").parse::<i128>().unwrap_or(0))
+                .sum();
+            let shape = molecule.atoms.len() == 3
+                && molecule.atoms[0].isotope == Isotope::V
+                && molecule.atoms[0].value.as_deref() == tv["expectedSourceValue"].as_str()
+                && molecule.atoms[1].isotope == Isotope::B
+                && molecule.atoms[1].value.as_deref() == tv["expectedBufferValue"].as_str()
+                && molecule.atoms[2].isotope == Isotope::V
+                && molecule.atoms[2].value.as_deref() == tv["expectedRemainderValue"].as_str();
+            let expected_sum: i128 = tv["expectedSum"].as_str().unwrap_or("0").parse().unwrap_or(0);
+            let verified = molecule.verify_with_wallet(&source_wallet_for_validation).await.unwrap_or(false);
+            let ok = shape && sum == expected_sum && verified;
+            Logger::test(&format!("deposit {name} conserves (V+B sum 0; cross-isotope bypass)"), ok, None);
+            all_pass = all_pass && ok;
+            last_hash = molecule.molecular_hash.clone().unwrap_or_default();
+            atom_total += molecule.atoms.len();
+        }
+
+        // ---- WITHDRAW: B (source -balance) -> V (recipient +amount) -> B (remainder +(balance-amount)) ----
+        let withdraw_tests = v.get("buffer_withdraw_conservation")
+            .and_then(|d| d.get("tests"))
+            .and_then(|t| t.as_array())
+            .context("Missing buffer_withdraw_conservation.tests")?;
+        for tv in withdraw_tests {
+            let name = tv["name"].as_str().unwrap_or("");
+            let balance = tv["sourceBalance"].as_i64().unwrap_or(0) as i128;
+            let amount = tv["amount"].as_i64().unwrap_or(0);
+
+            // The buffer wallet: B-isotope source AND remainder (mirrors the C++ reference —
+            // a self-withdrawal where the leftover buffer balance routes back to the same wallet).
+            let mut source_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"))?;
+            source_wallet.set_balance_i128(balance);
+            let recipient_bundle = source_wallet.bundle.clone().unwrap_or_default();
+
+            let mut molecule = Molecule::with_params(
+                Some(secret.clone()), None, Some(source_wallet.clone()), Some(source_wallet.clone()), None, None,
+            );
+            let mut recipients = HashMap::new();
+            recipients.insert(recipient_bundle, amount as f64);
+            molecule.init_withdraw_buffer(recipients, None)?;
+            set_fixed_timestamps(&mut molecule);
+            molecule.sign(molecule.bundle.clone(), false, true)?;
+
+            let sum: i128 = molecule.atoms.iter()
+                .filter(|a| a.isotope == Isotope::V || a.isotope == Isotope::B)
+                .map(|a| a.value.as_deref().unwrap_or("0").parse::<i128>().unwrap_or(0))
+                .sum();
+            let shape = molecule.atoms.len() == 3
+                && molecule.atoms[0].isotope == Isotope::B
+                && molecule.atoms[0].value.as_deref() == tv["expectedSourceValue"].as_str()
+                && molecule.atoms[1].isotope == Isotope::V
+                && molecule.atoms[1].value.as_deref() == tv["expectedRecipientValue"].as_str()
+                && molecule.atoms[2].isotope == Isotope::B
+                && molecule.atoms[2].value.as_deref() == tv["expectedRemainderValue"].as_str();
+            let expected_sum: i128 = tv["expectedSum"].as_str().unwrap_or("0").parse().unwrap_or(0);
+            // Keep the verifier's error rather than collapsing it to `false` — a bare
+            // bool cannot distinguish "builder produced the wrong atoms" from "verifier
+            // rejected correct atoms", and those have completely different owners.
+            let verify_result = molecule.verify_with_wallet(&source_wallet).await;
+            let verified = matches!(verify_result, Ok(true));
+            let ok = shape && sum == expected_sum && verified;
+            let reason = if ok {
+                None
+            } else if !shape {
+                Some(format!(
+                    "shape mismatch: {} atoms [{}]",
+                    molecule.atoms.len(),
+                    molecule.atoms.iter()
+                        .map(|a| format!("{:?}={}", a.isotope, a.value.as_deref().unwrap_or("-")))
+                        .collect::<Vec<_>>().join(", ")
+                ))
+            } else if sum != expected_sum {
+                Some(format!("V+B sum {sum} != expected {expected_sum}"))
+            } else {
+                Some(match verify_result {
+                    Ok(false) => "verify_with_wallet() returned false".to_string(),
+                    Err(e) => format!("verify_with_wallet() error: {e}"),
+                    Ok(true) => unreachable!(),
+                })
+            };
+            Logger::test(
+                &format!("withdraw {name} conserves (B+V sum 0; cross-isotope bypass)"),
+                ok,
+                reason.as_deref(),
+            );
+            all_pass = all_pass && ok;
+            last_hash = molecule.molecular_hash.clone().unwrap_or_default();
+            atom_total += molecule.atoms.len();
+        }
+
+
+        // ---- NEGATIVE: tampered buffer molecules the validator MUST reject. This
+        // vector set exists to close a coverage hole: a positive-only suite never
+        // observes rejection, so it can't tell a real conservation check apart from
+        // an absent one (see buffer_conservation_negative.description). ----
+        match v.get("buffer_conservation_negative").and_then(|d| d.get("tests")).and_then(|t| t.as_array()) {
+            Some(negative_tests) => {
+                for tv in negative_tests {
+                    let name = tv["name"].as_str().unwrap_or("");
+                    let (rejected, reason) = run_negative_buffer_case(&secret, token, tv).await?;
+                    println!("    reason: {reason}");
+                    Logger::test(
+                        &format!("negative {name} rejected"),
+                        rejected,
+                        if rejected { None } else { Some(reason.as_str()) },
+                    );
+                    all_pass = all_pass && rejected;
+                }
+            }
+            None => {
+                let must_have = std::env::var("KNISHIO_REQUIRE_VECTORS").unwrap_or_default() == "true";
+                if must_have {
+                    Logger::message("  FAILED: buffer_conservation_negative absent (KNISHIO_REQUIRE_VECTORS=true)", colors::RED);
+                    all_pass = false;
+                } else {
+                    Logger::message("  SKIPPED: buffer_conservation_negative absent (vector not yet vendored)", colors::YELLOW);
+                }
+            }
+        }
+
+        self.results.tests.buffer_family = BufferFamilyTestResult {
+            passed: all_pass,
+            skipped: false,
+            molecular_hash: last_hash,
+            atom_count: atom_total,
+            validation_error: if all_pass {
+                Some("null".to_string())
+            } else {
+                Some("buffer family vector validation failed".to_string())
+            },
+        };
+
+        Ok(all_pass)
+    }
+
     async fn test_mlkem768(&mut self) -> Result<bool> {
         Logger::message("\n5. ML-KEM768 Encryption Test", colors::BLUE);
         let test_config_value = self.config.get_value("tests.mlkem768");
@@ -1536,10 +1890,15 @@ impl SelfTestRunner {
     async fn test_cross_sdk_validation(&mut self) -> Result<bool> {
         Logger::message("\n7. Cross-SDK Validation", colors::BLUE);
 
-        // Check if cross-validation is disabled (Round 1 molecule generation only)
+        // Round 1 generates molecules and does not cross-validate, so it holds no opinion
+        // here and must not leave a verdict behind.
         if std::env::var("KNISHIO_DISABLE_CROSS_VALIDATION").unwrap_or_default() == "true" {
             Logger::message("  ⏭️  Cross-validation disabled for Round 1 (molecule generation only)", colors::YELLOW);
-            self.results.cross_sdk_compatible = true;
+            self.results.cross_validation = CrossValidationCoverage {
+                ran: false,
+                targets_expected: 0,
+                targets_validated: 0,
+            };
             return Ok(true);
         }
 
@@ -1547,30 +1906,46 @@ impl SelfTestRunner {
 
         let results_dir = std::env::var("KNISHIO_SHARED_RESULTS")
             .unwrap_or_else(|_| "../shared-test-results".to_string());
+        self.results.cross_validation.ran = true;
 
-        // Check if results directory exists
+        // A missing shared directory in Round 2 is a HARD FAILURE, not a skip. This
+        // returned Ok(true) — "compatible" — having found nothing to check. Absence of
+        // evidence must never be reported as evidence of compatibility.
         if !std::path::Path::new(&results_dir).exists() {
-            Logger::message("  ⏭️  No other SDK results found for cross-validation", colors::YELLOW);
-            self.results.cross_sdk_compatible = true;
-            return Ok(true);
+            Logger::message("  ❌ Shared results directory not found — cross-validation CANNOT run", colors::RED);
+            self.results.cross_sdk_compatible = false;
+            return Ok(false);
         }
 
-        // Get all JSON result files except rust-results.json
+        // Scope to *-results.json. `ends_with(".json")` also matched the canonical vector
+        // MASTERS that live in this directory (canonical-patent-vectors.json,
+        // cross-platform-test-vectors.json) and fed them into the peer loop as SDK
+        // results; they carry no `molecules` object, so they inflated the apparent peer
+        // count while contributing to neither pass nor fail.
         let result_files: Vec<_> = fs::read_dir(&results_dir)?
             .filter_map(std::result::Result::ok)
             .filter(|entry| {
                 entry.file_name()
                     .to_str()
-                    .is_some_and(|name| name.ends_with(".json") && !name.contains("rust"))
+                    .is_some_and(|name| name.ends_with("-results.json") && !name.contains("rust"))
             })
             .collect();
 
+        // Zero peers in Round 2 means Round 2 did not happen.
         if result_files.is_empty() {
-            Logger::message("  ⏭️  No other SDK results found for cross-validation", colors::YELLOW);
-            self.results.cross_sdk_compatible = true;
-            return Ok(true);
+            Logger::message("  ❌ No peer SDK results found — nothing to cross-validate", colors::RED);
+            self.results.cross_sdk_compatible = false;
+            return Ok(false);
         }
 
+        // Canonical set mirrors requiredMoleculeKeys in sdks/canonical-test-keys.json.
+        const REQUIRED_MOLECULE_TYPES: [&str; 7] = [
+            "metadata", "simpleTransfer", "complexTransfer", "tokenCreation",
+            "walletCreation", "shadowWalletClaim", "mlkem768",
+        ];
+
+        self.results.cross_validation.targets_expected = result_files.len();
+        let mut peers_validated = 0usize;
         let mut all_valid = true;
 
         for result_file in result_files {
@@ -1588,6 +1963,32 @@ impl SelfTestRunner {
 
             let other_results: Value = serde_json::from_str(&file_contents)
                 .with_context(|| format!("Failed to parse {} JSON", file_path.display()))?;
+
+            // A peer must publish every molecule type before we can claim to have
+            // validated it. The loop below iterates the keys that are PRESENT, so an
+            // omitted molecule is indistinguishable from a validated one — which is how
+            // Kotlin's Round-2 drop of tokenCreation/walletCreation/shadowWalletClaim
+            // passed every peer on 2026-07-27.
+            let published = other_results.get("molecules").and_then(|m| m.as_object());
+            let absent: Vec<&str> = REQUIRED_MOLECULE_TYPES
+                .iter()
+                .copied()
+                .filter(|t| {
+                    published
+                        .and_then(|m| m.get(*t))
+                        .and_then(|v| v.as_str())
+                        .is_none_or(str::is_empty)
+                })
+                .collect();
+            if !absent.is_empty() {
+                Logger::message(
+                    &format!("    ❌ {} published no molecule for: {}", sdk_name, absent.join(", ")),
+                    colors::RED,
+                );
+                all_valid = false;
+            }
+
+            peers_validated += 1;
 
             // Validate molecules from this SDK
             if let Some(molecules) = other_results.get("molecules").and_then(|m| m.as_object()) {
@@ -1629,7 +2030,26 @@ impl SelfTestRunner {
             }
         }
 
-        if all_valid {
+        // COVERAGE FLOOR. `all_valid` starts true and only becomes false on a DETECTED
+        // failure, so it records "nothing went wrong", not "everything was checked". Those
+        // differ whenever the loop examined fewer peers than it should have. Require both.
+        self.results.cross_validation.targets_validated = peers_validated;
+        let expected = self.results.cross_validation.targets_expected;
+        let full_coverage = peers_validated == expected;
+
+        if !full_coverage {
+            Logger::message(
+                &format!("\n  ❌ Incomplete coverage: validated {peers_validated}/{expected} peer SDKs"),
+                colors::RED,
+            );
+        }
+        Logger::message(
+            &format!("  📊 Cross-validation coverage: {peers_validated}/{expected} peer SDKs"),
+            colors::CYAN,
+        );
+
+        let compatible = all_valid && full_coverage;
+        if compatible {
             Logger::message("\n  ✅ All cross-SDK molecules validated successfully", colors::GREEN);
             Logger::message("  ✅ Cross-SDK Compatible: YES", colors::GREEN);
         } else {
@@ -1637,8 +2057,8 @@ impl SelfTestRunner {
             Logger::message("  ❌ Cross-SDK Compatible: NO", colors::RED);
         }
 
-        self.results.cross_sdk_compatible = all_valid;
-        Ok(all_valid)
+        self.results.cross_sdk_compatible = compatible;
+        Ok(compatible)
     }
 
     /// Validate a single molecule from another SDK
@@ -1758,25 +2178,38 @@ impl SelfTestRunner {
         println!("SDK: Rust v{}", self.results.version);
         println!("Timestamp: {}", self.results.timestamp);
 
-        // Count passed tests
-        let total_tests = 9;
-        let passed_tests = [
-            self.results.tests.crypto.passed,
-            self.results.tests.meta_creation.passed,
-            self.results.tests.simple_transfer.passed,
-            self.results.tests.complex_transfer.passed,
-            self.results.tests.token_creation.passed,
-            self.results.tests.wallet_creation.passed,
-            self.results.tests.shadow_wallet_claim.passed,
-            self.results.tests.mlkem768.passed,
-            self.results.tests.negative_cases.passed,
-        ].iter().filter(|&&x| x).count();
+        // Count passed tests. Skipped tests are reported separately — counting a skip as
+        // either a pass or a failure is what made this summary contradict the exit-code gate.
+        let total_tests = 10;
+        let mut passed_tests = 0;
+        let mut skipped_tests = 0;
+        if self.results.tests.crypto.passed { passed_tests += 1; }
+        if self.results.tests.meta_creation.passed { passed_tests += 1; }
+        if self.results.tests.simple_transfer.passed { passed_tests += 1; }
+        if self.results.tests.complex_transfer.passed { passed_tests += 1; }
+        if self.results.tests.token_creation.passed { passed_tests += 1; }
+        if self.results.tests.wallet_creation.passed { passed_tests += 1; }
+        if self.results.tests.shadow_wallet_claim.passed { passed_tests += 1; }
+        if self.results.tests.buffer_family.passed {
+            passed_tests += 1;
+        } else if self.results.tests.buffer_family.skipped {
+            skipped_tests += 1;
+        }
+        if self.results.tests.mlkem768.passed { passed_tests += 1; }
+        if self.results.tests.negative_cases.passed { passed_tests += 1; }
 
-        let color = if passed_tests == total_tests { colors::GREEN } else { colors::RED };
+        let failed_tests = total_tests - passed_tests - skipped_tests;
+        let color = if failed_tests == 0 { colors::GREEN } else { colors::RED };
         println!("\n{}Tests Passed: {}/{}{}", color, passed_tests, total_tests, colors::RESET);
+        if skipped_tests > 0 {
+            println!("{}Tests Skipped: {}/{}{}", colors::YELLOW, skipped_tests, total_tests, colors::RESET);
+            if self.results.tests.buffer_family.skipped {
+                println!("  - bufferFamily: {}", self.results.tests.buffer_family.validation_error.as_deref().unwrap_or(""));
+            }
+        }
 
         // Show failed tests
-        if passed_tests < total_tests {
+        if failed_tests > 0 {
             println!("\n{}Failed Tests:{}", colors::RED, colors::RESET);
             if !self.results.tests.meta_creation.passed {
                 println!("  - metaCreation: Validation failed");
@@ -1795,6 +2228,9 @@ impl SelfTestRunner {
             }
             if !self.results.tests.shadow_wallet_claim.passed {
                 println!("  - shadowWalletClaim: Validation failed");
+            }
+            if !self.results.tests.buffer_family.passed && !self.results.tests.buffer_family.skipped {
+                println!("  - bufferFamily: {}", self.results.tests.buffer_family.validation_error.as_deref().unwrap_or(""));
             }
         }
 
