@@ -36,7 +36,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # Refuse to publish a tag the manifest does not itself claim. Shared definition with
       # CI and with local runs — see .github/scripts/check-version.sh.
@@ -76,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: release   # matches the crates.io trusted-publisher Environment + the repo's `release` env
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # OIDC: exchange the GitHub id-token for a short-lived crates.io token (no stored secret).
       - name: Authenticate to crates.io (Trusted Publishing)
