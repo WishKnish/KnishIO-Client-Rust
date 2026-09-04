@@ -13,6 +13,35 @@ history. Entries at and below `0.2.2` are reconstructed from commit messages
 rather than written at release time; where the history does not substantiate a
 detail, the entry says so instead of guessing.
 
+
+## [Unreleased]
+
+## [0.9.5] — 2026-09-04
+
+### Added
+
+- **Hardware Envelope Encryption & Secure Memory Provider**: Introduced `SecretStorageProvider`,
+  `SecretStorageMetadata`, `EncryptedSecretPayload`, `StorageOptions`, and `StorageBackend` contracts
+  (`src/storage/mod.rs`).
+- **AES-GCM Envelope Encryption Provider** (`src/storage/aes_gcm.rs`): AES-256-GCM envelope encryption
+  with PBKDF2-HMAC-SHA256 (100,000 iterations) key derivation, 12-byte random IV (`rand::RngCore`),
+  16-byte random salt, pluggable `StorageBackend` (TPM NVRAM / OS Keyring ready), and auto-zeroized
+  byte buffers.
+- **In-Memory Storage Provider** (`src/storage/memory.rs`): Thread-safe in-memory fallback using
+  `Arc<RwLock<HashMap>>` with synchronous `store_secret_sync()` for seamless client initialization.
+- **Memory Hygiene & Zeroization Utilities** (`src/storage/secure_memory.rs`): Explicit buffer clearing
+  (`zeroize_bytes`), scoped execution with RAII drop guards (`with_secure_bytes`, `with_secure_string`),
+  and timing-safe comparison (`constant_time_equals`).
+- **KnishIOClient Secret Storage Integration**: `KnishIOClient` accepts `secret_storage`, provides
+  `set_secret_storage()`, `get_secret_storage()`, and `retrieve_secret()`, and unwraps the master secret
+  just-in-time for molecule construction (`create_molecule()`) and auth token refresh (`request_auth_token()`)
+  without permanently retaining cleartext secrets in client heap memory.
+- **Error Types**: Added `SecretStorage`, `SecretNotFound`, `DecryptionFailed`, and `StorageUnavailable`
+  variants to `KnishIOError` (`src/error/mod.rs`).
+- **`pq_line_rate` benchmark** (`benches/pq_line_rate.rs`, `ring` dev-dependency): ML-KEM-768 KEM
+  operations, AES-256-GCM data-plane throughput (hardware-accelerated and pure-software), and
+  `Wallet` per-message encapsulation envelope throughput, with 1/10 Gbps line-rate CPU sizing.
+
 ## [0.9.4] — 2026-08-05
 
 ### Added
@@ -170,6 +199,9 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/0.9.5...HEAD
+[0.9.5]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/0.9.5
+[0.9.4]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/0.9.4
 [0.9.3]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/0.9.3
 [0.9.2]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/0.9.2
 [0.9.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/0.9.0
