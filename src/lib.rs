@@ -75,6 +75,7 @@ pub mod versions;
 pub mod token_unit;
 pub mod policy_meta;
 
+pub mod storage;
 // Utility modules
 pub mod utils;
 
@@ -92,6 +93,13 @@ pub use check_molecule::{CheckMolecule, IntegrityReport, MoleculeIntegrityResult
 pub use token_unit::TokenUnit;
 pub use policy_meta::PolicyMeta;
 
+
+// Secret storage re-exports
+pub use storage::{
+    SecretStorageProvider, SecretStorageMetadata, EncryptedSecretPayload,
+    StorageOptions, StorageBackend, MemoryStorageBackend,
+    MemorySecretStorageProvider, AesGcmSecretStorageProvider,
+};
 // Rules system re-exports
 pub use rules::{Rule, Callback, Condition};
 

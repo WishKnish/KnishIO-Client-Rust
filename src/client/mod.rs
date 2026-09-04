@@ -87,6 +87,8 @@ pub struct KnishIOClient {
     secret: Option<String>,
     /// Bundle hash (64-character user identifier derived from secret)
     bundle: Option<String>,
+    /// Optional pluggable hardware envelope encryption secret storage provider
+    secret_storage: Option<std::sync::Arc<dyn crate::storage::SecretStorageProvider>>,
     
     /// Current authentication token for server requests
     auth_token: Option<AuthToken>,
@@ -137,6 +139,7 @@ impl KnishIOClient {
             cell_slug: None,
             secret: None,
             bundle: None,
+            secret_storage: None,
             auth_token: None,
             auth_token_objects: HashMap::new(),
             auth_in_process: false,
@@ -425,6 +428,7 @@ impl KnishIOClient {
     pub fn reset(&mut self) {
         self.secret = None;
         self.bundle = None;
+        self.secret_storage = None;
         self.auth_token = None;
         self.remainder_wallet = None;
         self.last_molecule_query = None;
@@ -476,7 +480,7 @@ impl KnishIOClient {
 
     /// Check if the client has a secret
     pub fn has_secret(&self) -> bool {
-        self.secret.is_some()
+        self.secret.is_some() || (self.secret_storage.is_some() && self.bundle.is_some())
     }
 
     /// Check if the client has a bundle
@@ -503,6 +507,34 @@ impl KnishIOClient {
     pub fn get_secret(&self) -> Result<&str> {
         self.secret.as_deref()
             .ok_or(KnishIOError::Unauthenticated)
+    }
+
+    /// Set the secret storage provider and optionally associate an active bundle hash
+    pub fn set_secret_storage(
+        &mut self,
+        storage: std::sync::Arc<dyn crate::storage::SecretStorageProvider>,
+        bundle_hash: Option<String>,
+    ) {
+        self.secret_storage = Some(storage);
+        if let Some(bundle) = bundle_hash {
+            self.bundle = Some(bundle);
+        }
+    }
+
+    /// Get the configured secret storage provider
+    pub fn get_secret_storage(&self) -> Option<std::sync::Arc<dyn crate::storage::SecretStorageProvider>> {
+        self.secret_storage.clone()
+    }
+
+    /// Asynchronously retrieve the secret from storage or return in-memory secret
+    pub async fn retrieve_secret(&self, options: crate::storage::StorageOptions) -> Result<Option<String>> {
+        if let Some(sec) = &self.secret {
+            return Ok(Some(sec.clone()));
+        }
+        if let (Some(storage), Some(bundle)) = (&self.secret_storage, &self.bundle) {
+            return storage.retrieve_secret(bundle, options).await;
+        }
+        Ok(None)
     }
 
     /// Get the cell slug (equivalent to getCellSlug in JS)
@@ -672,8 +704,13 @@ impl KnishIOClient {
         self.log("info", "KnishIOClient::create_molecule() - Creating a new molecule...");
 
         // Use provided or get stored secret/bundle
-        let secret = secret.or_else(|| self.secret.clone())
-            .ok_or(KnishIOError::MissingSecret)?;
+        let mut secret = secret.or_else(|| self.secret.clone());
+        if secret.is_none() {
+            if let (Some(storage), Some(bundle)) = (&self.secret_storage, &self.bundle) {
+                secret = storage.retrieve_secret(bundle, Default::default()).await.ok().flatten();
+            }
+        }
+        let secret = secret.ok_or(KnishIOError::MissingSecret)?;
         let bundle = bundle.or_else(|| self.bundle.clone());
 
         // Determine source wallet
@@ -1068,11 +1105,23 @@ impl KnishIOClient {
     /// * `secret` - User secret key
     pub fn set_secret<S: Into<String>>(&mut self, secret: S) {
         let secret_string = secret.into();
-        self.secret = Some(secret_string.clone());
-        
-        // Generate bundle hash from secret
-        self.bundle = Some(crate::crypto::generate_bundle_hash(&secret_string));
-        
+        let bundle_hash = crate::crypto::generate_bundle_hash(&secret_string);
+
+        if let Some(storage) = &self.secret_storage {
+            let storage_clone = std::sync::Arc::clone(storage);
+            let b_clone = bundle_hash.clone();
+            let s_clone = secret_string.clone();
+            tokio::spawn(async move {
+                let _ = storage_clone.store_secret(&b_clone, &s_clone, Default::default()).await;
+            });
+        } else {
+            let mem_storage = std::sync::Arc::new(crate::storage::MemorySecretStorageProvider::new());
+            let _ = mem_storage.store_secret_sync(&bundle_hash, &secret_string, Default::default());
+            self.secret_storage = Some(mem_storage as std::sync::Arc<dyn crate::storage::SecretStorageProvider>);
+        }
+
+        self.secret = Some(secret_string);
+        self.bundle = Some(bundle_hash);
         self.log("info", "User secret and bundle configured");
     }
     
@@ -3295,6 +3344,8 @@ impl KnishIOClient {
         if working_secret.is_none() {
             if let Some(s) = seed {
                 working_secret = Some(generate_secret(s));
+            } else if let (Some(storage), Some(bundle)) = (&self.secret_storage, &self.bundle) {
+                working_secret = storage.retrieve_secret(bundle, Default::default()).await.ok().flatten();
             }
         }
 
@@ -3421,6 +3472,7 @@ impl Clone for KnishIOClient {
             subscription_manager: self.subscription_manager.clone(),
             remainder_wallet: self.remainder_wallet.clone(),
             last_molecule_query: self.last_molecule_query.clone(),
+            secret_storage: self.secret_storage.clone(),
             abort_controllers: Arc::new(Mutex::new(HashMap::new())), // Create new Arc for clone
         }
     }

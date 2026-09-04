@@ -74,7 +74,7 @@ hex = "0.4"
 base64 = "0.22"
 pbkdf2 = "0.12"                  # Key derivation
 aes-gcm = "0.10"                  # AES-GCM encryption for ML-KEM768
-
+zeroize = { version = "1.9", features = ["derive", "alloc"] } # Memory zeroization
 # SIMD optimizations for crypto (2025 high performance)
 tiny-keccak = { version = "2.0", features = ["shake", "keccak"] } # Compact Keccak with SHAKE256 support
 aes = "0.8"                      # AES hardware acceleration (for CTR_DRBG)
@@ -123,9 +123,11 @@ simd-optimized = ["sha3-asm"]    # Enable SIMD optimizations
 benchmark-mode = []              # Enable benchmarking-specific optimizations
 
 [dev-dependencies]
-# [[bench]]
-# name = "crypto_bench"
-# harness = false
+ring = "0.17"
+
+[[bench]]
+name = "pq_line_rate"
+harness = false
 
 # Self-test binary (follows JavaScript SDK pattern)
 [[bin]]

@@ -160,6 +160,24 @@ pub enum KnishIOError {
     #[error("Wallet not found")]
     WalletNotFound,    
 
+
+    // Secret storage errors
+
+    /// Secret storage error
+    #[error("Secret storage error: {0}")]
+    SecretStorage(String),
+
+    /// Secret not found for bundle hash
+    #[error("Secret not found for bundle: {0}")]
+    SecretNotFound(String),
+
+    /// Secret decryption failed
+    #[error("Secret decryption failed: {0}")]
+    DecryptionFailed(String),
+
+    /// Secret storage provider unavailable
+    #[error("Secret storage provider unavailable: {0}")]
+    StorageUnavailable(String),
     // Missing resource errors
     
     /// Missing secret for wallet operation
