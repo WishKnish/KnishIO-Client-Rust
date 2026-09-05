@@ -1,0 +1,68 @@
+# Rust SDK scheduled dependency audit — RUSTSEC advisories against a tree nobody pushed to.
+#
+# Why a SCHEDULE and not just the ci.yml audit job: an advisory is published against code that
+# has NOT changed. That is the 2026-07 → 2026-08 lesson — a repo sits green for weeks while a
+# crate it already ships acquires a RUSTSEC entry, because nothing re-examines a tree with no
+# commits. ci.yml answers "did this change break anything"; this file answers "did the world
+# change underneath us". Only the second question has a clock.
+#
+# ci.yml keeps its own cargo audit job (that one gates a merge); this is the same check on a
+# timer, which is what catches the weeks where nobody pushes at all.
+#
+# NOTE: scheduled workflows only fire from the DEFAULT BRANCH. This file has no effect until
+# it is merged there — a branch-only copy runs never, silently.
+name: Scheduled audit
+
+on:
+  schedule:
+    # Mondays 06:17 UTC. Deliberately off the hour: GitHub sheds scheduled runs when the
+    # top-of-hour queue saturates, and a weekly job that quietly does not run is worse than
+    # no job at all, because it reads as green.
+    - cron: '17 6 * * 1'
+  # Manual trigger, plus a deliberate-failure switch. A gate nobody has watched FAIL is an
+  # unproven gate: set selftest_fail to make a run exit 1 on purpose and confirm the failure
+  # is actually visible wherever these notifications land.
+  workflow_dispatch:
+    inputs:
+      selftest_fail:
+        description: 'Fail this run on purpose, to prove the alert path works. Audits nothing.'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit (RUSTSEC advisories)
+    runs-on: ubuntu-latest
+    steps:
+      # `if: inputs.selftest_fail` reads the DECLARED BOOLEAN directly. Do not "fix" this to
+      # `== 'true'`: GitHub coerces mismatched types to number for loose equality, the string
+      # 'true' casts to NaN, and NaN equals nothing — so that form is always false and the
+      # probe would silently never fire. The input is used only inside this expression and is
+      # never interpolated into shell text.
+      - name: Selftest failure probe
+        if: inputs.selftest_fail
+        run: |
+          echo "::error::Selftest failure probe requested — failing this run deliberately."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c  # stable
+
+      # Cargo.lock is gitignored in this repo (.gitignore:9), so there is nothing committed to
+      # audit — resolve fresh, which is also exactly what a new consumer of the crate gets.
+      - name: Generate lockfile
+        run: cargo generate-lockfile
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@b9b2dbfff0f381c9fe5e52c55f95c5d0486949d9  # cargo-audit
+
+      - name: cargo audit
+        run: cargo audit
