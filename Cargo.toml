@@ -67,20 +67,20 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Cryptography
-sha3 = "0.10"                    # For SHAKE256
-sha2 = "0.10"                    # For PBKDF2
+sha3 = "0.12"                    # For SHAKE256
+sha2 = "0.11"                    # For PBKDF2
 libcrux-ml-kem = "0.0.10"        # Pinned: formally verified ML-KEM (FIPS 203); 0.0.10 clears RUSTSEC-2026-0207/-0208 (libcrux-sha3) + RUSTSEC-2026-0212 (libcrux-secrets)
 hex = "0.4"
-base64 = "0.22"
-pbkdf2 = "0.12"                  # Key derivation
-aes-gcm = "0.10"                  # AES-GCM encryption for ML-KEM768
+base64 = "0.23"
+pbkdf2 = "0.13"                  # Key derivation
+aes-gcm = "0.11"                  # AES-GCM encryption for ML-KEM768
 zeroize = { version = "1.9", features = ["derive", "alloc"] } # Memory zeroization
 # SIMD optimizations for crypto (2025 high performance)
 tiny-keccak = { version = "2.0", features = ["shake", "keccak"] } # Compact Keccak with SHAKE256 support
-aes = "0.8"                      # AES hardware acceleration (for CTR_DRBG)
+aes = "0.9"                      # AES hardware acceleration (for CTR_DRBG)
 
 # GraphQL
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls-tls"] }
 
 # Error handling
 thiserror = "2.0.17"
