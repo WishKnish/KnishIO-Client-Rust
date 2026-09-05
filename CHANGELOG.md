@@ -16,6 +16,28 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cross-SDK envelope interoperability** (`src/storage/mod.rs`): `SecretStorageMetadata` and
+  `EncryptedSecretPayload` now serialize their metadata keys as camelCase
+  (`bundleHash`, `createdAt`, `hardwareBacked`, `providerType`), matching the TypeScript,
+  JavaScript, and Kotlin providers that share this wire format. 0.9.5 emitted snake_case, so an
+  envelope produced by `@wishknish/knishio-client-ts@0.9.7` failed here with
+  `missing field bundle_hash` before decryption was attempted, and an envelope produced here
+  deserialized in TypeScript with every typed metadata field `undefined`. The AES-256-GCM /
+  PBKDF2-HMAC-SHA256 core was always identical across all four SDKs; only the JSON framing
+  diverged. Envelopes written by 0.9.5 remain readable via `serde` field aliases.
+  0.9.5 shipped this envelope as a format shared with the other SDKs; that was true of its
+  crypto core and of molecular output (its self-test cross-validated 7/7 peers), but false of
+  the envelope's JSON framing, which no shared vector covered at the time.
+
+### Added
+
+- **Cross-SDK envelope regression tests** (`tests/secret_storage.rs`): a frozen envelope produced
+  by the TypeScript SDK 0.9.7 is decrypted here, a frozen 0.9.5 snake_case envelope proves the
+  back-compat aliases, and the emitted key set is asserted against the peer-SDK contract. The
+  first two fail against 0.9.5's serialization.
+
 ## [0.9.5] — 2026-09-04
 
 ### Added

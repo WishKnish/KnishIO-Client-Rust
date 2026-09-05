@@ -13,22 +13,41 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 
 /// Metadata associated with an encrypted secret in storage
+///
+/// WIRE FORMAT IS camelCase. This is a cross-SDK contract, not a style choice:
+/// the TS, JS, and Kotlin providers all emit `bundleHash`/`createdAt`/
+/// `hardwareBacked`/`providerType`, and this struct is serialized into the same
+/// `EncryptedSecretPayload` JSON they read. Rust originally shipped snake_case in
+/// 0.9.5, which made a TS-produced envelope fail here with
+/// `missing field bundle_hash` before decryption was even attempted, and made a
+/// Rust-produced envelope deserialize in TS with every typed metadata field
+/// `undefined`. The `alias` attributes keep envelopes written by 0.9.5 readable.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct SecretStorageMetadata {
     /// Bundle hash identifying the account/wallet
+    #[serde(alias = "bundle_hash")]
     pub bundle_hash: String,
     /// Optional human-readable label
     pub label: Option<String>,
     /// Creation timestamp in milliseconds
+    #[serde(alias = "created_at")]
     pub created_at: i64,
     /// Whether this secret is backed by hardware (TPM, Secure Enclave)
+    #[serde(alias = "hardware_backed")]
     pub hardware_backed: bool,
     /// Provider type identifier
+    #[serde(alias = "provider_type")]
     pub provider_type: String,
 }
 
 /// Versioned envelope encryption payload
+///
+/// Every field here is single-word today, so `rename_all` is currently a no-op —
+/// it is declared anyway so that adding a multi-word field cannot silently
+/// reintroduce the snake_case divergence described on `SecretStorageMetadata`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EncryptedSecretPayload {
     /// Payload format version (always 1)
     pub version: u32,
