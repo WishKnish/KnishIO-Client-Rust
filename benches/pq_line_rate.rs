@@ -19,7 +19,7 @@ use aes_gcm::{
 };
 use knishio_client::Wallet;
 use libcrux_ml_kem::mlkem768;
-use rand::RngCore;
+use rand::Rng;
 use ring::aead::{Aad, BoundKey, Nonce as RingNonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM};
 
 struct OneNonce(Option<[u8; 12]>);

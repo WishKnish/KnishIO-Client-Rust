@@ -7,7 +7,7 @@ use crate::crypto::{generate_address, generate_bundle_hash, generate_key};
 use crate::error::{KnishIOError, Result};
 use crate::types::TokenUnit;
 use base64::Engine as _;
-use rand::{RngCore};
+use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
@@ -402,7 +402,7 @@ impl Wallet {
     ///
     /// A hexadecimal position string
     pub fn generate_position(salt_length: usize) -> String {
-        use rand::Rng;
+        use rand::RngExt;
         
         const HEX_CHARSET: &[u8] = b"abcdef0123456789";
         
@@ -601,7 +601,7 @@ impl Wallet {
     ///
     /// A new batch ID string
     fn generate_batch_id() -> String {
-        use rand::Rng;
+        use rand::RngExt;
         let mut rng = rand::rng();
         format!("{:016x}", rng.random::<u64>())
     }

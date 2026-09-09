@@ -92,7 +92,7 @@ pub fn chunk_substr(input: &str, chunk_size: usize) -> Vec<String> {
 /// assert!(hex_string.chars().all(|c| "0123456789abcdef".contains(c)));
 /// ```
 pub fn random_string(length: usize, alphabet: Option<&str>) -> String {
-    use rand::Rng;
+    use rand::RngExt;
     
     let charset = alphabet.unwrap_or("abcdef0123456789");
     let charset_bytes: Vec<u8> = charset.bytes().collect();

@@ -458,7 +458,7 @@ pub fn generate_address(key: &str) -> Result<String> {
 ///
 /// A 64-character hexadecimal position string
 pub fn generate_position(salt_length: usize) -> String {
-    use rand::Rng;
+    use rand::RngExt;
     
     let mut rng = rand::rng();
     let salt: String = (0..salt_length)
@@ -470,7 +470,7 @@ pub fn generate_position(salt_length: usize) -> String {
 
 /// Generate a random hash (helper function)
 fn generate_random_hash() -> String {
-    use rand::Rng;
+    use rand::RngExt;
     
     let mut rng = rand::rng();
     let random_data: String = (0..32)
@@ -774,7 +774,7 @@ pub fn base58_encode_bytes(input: &[u8]) -> String {
 ///
 /// Hexadecimal string representation of the random salt
 pub fn generate_salt(length: usize) -> String {
-    use rand::RngCore;
+    use rand::Rng;
     let mut rng = rand::rng();
     let mut salt = vec![0u8; length];
     rng.fill_bytes(&mut salt);

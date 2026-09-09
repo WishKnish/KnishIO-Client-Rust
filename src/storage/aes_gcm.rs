@@ -12,7 +12,7 @@ use aes_gcm::{Aes256Gcm, Nonce};
 use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
-use rand::RngCore;
+use rand::Rng;
 use std::sync::Arc;
 use zeroize::Zeroize;
 
