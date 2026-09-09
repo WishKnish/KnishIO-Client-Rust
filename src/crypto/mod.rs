@@ -25,7 +25,7 @@
 //! - **Memory Pooling**: Zero-allocation buffer management for high-throughput operations
 //! - **Adaptive Selection**: Automatic fallback between SIMD and standard implementations
 
-use sha3::{Shake256, digest::{ExtendableOutput, Update, XofReader}};
+use shake::{Shake256, digest::{ExtendableOutput, Update, XofReader}};
 use crate::error::{KnishIOError, Result};
 use num_bigint;
 use num_traits;

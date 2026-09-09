@@ -17,7 +17,6 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use aes_gcm::aead::generic_array::GenericArray;
 use knishio_client::Wallet;
 use libcrux_ml_kem::mlkem768;
 use rand::RngCore;
@@ -161,12 +160,11 @@ fn bench_portable_aes_gcm(sizes: &[(&str, usize, usize)]) -> Vec<PerfRow> {
     let mut rows = Vec::new();
     let mut key_bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut key_bytes);
-    let key = GenericArray::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes).expect("cipher");
 
     let mut nonce_bytes = [0u8; 12];
     rand::rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
 
     for &(label, size_bytes, iters) in sizes {
         let plaintext = vec![0x42u8; size_bytes];
@@ -175,7 +173,7 @@ fn bench_portable_aes_gcm(sizes: &[(&str, usize, usize)]) -> Vec<PerfRow> {
         let start = Instant::now();
         let mut ct = Vec::new();
         for _ in 0..iters {
-            ct = cipher.encrypt(nonce, plaintext.as_slice()).expect("encrypt");
+            ct = cipher.encrypt(&nonce, plaintext.as_slice()).expect("encrypt");
         }
         let enc_dur = start.elapsed();
         let total_mb = (size_bytes * iters) as f64 / (1024.0 * 1024.0);
@@ -187,7 +185,7 @@ fn bench_portable_aes_gcm(sizes: &[(&str, usize, usize)]) -> Vec<PerfRow> {
         // Decrypt
         let start = Instant::now();
         for _ in 0..iters {
-            let _pt = cipher.decrypt(nonce, ct.as_slice()).expect("decrypt");
+            let _pt = cipher.decrypt(&nonce, ct.as_slice()).expect("decrypt");
         }
         let dec_dur = start.elapsed();
         let dec_mb_s = total_mb / dec_dur.as_secs_f64();

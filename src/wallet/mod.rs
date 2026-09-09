@@ -6,7 +6,6 @@
 use crate::crypto::{generate_address, generate_bundle_hash, generate_key};
 use crate::error::{KnishIOError, Result};
 use crate::types::TokenUnit;
-use aes::cipher::generic_array::GenericArray;
 use base64::Engine as _;
 use rand::{RngCore};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -764,16 +763,16 @@ impl Wallet {
         use aes_gcm::aead::Aead;
         
         // Use shared secret as AES key
-        let key = GenericArray::from_slice(shared_secret);
-        let cipher = Aes256Gcm::new(key);
+        let cipher = Aes256Gcm::new_from_slice(shared_secret)
+            .map_err(|_| KnishIOError::DecryptionKey)?;
         
         // Generate random nonce
         let mut nonce_bytes = [0u8; 12];
         rand::rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
         
         // Encrypt message
-        let mut encrypted = cipher.encrypt(nonce, message)
+        let mut encrypted = cipher.encrypt(&nonce, message)
             .map_err(|_| KnishIOError::EncryptionError)?;
         
         // Prepend nonce to encrypted data
@@ -793,15 +792,16 @@ impl Wallet {
         }
         
         // Use shared secret as AES key
-        let key = GenericArray::from_slice(shared_secret);
-        let cipher = Aes256Gcm::new(key);
+        let cipher = Aes256Gcm::new_from_slice(shared_secret)
+            .map_err(|_| KnishIOError::DecryptionKey)?;
         
         // Extract nonce and encrypted message
-        let nonce = Nonce::from_slice(&encrypted_data[..12]);
+        let nonce = Nonce::try_from(&encrypted_data[..12])
+            .map_err(|_| KnishIOError::DecryptionKey)?;
         let encrypted_message = &encrypted_data[12..];
         
         // Decrypt message
-        let decrypted = cipher.decrypt(nonce, encrypted_message)
+        let decrypted = cipher.decrypt(&nonce, encrypted_message)
             .map_err(|_| KnishIOError::DecryptionKey)?;
         
         Ok(decrypted)

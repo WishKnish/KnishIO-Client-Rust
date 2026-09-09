@@ -2,7 +2,7 @@
 name = "knishio-client"
 version = "0.9.5"
 edition = "2021"
-rust-version = "1.75"  # Minimum supported Rust version for 2025 features
+rust-version = "1.89"  # aes 0.9.3 / RustCrypto 2026 line floor; CI builds on stable
 authors = ["Eugene Teplitsky <eugene@wishknish.com>"]
 description = "Rust implementation of the Knish.IO SDK for interacting with Knish.IO decentralized anchor node validator infrastructure."
 license = "GPL-3.0-or-later"
@@ -49,6 +49,8 @@ should_implement_trait = "allow"     # deliberate API (e.g. custom from_str)
 large_enum_variant = "allow"         # deliberate layout choice
 todo = "warn"                        # Warn on TODO comments
 unimplemented = "warn"               # Warn on unimplemented!() macro
+unnecessary_map_or = "allow"         # 1.82+ lint; preserves existing map_or pattern
+chunks_exact_to_as_chunks = "allow"  # SIMD/hash core chunking
 
 [dependencies]
 tokio = { version = "1.47", features = [
@@ -67,20 +69,20 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Cryptography
-sha3 = "0.10"                    # For SHAKE256
-sha2 = "0.10"                    # For PBKDF2
+shake = "0.1"                    # For SHAKE256 (sha3 0.12 moved Shake* here)
+sha2 = "0.11"                    # For PBKDF2
 libcrux-ml-kem = "0.0.10"        # Pinned: formally verified ML-KEM (FIPS 203); 0.0.10 clears RUSTSEC-2026-0207/-0208 (libcrux-sha3) + RUSTSEC-2026-0212 (libcrux-secrets)
 hex = "0.4"
-base64 = "0.22"
-pbkdf2 = "0.12"                  # Key derivation
-aes-gcm = "0.10"                  # AES-GCM encryption for ML-KEM768
+base64 = "0.23"
+pbkdf2 = "0.13"                  # Key derivation
+aes-gcm = "0.11"                  # AES-GCM encryption for ML-KEM768
 zeroize = { version = "1.9", features = ["derive", "alloc"] } # Memory zeroization
 # SIMD optimizations for crypto (2025 high performance)
 tiny-keccak = { version = "2.0", features = ["shake", "keccak"] } # Compact Keccak with SHAKE256 support
-aes = "0.8"                      # AES hardware acceleration (for CTR_DRBG)
+aes = "0.9"                      # AES hardware acceleration (for CTR_DRBG)
 
 # GraphQL
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls"] }
 
 # Error handling
 thiserror = "2.0.17"
