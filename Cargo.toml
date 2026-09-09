@@ -99,14 +99,14 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 # Utilities
-rand = "0.9.3"
+rand = "0.10.2"
 chrono = { version = "0.4", features = ["serde"] }
 # Removed once_cell and lazy_static - using std::sync::LazyLock instead
 uuid = { version = "1.10", features = ["v4", "serde"] }
 num_cpus = "1.16"               # For system information in benchmarks
 
 # String and number utilities
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-traits = "0.2"
 
 # Optional SIMD acceleration - enabled per target architecture
