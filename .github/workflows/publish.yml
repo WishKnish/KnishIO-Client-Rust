@@ -36,7 +36,10 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      # persist-credentials: false (2026-08) — nothing here pushes; the Release uses GITHUB_TOKEN, not git config.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       # Refuse to publish a tag the manifest does not itself claim. Shared definition with
       # CI and with local runs — see .github/scripts/check-version.sh.
@@ -77,6 +80,8 @@ jobs:
     environment: release   # matches the crates.io trusted-publisher Environment + the repo's `release` env
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       # Release body = this tag's CHANGELOG.md section, NOT generate_release_notes.
       # generate_release_notes builds "What's Changed" from merged PULL REQUESTS in the tag
