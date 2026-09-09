@@ -14,16 +14,16 @@ The SDK can be installed via Cargo:
 ```bash
 # Add to Cargo.toml
 [dependencies]
-knishio-client = "0.1.0"
+knishio-client = "0.9.5"
 
 # Or install from the command line
 cargo add knishio-client
 ```
 
 **Requirements:**
-- Rust 1.70 or higher
+- Rust 1.89 or higher (the crate's declared `rust-version`)
 - Cargo for dependency management
-- Required dependencies: `serde`, `sha3`, `hex`, `base64`, `chrono`, `rand`
+- Required dependencies: `serde`, `shake`, `hex`, `base64`, `chrono`, `rand`
 
 After installation, import the SDK in your project:
 

@@ -12,9 +12,8 @@ use std::path::Path;
 
 fn main() {
     // Declare the custom cfg so rustc (1.80+) doesn't warn it's unexpected.
-    // Single-colon form: the crate's MSRV is 1.75, and cargo rejects the `cargo::`
-    // (1.77+) syntax below that MSRV. (On <1.80 cargo this instruction is an unknown
-    // no-op; on CI's 1.96 it's honored.)
+    // Single-colon form: cargo: instructions remain supported across all modern cargo versions.
+    // The crate's MSRV is 1.89 (raised for the RustCrypto 2026 line).
     println!("cargo:rustc-check-cfg=cfg(has_shared_fixtures)");
 
     // build.rs runs with the crate root as CWD; the monorepo fixtures are at

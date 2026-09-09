@@ -16,6 +16,19 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Changed
+
+- **MSRV raised 1.75 → 1.89**, required by the RustCrypto 2026 line (`aes` 0.9.3). CI builds
+  on rolling stable.
+- **RustCrypto 2026 line**: `sha3` 0.10 → `shake` 0.1 (`sha3` 0.12 moved `Shake256` into its
+  own crate; the API is unchanged), `sha2` 0.10 → 0.11, `aes-gcm` 0.10 → 0.11, `aes` 0.8 → 0.9,
+  `pbkdf2` 0.12 → 0.13, `base64` 0.22 → 0.23. `aes-gcm` 0.11 replaced `generic-array` with
+  `hybrid-array`, so nonces are constructed via `Nonce::from`/`Nonce::try_from` and AEAD
+  methods take `&Nonce`. No cryptographic output changed.
+- **`reqwest` 0.12 → 0.13**, whose `rustls-tls` feature was renamed `rustls`.
+- **`rand` 0.9.3 → 0.10.2 and `num-bigint` 0.4 → 0.5.** In `rand` 0.10, `RngCore` was renamed
+  `Rng` and the former `Rng` methods moved to `RngExt`.
+
 ### Fixed
 
 - **Cross-SDK envelope interoperability** (`src/storage/mod.rs`): `SecretStorageMetadata` and
