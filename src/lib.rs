@@ -28,6 +28,7 @@
 //!         "KNISH",
 //!         None,
 //!         None,
+//!         None,
 //!     )?;
 //!
 //!     // Create and sign a molecule
@@ -87,7 +88,7 @@ pub use atom::Atom;
 pub use error::{KnishIOError, Result};
 pub use molecule::{Molecule, TypeSafeMoleculeBuilder, ValueAtomParams, MetaAtomParams, IdentityAtomParams, TokenRequestAtomParams, BufferDepositAtomParams, BufferWithdrawAtomParams, FusionAtomParams, StackableTransferParams};
 pub use types::{Isotope, MetaItem};
-pub use wallet::Wallet;
+pub use wallet::{Wallet, MlKemParameterSet};
 pub use client::{KnishIOClient, TransferRecipient, builder::ClientBuilder};
 pub use check_molecule::{CheckMolecule, IntegrityReport, MoleculeIntegrityResult};
 pub use token_unit::TokenUnit;
@@ -164,6 +165,7 @@ mod integration_tests {
             "TEST",
             None,
             None,
+            None,
         );
         
         assert!(wallet.is_ok());
@@ -181,6 +183,7 @@ mod integration_tests {
             Some("test-secret-12345"),
             None,
             "TEST",
+            None,
             None,
             None,
         ).unwrap();

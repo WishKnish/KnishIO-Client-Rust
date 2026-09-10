@@ -16,6 +16,16 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-09-10
+
+### Changed
+
+- **ML-KEM-1024 by default with optional ML-KEM-768 step-back.** Added `MlKemParameterSet` enum
+  (`MlKem1024` default, `MlKem768`) with accessor methods `pk_bytes()`, `sk_bytes()`, `ct_bytes()`.
+- **Breaking API change:** `Wallet::new` and `Wallet::create` now accept an optional
+  `mlkem_parameter_set: Option<MlKemParameterSet>`.
+- Client and molecule operations now preserve the configured ML-KEM parameter set.
+
 ### Changed
 
 - **MSRV raised 1.75 → 1.89**, required by the RustCrypto 2026 line (`aes` 0.9.3). CI builds

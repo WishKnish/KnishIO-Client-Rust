@@ -148,6 +148,7 @@ mod tests {
             "TEST",
             None,
             None,
+            None,
         ).unwrap();
         
         // This should fail without proper molecule initialization methods implemented

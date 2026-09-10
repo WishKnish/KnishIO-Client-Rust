@@ -1601,6 +1601,7 @@ impl ResponseWalletList {
                 token_slug,
                 None,
                 characters,
+                None,
             ).ok()?
         } else {
             // With position: equivalent to JS new Wallet({secret, token, position, batchId, characters})
@@ -1610,6 +1611,7 @@ impl ResponseWalletList {
                 token_slug,
                 position,
                 characters,
+                None,
             ).ok()?;
             // Overwrite address from response (server is authoritative)
             if let Some(addr) = data.get("address").and_then(|v| v.as_str()) {

@@ -65,7 +65,8 @@ fn create_fixed_remainder_wallet(secret: &str, token: &str) -> Result<Wallet> {
         None, // address
         Some("bbbb000000000000cccc111111111111dddd222222222222eeee333333333333"), // Fixed deterministic position
         None, // batch_id
-        None  // characters
+        None, // characters
+        None,
     )?)
 }
 
@@ -90,13 +91,13 @@ async fn run_negative_buffer_case(secret: &str, token: &str, tv: &Value) -> Resu
     let field = tamper["field"].as_str().unwrap_or("");
     let to = tamper["to"].as_str().unwrap_or("");
 
-    let mut source_wallet = Wallet::new(Some(secret), None, Some(token), None, None, None, Some("BASE64"))?;
+    let mut source_wallet = Wallet::new(Some(secret), None, Some(token), None, None, None, Some("BASE64"), None)?;
     source_wallet.set_balance_i128(balance);
     let verify_wallet = source_wallet.clone();
 
     let mut molecule = match build_from {
         "deposit" => {
-            let remainder_wallet = Wallet::new(Some(secret), None, Some(token), None, None, None, Some("BASE64"))?;
+            let remainder_wallet = Wallet::new(Some(secret), None, Some(token), None, None, None, Some("BASE64"), None)?;
             let mut m = Molecule::with_params(
                 Some(secret.to_string()), None, Some(source_wallet.clone()), Some(remainder_wallet), None, None,
             );
@@ -854,6 +855,7 @@ impl SelfTestRunner {
             Some(&source_position),
             None,
             Some("BASE64"),
+            None,
         ).context("Failed to create source wallet")?;
 
         Logger::test("Source wallet creation", true, None);
@@ -957,6 +959,7 @@ impl SelfTestRunner {
             Some(&source_position),
             None,
             Some("BASE64"),
+            None,
         ).context("Failed to create source wallet")?;
 
         source_wallet.set_balance_f64(balance);  // Set balance for testing
@@ -972,6 +975,7 @@ impl SelfTestRunner {
             Some(&recipient_position),
             None,
             Some("BASE64"),
+            None,
         ).context("Failed to create recipient wallet")?;
 
         Logger::test("Recipient wallet creation", true, None);
@@ -1060,6 +1064,7 @@ impl SelfTestRunner {
             Some(&source_position),
             None,
             Some("BASE64"),
+            None,
         ).context("Failed to create source wallet")?;
 
         source_wallet.set_balance_f64(balance);
@@ -1080,6 +1085,7 @@ impl SelfTestRunner {
             Some(&recipient_position),
             None,
             Some("BASE64"),
+            None,
         ).context("Failed to create recipient wallet")?;
 
         Logger::test("Recipient wallet creation", true, None);
@@ -1167,6 +1173,7 @@ impl SelfTestRunner {
             Some(&source_position),
             None,
             Some("BASE64"),
+            None,
         ).context("Failed to create source wallet")?;
         Logger::test("Source wallet creation", true, None);
 
@@ -1180,6 +1187,7 @@ impl SelfTestRunner {
             Some(&recipient_position),
             None,
             Some("BASE64"),
+            None,
         ).context("Failed to create recipient wallet")?;
         Logger::test("Recipient wallet creation", true, None);
 
@@ -1257,13 +1265,13 @@ impl SelfTestRunner {
 
         let source_secret = generate_secret(&source_seed);
         let source_wallet = Wallet::new(
-            Some(&source_secret), None, Some(&source_token), None, Some(&source_position), None, Some("BASE64"),
+            Some(&source_secret), None, Some(&source_token), None, Some(&source_position), None, Some("BASE64"), None,
         ).context("Failed to create source wallet")?;
         Logger::test("Source wallet creation", true, None);
 
         let new_secret = generate_secret(&new_wallet_seed);
         let new_wallet = Wallet::new(
-            Some(&new_secret), None, Some(&new_token), None, Some(&new_wallet_position), None, Some("BASE64"),
+            Some(&new_secret), None, Some(&new_token), None, Some(&new_wallet_position), None, Some("BASE64"), None,
         ).context("Failed to create new wallet")?;
         Logger::test("New wallet creation", true, None);
 
@@ -1323,13 +1331,13 @@ impl SelfTestRunner {
 
         let source_secret = generate_secret(&source_seed);
         let source_wallet = Wallet::new(
-            Some(&source_secret), None, Some(&source_token), None, Some(&source_position), None, Some("BASE64"),
+            Some(&source_secret), None, Some(&source_token), None, Some(&source_position), None, Some("BASE64"), None,
         ).context("Failed to create source wallet")?;
         Logger::test("Source wallet creation", true, None);
 
         let claim_secret = generate_secret(&claim_seed);
         let claim_wallet = Wallet::new(
-            Some(&claim_secret), None, Some(&claim_token), None, Some(&claim_position), None, Some("BASE64"),
+            Some(&claim_secret), None, Some(&claim_token), None, Some(&claim_position), None, Some("BASE64"), None,
         ).context("Failed to create claim wallet")?;
         Logger::test("Claim wallet creation", true, None);
 
@@ -1434,10 +1442,10 @@ impl SelfTestRunner {
             let balance = tv["sourceBalance"].as_i64().unwrap_or(0) as i128;
             let amount = tv["amount"].as_i64().unwrap_or(0);
 
-            let mut source_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"))?;
+            let mut source_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"), None)?;
             source_wallet.set_balance_i128(balance);
             let source_wallet_for_validation = source_wallet.clone();
-            let remainder_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"))?;
+            let remainder_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"), None)?;
 
             let mut molecule = Molecule::with_params(
                 Some(secret.clone()), None, Some(source_wallet), Some(remainder_wallet), None, None,
@@ -1478,7 +1486,7 @@ impl SelfTestRunner {
 
             // The buffer wallet: B-isotope source AND remainder (mirrors the C++ reference —
             // a self-withdrawal where the leftover buffer balance routes back to the same wallet).
-            let mut source_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"))?;
+            let mut source_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"), None)?;
             source_wallet.set_balance_i128(balance);
             let recipient_bundle = source_wallet.bundle.clone().unwrap_or_default();
 
@@ -1611,6 +1619,7 @@ impl SelfTestRunner {
                 Some(&position),
                 None,
                 Some("BASE64"),
+                Some(knishio_client::MlKemParameterSet::MlKem768),
             ).context("Failed to create encryption wallet")?;
 
             Logger::test("Encryption wallet creation", true, None);
@@ -1703,7 +1712,8 @@ impl SelfTestRunner {
                 None,
                 Some("0123456789abcdeffedcba9876543210fedcba9876543210fedcba9876543210"),
                 None,
-                None
+                None,
+                None,
             )?;
             source_wallet.balance = "1000".to_string();
 
@@ -1997,11 +2007,11 @@ impl SelfTestRunner {
                         // Special handling for ML-KEM768 cross-SDK compatibility
                         let validation_success = match self.validate_cross_sdk_mlkem768(molecule_data).await {
                             Ok(valid) => {
-                                Logger::message(&format!("    ✅ {molecule_type} decryption: PASSED"), colors::GREEN);
+                                Logger::test(&format!("{molecule_type} decryption"), valid, None);
                                 valid
                             }
                             Err(error) => {
-                                Logger::message(&format!("    ❌ {molecule_type} decryption: FAILED - {error}"), colors::RED);
+                                Logger::test(&format!("{molecule_type} decryption"), false, Some(&error.to_string()));
                                 false
                             }
                         };
@@ -2013,11 +2023,11 @@ impl SelfTestRunner {
                         // Standard molecule validation for non-ML-KEM768 types
                         let validation_success = match self.validate_cross_sdk_molecule(molecule_data, molecule_type).await {
                             Ok(valid) => {
-                                Logger::message(&format!("    ✅ {molecule_type} molecule: PASSED"), colors::GREEN);
+                                Logger::test(&format!("{molecule_type} molecule"), valid, None);
                                 valid
                             }
                             Err(error) => {
-                                Logger::message(&format!("    ❌ {molecule_type} molecule: FAILED - {error}"), colors::RED);
+                                Logger::test(&format!("{molecule_type} molecule"), false, Some(&error.to_string()));
                                 false
                             }
                         };
@@ -2116,6 +2126,7 @@ impl SelfTestRunner {
             Some(position),
             None,
             Some("BASE64"),
+            Some(knishio_client::MlKemParameterSet::MlKem768),
         )?;
 
         // STRONG cross-SDK check (cycle 138): decrypt THEIR encryptedData with our TESTSEED

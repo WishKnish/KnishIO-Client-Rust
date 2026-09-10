@@ -110,6 +110,7 @@ impl AuthToken {
             snapshot.wallet.position.as_deref(),
             None,
             snapshot.wallet.characters.as_deref(),
+            None,
         )?;
         
         Ok(Self::create(
@@ -308,6 +309,7 @@ mod tests {
             "AUTH",
             None,
             None,
+            None,
         ).unwrap();
         
         let auth_token = AuthToken::create(
@@ -328,6 +330,7 @@ mod tests {
             Some("test-secret"),
             None,
             "AUTH",
+            None,
             None,
             None,
         ).unwrap();
@@ -355,6 +358,7 @@ mod tests {
             Some("test-secret"),
             None,
             "AUTH",
+            None,
             None,
             None,
         ).unwrap();

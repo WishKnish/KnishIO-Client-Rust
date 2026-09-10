@@ -11,6 +11,44 @@ use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
+/// ML-KEM parameter set for post-quantum key encapsulation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MlKemParameterSet {
+    /// ML-KEM-1024 (FIPS 203 Category 5) - CNSA 2.0 compliant (default)
+    MlKem1024,
+    /// ML-KEM-768 (FIPS 203 Category 3) - Optional step-back
+    MlKem768,
+}
+
+impl Default for MlKemParameterSet {
+    fn default() -> Self {
+        Self::MlKem1024
+    }
+}
+
+impl MlKemParameterSet {
+    pub const fn pk_bytes(&self) -> usize {
+        match self {
+            Self::MlKem1024 => 1568,
+            Self::MlKem768 => 1184,
+        }
+    }
+
+    pub const fn sk_bytes(&self) -> usize {
+        match self {
+            Self::MlKem1024 => 3168,
+            Self::MlKem768 => 2400,
+        }
+    }
+
+    pub const fn ct_bytes(&self) -> usize {
+        match self {
+            Self::MlKem1024 => 1568,
+            Self::MlKem768 => 1088,
+        }
+    }
+}
+
 /// Wallet structure representing cryptographic keys and token management
 ///
 /// The Wallet struct maintains exact compatibility with the JavaScript implementation,
@@ -62,6 +100,9 @@ pub struct Wallet {
     
     /// Molecules associated with this wallet
     pub molecules: HashMap<String, serde_json::Value>,
+    /// ML-KEM parameter set (default: ML-KEM-1024)
+    #[serde(default)]
+    pub mlkem_parameter_set: MlKemParameterSet,
 }
 
 /// Debug impl that redacts sensitive cryptographic material (private key, ML-KEM private key)
@@ -105,6 +146,7 @@ impl Wallet {
         position: Option<&str>,
         batch_id: Option<&str>,
         characters: Option<&str>,
+        mlkem_parameter_set: Option<MlKemParameterSet>,
     ) -> Result<Self> {
         let token = token.unwrap_or("USER").to_string();
         
@@ -122,6 +164,7 @@ impl Wallet {
             token_units: Vec::new(),
             trade_rates: HashMap::new(),
             molecules: HashMap::new(),
+            mlkem_parameter_set: mlkem_parameter_set.unwrap_or_default(),
         };
 
         if let Some(secret) = secret {
@@ -173,6 +216,7 @@ impl Wallet {
         token: &str,
         position: Option<&str>,
         characters: Option<&str>,
+        mlkem_parameter_set: Option<MlKemParameterSet>,
     ) -> Result<Self> {
         // Validate credentials
         if secret.is_none() && bundle.is_none() {
@@ -201,6 +245,7 @@ impl Wallet {
             final_position.as_deref(),
             None,  // batch_id
             characters,
+            mlkem_parameter_set,
         )
     }
 
@@ -249,8 +294,8 @@ impl Wallet {
             position,
             batch_id,
             characters,
+            None,
         )?;
-
         wallet.balance = balance;
 
         // Parse token units. The GraphQL Balance response returns each unit as an OBJECT
@@ -559,8 +604,8 @@ impl Wallet {
             &self.token,
             None,
             self.characters.as_deref(),
+            Some(self.mlkem_parameter_set),
         )?;
-        
         remainder_wallet.init_batch_id(Some(self), true);
         Ok(remainder_wallet)
     }
@@ -625,13 +670,22 @@ impl Wallet {
                     .map_err(|_| KnishIOError::DecryptionKey)?;
             }
             
-            // Generate ML-KEM768 key pair using deterministic seed
-            use libcrux_ml_kem::mlkem768;
-            let keypair = mlkem768::generate_key_pair(seed);
+            let (pk_bytes, sk_bytes) = match self.mlkem_parameter_set {
+                MlKemParameterSet::MlKem1024 => {
+                    use libcrux_ml_kem::mlkem1024;
+                    let keypair = mlkem1024::generate_key_pair(seed);
+                    (keypair.pk().as_slice().to_vec(), keypair.sk().as_slice().to_vec())
+                }
+                MlKemParameterSet::MlKem768 => {
+                    use libcrux_ml_kem::mlkem768;
+                    let keypair = mlkem768::generate_key_pair(seed);
+                    (keypair.pk().as_slice().to_vec(), keypair.sk().as_slice().to_vec())
+                }
+            };
             
             // Serialize keys to match JavaScript base64 format
-            self.pubkey = Some(base64::engine::general_purpose::STANDARD.encode(keypair.pk().as_slice()));
-            self.privkey = Some(keypair.sk().as_slice().to_vec());
+            self.pubkey = Some(base64::engine::general_purpose::STANDARD.encode(&pk_bytes));
+            self.privkey = Some(sk_bytes);
         }
         
         Ok(())
@@ -662,31 +716,40 @@ impl Wallet {
             .map_err(|_| KnishIOError::DecryptionKey)?;
             
         // Perform ML-KEM768 encapsulation to get shared secret
-        use libcrux_ml_kem::mlkem768;
         use libcrux_ml_kem::MlKemPublicKey;
-        
-        // ML-KEM-768 public keys are exactly 1184 bytes. A wrong-length key here almost always means
-        // the node did not advertise an ML-KEM public key in its auth `key` field (e.g. a validator
-        // predating the PQ-transport build) — return a clean typed error instead of feeding libcrux a
-        // malformed key. The Rust analogue of the other SDKs' encrypt guards (a typed error, like C).
-        if recipient_pubkey_bytes.len() != 1184 {
+
+        let expected_pk_bytes = self.mlkem_parameter_set.pk_bytes();
+        if recipient_pubkey_bytes.len() != expected_pk_bytes {
             return Err(KnishIOError::DecryptionKey);
         }
-        let mut public_key_array = [0u8; 1184];
-        public_key_array.copy_from_slice(&recipient_pubkey_bytes);
-        let public_key = MlKemPublicKey::from(public_key_array);
-        
+
         // Generate random bytes for encapsulation
         let mut randomness = [0u8; 32];
         rand::rng().fill_bytes(&mut randomness);
-        
-        let (ciphertext, shared_secret) = mlkem768::encapsulate(&public_key, randomness);
-        
+
+        let (ciphertext_bytes, shared_secret_bytes) = match self.mlkem_parameter_set {
+            MlKemParameterSet::MlKem1024 => {
+                use libcrux_ml_kem::mlkem1024;
+                let mut public_key_array = [0u8; 1568];
+                public_key_array.copy_from_slice(&recipient_pubkey_bytes);
+                let public_key = MlKemPublicKey::from(public_key_array);
+                let (ciphertext, shared_secret) = mlkem1024::encapsulate(&public_key, randomness);
+                (ciphertext.as_slice().to_vec(), shared_secret.as_slice().to_vec())
+            }
+            MlKemParameterSet::MlKem768 => {
+                use libcrux_ml_kem::mlkem768;
+                let mut public_key_array = [0u8; 1184];
+                public_key_array.copy_from_slice(&recipient_pubkey_bytes);
+                let public_key = MlKemPublicKey::from(public_key_array);
+                let (ciphertext, shared_secret) = mlkem768::encapsulate(&public_key, randomness);
+                (ciphertext.as_slice().to_vec(), shared_secret.as_slice().to_vec())
+            }
+        };
+
         // Encrypt message using AES-GCM with shared secret
-        let encrypted_message_bytes = self.encrypt_with_shared_secret(message_bytes, shared_secret.as_slice()).await?;
-        
+        let encrypted_message_bytes = self.encrypt_with_shared_secret(message_bytes, &shared_secret_bytes).await?;
         // Serialize to base64 (matches JavaScript serialization)
-        let cipher_text = base64::engine::general_purpose::STANDARD.encode(ciphertext.as_slice());
+        let cipher_text = base64::engine::general_purpose::STANDARD.encode(&ciphertext_bytes);
         let encrypted_message = base64::engine::general_purpose::STANDARD.encode(encrypted_message_bytes);
         
         Ok(EncryptedMessage {
@@ -718,34 +781,45 @@ impl Wallet {
             .map_err(|_| KnishIOError::DecryptionKey)?;
             
         // Perform ML-KEM768 decapsulation to recover shared secret
-        use libcrux_ml_kem::mlkem768;
+        if privkey.len() != self.mlkem_parameter_set.sk_bytes() || ciphertext_bytes.len() != self.mlkem_parameter_set.ct_bytes() {
+            return Err(KnishIOError::DecryptionKey);
+        }
+
         use libcrux_ml_kem::{MlKemCiphertext, MlKemPrivateKey};
-        
-        // Convert secret key to proper libcrux type
-        if privkey.len() != 2400 {
-            return Err(KnishIOError::DecryptionKey);
-        }
-        let mut secret_key_array = [0u8; 2400];
-        secret_key_array.copy_from_slice(privkey);
-        let secret_key = MlKemPrivateKey::from(secret_key_array);
-        
-        // Convert ciphertext to proper libcrux type
-        if ciphertext_bytes.len() != 1088 {
-            return Err(KnishIOError::DecryptionKey);
-        }
-        let mut ciphertext_array = [0u8; 1088];
-        ciphertext_array.copy_from_slice(&ciphertext_bytes);
-        let ciphertext = MlKemCiphertext::from(ciphertext_array);
-        
-        let shared_secret = mlkem768::decapsulate(&secret_key, &ciphertext);
-        
+
+        let shared_secret_bytes = match self.mlkem_parameter_set {
+            MlKemParameterSet::MlKem1024 => {
+                use libcrux_ml_kem::mlkem1024;
+                let mut secret_key_array = [0u8; 3168];
+                secret_key_array.copy_from_slice(privkey);
+                let secret_key = MlKemPrivateKey::from(secret_key_array);
+
+                let mut ciphertext_array = [0u8; 1568];
+                ciphertext_array.copy_from_slice(&ciphertext_bytes);
+                let ciphertext = MlKemCiphertext::from(ciphertext_array);
+
+                mlkem1024::decapsulate(&secret_key, &ciphertext).as_slice().to_vec()
+            }
+            MlKemParameterSet::MlKem768 => {
+                use libcrux_ml_kem::mlkem768;
+                let mut secret_key_array = [0u8; 2400];
+                secret_key_array.copy_from_slice(privkey);
+                let secret_key = MlKemPrivateKey::from(secret_key_array);
+
+                let mut ciphertext_array = [0u8; 1088];
+                ciphertext_array.copy_from_slice(&ciphertext_bytes);
+                let ciphertext = MlKemCiphertext::from(ciphertext_array);
+
+                mlkem768::decapsulate(&secret_key, &ciphertext).as_slice().to_vec()
+            }
+        };
         // Deserialize encrypted message from base64
         let encrypted_message_bytes = base64::engine::general_purpose::STANDARD
             .decode(&encrypted_data.encrypted_message)
             .map_err(|_| KnishIOError::DecryptionKey)?;
             
         // Decrypt message using AES-GCM with shared secret
-        let decrypted_bytes = self.decrypt_with_shared_secret(&encrypted_message_bytes, shared_secret.as_slice()).await?;
+        let decrypted_bytes = self.decrypt_with_shared_secret(&encrypted_message_bytes, &shared_secret_bytes).await?;
         
         // Convert back to JSON
         let decrypted_string = String::from_utf8(decrypted_bytes)
@@ -876,6 +950,7 @@ impl Default for Wallet {
             token_units: Vec::new(),
             trade_rates: HashMap::new(),
             molecules: HashMap::new(),
+            mlkem_parameter_set: MlKemParameterSet::default(),
         }
     }
 }
@@ -890,6 +965,7 @@ mod tests {
             Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
             None,
             "TEST",
+            None,
             None,
             None,
         ).expect("Wallet creation should succeed with valid parameters");
@@ -907,6 +983,7 @@ mod tests {
             None,
             Some("test-bundle"),
             Some("TEST"),
+            None,
             None,
             None,
             None,
@@ -1008,11 +1085,11 @@ mod tests {
         // Same secret + token + position → same keypair every time
         let wallet1 = Wallet::create(
             Some("KNISHIO_TEST_SECRET_DO_NOT_USE_IN_PRODUCTION"),
-            None, "TEST", Some("fixed_position_for_testing"), None,
+            None, "TEST", Some("fixed_position_for_testing"), None, None,
         ).unwrap();
         let wallet2 = Wallet::create(
             Some("KNISHIO_TEST_SECRET_DO_NOT_USE_IN_PRODUCTION"),
-            None, "TEST", Some("fixed_position_for_testing"), None,
+            None, "TEST", Some("fixed_position_for_testing"), None, None,
         ).unwrap();
 
         assert!(wallet1.pubkey.is_some(), "ML-KEM pubkey should be generated");
@@ -1023,30 +1100,44 @@ mod tests {
 
     #[test]
     fn test_mlkem_key_sizes() {
-        let wallet = Wallet::create(
+        let wallet1024 = Wallet::create(
             Some("KNISHIO_TEST_SECRET_DO_NOT_USE_IN_PRODUCTION"),
-            None, "TEST", None, None,
+            None, "TEST", None, None, None,
         ).unwrap();
 
-        // ML-KEM768 spec: pubkey = 1184 bytes, privkey = 2400 bytes
+        // ML-KEM-1024 spec: pubkey = 1568 bytes, privkey = 3168 bytes
         let pubkey_bytes = base64::engine::general_purpose::STANDARD
-            .decode(wallet.pubkey.as_ref().unwrap())
+            .decode(wallet1024.pubkey.as_ref().unwrap())
             .unwrap();
-        let privkey_bytes = wallet.privkey.as_ref().unwrap();
+        let privkey_bytes = wallet1024.privkey.as_ref().unwrap();
 
-        assert_eq!(pubkey_bytes.len(), 1184, "ML-KEM768 pubkey should be 1184 bytes");
-        assert_eq!(privkey_bytes.len(), 2400, "ML-KEM768 privkey should be 2400 bytes");
+        assert_eq!(pubkey_bytes.len(), 1568, "ML-KEM-1024 pubkey should be 1568 bytes");
+        assert_eq!(privkey_bytes.len(), 3168, "ML-KEM-1024 privkey should be 3168 bytes");
+
+        // ML-KEM-768 step-back
+        let wallet768 = Wallet::create(
+            Some("KNISHIO_TEST_SECRET_DO_NOT_USE_IN_PRODUCTION"),
+            None, "TEST", None, None, Some(MlKemParameterSet::MlKem768),
+        ).unwrap();
+
+        let pubkey_bytes768 = base64::engine::general_purpose::STANDARD
+            .decode(wallet768.pubkey.as_ref().unwrap())
+            .unwrap();
+        let privkey_bytes768 = wallet768.privkey.as_ref().unwrap();
+
+        assert_eq!(pubkey_bytes768.len(), 1184, "ML-KEM-768 pubkey should be 1184 bytes");
+        assert_eq!(privkey_bytes768.len(), 2400, "ML-KEM-768 privkey should be 2400 bytes");
     }
 
     #[tokio::test]
     async fn test_mlkem_encrypt_decrypt_roundtrip() {
         let sender = Wallet::create(
             Some("sender_secret_for_testing_12345"),
-            None, "TEST", None, None,
+            None, "TEST", None, None, None,
         ).unwrap();
         let recipient = Wallet::create(
             Some("recipient_secret_for_testing_12345"),
-            None, "TEST", None, None,
+            None, "TEST", None, None, None,
         ).unwrap();
 
         let message = serde_json::json!({"hello": "quantum world", "value": 42});
@@ -1054,11 +1145,11 @@ mod tests {
 
         let encrypted = sender.encrypt_message(&message, recipient_pubkey).await.unwrap();
 
-        // Ciphertext should be 1088 bytes (base64 encoded)
+        // Ciphertext should be 1568 bytes (base64 encoded) for ML-KEM-1024 default
         let ciphertext_bytes = base64::engine::general_purpose::STANDARD
             .decode(&encrypted.cipher_text)
             .unwrap();
-        assert_eq!(ciphertext_bytes.len(), 1088, "ML-KEM768 ciphertext should be 1088 bytes");
+        assert_eq!(ciphertext_bytes.len(), 1568, "ML-KEM-1024 ciphertext should be 1568 bytes");
 
         // Decrypt with recipient's private key
         let decrypted = recipient.decrypt_message(&encrypted).await.unwrap();
@@ -1068,15 +1159,20 @@ mod tests {
     // PQ-transport hardening: a stale/non-PQ node advertises a ~48-byte `key`; encrypt_message must
     // return a clean error (not feed libcrux a malformed key). The Rust analogue of the cross-SDK guard.
     #[tokio::test]
-    async fn test_mlkem_encrypt_rejects_non_1184_key() {
+    async fn test_mlkem_encrypt_rejects_mismatched_key() {
         let sender = Wallet::create(
             Some("sender_secret_for_testing_12345"),
-            None, "TEST", None, None,
+            None, "TEST", None, None, None,
         ).unwrap();
         // 48 bytes base64 — the exact length a pre-PQ validator advertised in its auth `key`.
         let short_key = base64::engine::general_purpose::STANDARD.encode([0u8; 48]);
         let result = sender.encrypt_message(&serde_json::json!({"q": 1}), &short_key).await;
-        assert!(result.is_err(), "encrypt_message must reject a non-1184-byte ML-KEM key");
+        assert!(result.is_err(), "encrypt_message must reject non-1568 key on 1024 wallet");
+
+        // 768 key (1184 bytes) rejected by 1024 wallet
+        let key_768 = base64::engine::general_purpose::STANDARD.encode([0u8; 1184]);
+        let result768 = sender.encrypt_message(&serde_json::json!({"q": 1}), &key_768).await;
+        assert!(result768.is_err(), "1024 wallet must reject 768 key");
     }
 
     #[test]
@@ -1084,11 +1180,11 @@ mod tests {
         // Use valid hex secrets (generate_key treats secret as hex BigUint)
         let wallet1 = Wallet::create(
             Some("aaaa0000aaaa0000aaaa0000aaaa0000aaaa0000aaaa0000aaaa0000aaaa0000"),
-            None, "TEST", None, None,
+            None, "TEST", None, None, None,
         ).unwrap();
         let wallet2 = Wallet::create(
             Some("bbbb1111bbbb1111bbbb1111bbbb1111bbbb1111bbbb1111bbbb1111bbbb1111"),
-            None, "TEST", None, None,
+            None, "TEST", None, None, None,
         ).unwrap();
 
         assert_ne!(wallet1.pubkey, wallet2.pubkey, "Different secrets should produce different ML-KEM pubkeys");
@@ -1100,7 +1196,7 @@ mod tests {
         // Shadow wallets (no secret) should NOT have ML-KEM keys
         let wallet = Wallet::new(
             None, Some("test-bundle"), Some("TEST"),
-            None, None, None, None,
+            None, None, None, None, None,
         ).unwrap();
 
         assert!(wallet.pubkey.is_none(), "Shadow wallet should not have ML-KEM pubkey");

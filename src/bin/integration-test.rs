@@ -197,7 +197,7 @@ async fn test_rust_authentication_token(_client: &reqwest::Client, url: &str, te
     log_section("2. Rust Authentication Token (Tokio)");
     
     // Create Rust auth wallet
-    let _auth_wallet = Wallet::create(Some(test_secret), None, "AUTH", None, None)?;
+    let _auth_wallet = Wallet::create(Some(test_secret), None, "AUTH", None, None, None)?;
     
     log_test("Rust auth wallet creation", true, None, None);
     
@@ -253,7 +253,8 @@ async fn test_rust_molecular_metadata_creation(client: &reqwest::Client, url: &s
         Some(test_bundle), 
         "USER",
         Some("0123456789abcdeffedcba9876543210fedcba9876543210fedcba9876543210"),
-        None
+        None,
+        None,
     )?;
     
     log_test("Rust source wallet creation", true, None, None);

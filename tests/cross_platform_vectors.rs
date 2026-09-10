@@ -34,6 +34,8 @@ struct Vectors {
     molecular_hash: MolecularHashSection,
     wots_signature: WotsSignatureSection,
     mlkem768: Mlkem768Section,
+    #[serde(default)]
+    mlkem1024: Option<Mlkem768Section>,
     edge_cases: EdgeCasesSection,
 }
 
@@ -305,6 +307,7 @@ fn test_wallet_address_cross_platform() {
             &test.token,
             Some(&test.position),
             None,
+            None,
         ).unwrap_or_else(|e| panic!(
             "Wallet creation failed for vector '{}': {:?}", test.name, e
         ));
@@ -559,6 +562,7 @@ fn test_mlkem768_keygen_cross_platform() {
         &v.token,
         Some(&v.position),
         None,
+        Some(knishio_client::MlKemParameterSet::MlKem768),
     ).unwrap_or_else(|e| panic!("ML-KEM768 keygen wallet creation failed: {:?}", e));
 
     // libcrux-ml-kem keygen must byte-match the @noble-derived frozen pubkey.
@@ -580,6 +584,7 @@ async fn test_mlkem768_decrypt_cross_platform() {
         &v.token,
         Some(&v.position),
         None,
+        Some(knishio_client::MlKemParameterSet::MlKem768),
     ).unwrap_or_else(|e| panic!("ML-KEM768 decrypt wallet creation failed: {:?}", e));
 
     let em = EncryptedMessage {
@@ -595,5 +600,56 @@ async fn test_mlkem768_decrypt_cross_platform() {
         plaintext.as_str(),
         Some(v.expected_plaintext.as_str()),
         "ML-KEM768 decrypt plaintext mismatch (frozen @noble sample via libcrux)"
+    );
+}
+#[test]
+fn test_mlkem1024_keygen_cross_platform() {
+    let vectors = load_vectors();
+    let v = vectors.vectors.mlkem1024.as_ref().expect("mlkem1024 section missing");
+    let keygen = &v.keygen;
+
+    let wallet = Wallet::create(
+        Some(&keygen.secret),
+        None,
+        &keygen.token,
+        Some(&keygen.position),
+        None,
+        None,
+    ).unwrap_or_else(|e| panic!("ML-KEM1024 keygen wallet creation failed: {:?}", e));
+
+    assert_eq!(
+        wallet.pubkey.as_deref(),
+        Some(keygen.expected_pubkey.as_str()),
+        "ML-KEM1024 keygen pubkey mismatch (libcrux vs @noble frozen vector)"
+    );
+}
+
+#[tokio::test]
+async fn test_mlkem1024_decrypt_cross_platform() {
+    let vectors = load_vectors();
+    let v = vectors.vectors.mlkem1024.as_ref().expect("mlkem1024 section missing");
+    let decrypt = &v.decrypt;
+
+    let wallet = Wallet::create(
+        Some(&decrypt.secret),
+        None,
+        &decrypt.token,
+        Some(&decrypt.position),
+        None,
+        None,
+    ).unwrap_or_else(|e| panic!("ML-KEM1024 decrypt wallet creation failed: {:?}", e));
+
+    let em = EncryptedMessage {
+        cipher_text: decrypt.cipher_text.clone(),
+        encrypted_message: decrypt.encrypted_message.clone(),
+    };
+
+    let plaintext = wallet.decrypt_message(&em).await
+        .unwrap_or_else(|e| panic!("ML-KEM1024 decrypt failed: {:?}", e));
+
+    assert_eq!(
+        plaintext.as_str(),
+        Some(decrypt.expected_plaintext.as_str()),
+        "ML-KEM1024 decrypt plaintext mismatch (frozen @noble sample via libcrux)"
     );
 }

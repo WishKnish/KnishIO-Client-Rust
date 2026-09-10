@@ -157,6 +157,7 @@ impl Molecule {
                     &source.token,
                     source.batch_id.as_deref(),
                     source.characters.as_deref(),
+                    Some(source.mlkem_parameter_set),
                 ).ok()
             } else {
                 None
@@ -314,6 +315,7 @@ impl Molecule {
                     "USER",
                     None,
                     None,
+                    self.source_wallet.as_ref().map(|w| w.mlkem_parameter_set),
                 ).ok();
                 if user_wallet.is_some() {
                     self.remainder_wallet = user_wallet;
@@ -1141,6 +1143,7 @@ impl Molecule {
                     "USER",
                     None,
                     None,
+                    Some(source_wallet.mlkem_parameter_set),
                 )?;
                 
                 let final_meta = meta;
@@ -1197,6 +1200,7 @@ impl Molecule {
                     &source_token,
                     source_batch_id.as_deref(),
                     None,
+                    self.source_wallet.as_ref().map(|w| w.mlkem_parameter_set),
                 )?;
 
                 // Remove tokens from source (debit the FULL balance for UTXO
@@ -1776,6 +1780,7 @@ fn reconstruct_wallet_from_json(wallet_data: &serde_json::Value) -> crate::error
             token,
             position.as_deref(), 
             characters.as_deref(),
+            None,
         )?
     } else {
         // Special case: PHP/C SDKs may not include bundle in sourceWallet
@@ -1788,6 +1793,7 @@ fn reconstruct_wallet_from_json(wallet_data: &serde_json::Value) -> crate::error
             position.as_deref(),
             batch_id.as_deref(),
             characters.as_deref(),
+            None,
         )?
     };
     
@@ -2052,7 +2058,8 @@ mod tests {
             None, 
             "TEST", 
             None, 
-            None
+            None,
+            None,
         ).unwrap();
         
         let mut source_wallet = source_wallet;
@@ -2063,7 +2070,8 @@ mod tests {
             None, 
             "TEST", 
             None, 
-            None
+            None,
+            None,
         ).unwrap();
         
         let remainder_wallet = Wallet::create(
@@ -2071,7 +2079,8 @@ mod tests {
             None, 
             "TEST", 
             None, 
-            None
+            None,
+            None,
         ).unwrap();
         
         let mut molecule = Molecule::with_params(
@@ -2097,7 +2106,7 @@ mod tests {
         use crate::token_unit::TokenUnit;
 
         // Source holds 3 units (u1,u2,u3), balance 3; transfer u1->R1, u2->R2, keep u3.
-        let mut source_wallet = Wallet::create(Some("mr-secret"), None, "STK", None, None).unwrap();
+        let mut source_wallet = Wallet::create(Some("mr-secret"), None, "STK", None, None, None).unwrap();
         source_wallet.set_balance_i128(3);
         source_wallet.batch_id = Some("b-mr".to_string());
         source_wallet.token_units = vec![
@@ -2107,10 +2116,10 @@ mod tests {
         ];
 
         let mut recipient_wallets = vec![
-            Wallet::create(Some("mr-r1-secret"), None, "STK", None, None).unwrap(),
-            Wallet::create(Some("mr-r2-secret"), None, "STK", None, None).unwrap(),
+            Wallet::create(Some("mr-r1-secret"), None, "STK", None, None, None).unwrap(),
+            Wallet::create(Some("mr-r2-secret"), None, "STK", None, None, None).unwrap(),
         ];
-        let mut remainder_wallet = Wallet::create(Some("mr-secret"), None, "STK", None, None).unwrap();
+        let mut remainder_wallet = Wallet::create(Some("mr-secret"), None, "STK", None, None, None).unwrap();
 
         // N-way split: u1->R1, u2->R2, keep u3
         let recipient_unit_lists = vec![vec!["u1".to_string()], vec!["u2".to_string()]];
@@ -2174,7 +2183,8 @@ mod tests {
             None, 
             "TEST", 
             None, 
-            None
+            None,
+            None,
         ).unwrap();
         source_wallet.balance = "10".to_string();
         
@@ -2183,7 +2193,8 @@ mod tests {
             None, 
             "TEST", 
             None, 
-            None
+            None,
+            None,
         ).unwrap();
         
         let mut molecule = Molecule::with_params(
@@ -2283,12 +2294,12 @@ mod tests {
     fn test_add_continuid_atom_includes_previous_position() {
         let source_pos = "a".repeat(64);
         let mut source_wallet = Wallet::create(
-            Some("test-secret"), None, "USER", Some(&source_pos), None,
+            Some("test-secret"), None, "USER", Some(&source_pos), None, None,
         ).unwrap();
         source_wallet.position = Some(source_pos.clone());
 
         let remainder_wallet = Wallet::create(
-            Some("test-secret"), None, "USER", None, None,
+            Some("test-secret"), None, "USER", None, None, None,
         ).unwrap();
 
         let mut molecule = Molecule::with_params(
@@ -2318,7 +2329,7 @@ mod tests {
     #[test]
     fn test_add_continuid_atom_without_source_wallet() {
         let remainder_wallet = Wallet::create(
-            Some("test-secret"), None, "USER", None, None,
+            Some("test-secret"), None, "USER", None, None, None,
         ).unwrap();
 
         let mut molecule = Molecule::with_params(
@@ -2345,7 +2356,7 @@ mod tests {
     #[test]
     fn test_add_continuid_atom_includes_pubkey_when_present() {
         let mut remainder_wallet = Wallet::create(
-            Some("test-secret"), None, "USER", None, None,
+            Some("test-secret"), None, "USER", None, None, None,
         ).unwrap();
         remainder_wallet.pubkey = Some("test-pubkey-hex".to_string());
 
@@ -2381,6 +2392,7 @@ mod tests {
             Some(&"b".repeat(64)),                   // position (valid 64-hex)
             None,                                    // batch_id
             None,                                    // characters
+            None,
         ).unwrap();
         assert!(remainder_wallet.pubkey.is_none(), "precondition: no pubkey on shadow wallet");
 
@@ -2416,7 +2428,7 @@ mod tests {
         // Mirror request_profile_auth_token's AUTH source wallet (Wallet::new generates a position,
         // derives the address, and initializes ML-KEM → pubkey).
         let auth_source = Wallet::new(
-            Some(secret), None, Some("AUTH"), None, None, None, None,
+            Some(secret), None, Some("AUTH"), None, None, None, None, None,
         ).unwrap();
         let source_pos = auth_source.position.clone().expect("AUTH source must have a position");
 

@@ -196,7 +196,7 @@ fn test_buffer_deposit_conservation_vectors() {
     let position = "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b";
 
     for test in &vectors.vectors.buffer_deposit_conservation.tests {
-        let mut source = Wallet::create(Some(secret), None, "BUFTOK", Some(position), None)
+        let mut source = Wallet::create(Some(secret), None, "BUFTOK", Some(position), None, None)
             .expect("create buffer source wallet");
         source.balance = test.source_balance.to_string();
 
@@ -262,7 +262,7 @@ fn test_buffer_withdraw_conservation_vectors() {
     let position = "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b";
 
     for test in &vectors.vectors.buffer_withdraw_conservation.tests {
-        let mut source = Wallet::create(Some(secret), None, "BUFTOK", Some(position), None)
+        let mut source = Wallet::create(Some(secret), None, "BUFTOK", Some(position), None, None)
             .expect("create buffer source wallet");
         source.balance = test.source_balance.to_string();
 

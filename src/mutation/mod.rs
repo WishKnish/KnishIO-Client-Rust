@@ -383,12 +383,14 @@ mod tests {
             "TEST",
             None,
             None,
+            None,
         ).unwrap();
         
         let recipient_wallet = Wallet::create(
             Some("recipient-secret"),
             None,
             "TEST",
+            None,
             None,
             None,
         ).unwrap();

@@ -81,7 +81,8 @@ async fn example_create_wallet(
         None,
         "TEST",
         None,
-        None
+        None,
+        None,
     )?;
 
     // Create a molecule for the wallet creation
@@ -130,7 +131,8 @@ async fn example_create_token(
         None,
         "TEST",
         None,
-        None
+        None,
+        None,
     )?;
 
     // Prepare metadata
@@ -192,7 +194,8 @@ async fn example_transfer_tokens(
         None,
         "TEST",
         None,
-        None
+        None,
+        None,
     )?;
 
     // Create recipient wallet
@@ -201,7 +204,8 @@ async fn example_transfer_tokens(
         None,
         "TEST",
         None,
-        None
+        None,
+        None,
     )?;
 
     // Create parameters
@@ -332,7 +336,8 @@ async fn example_claim_shadow_wallet(
         None,
         "TEST",
         None,
-        None
+        None,
+        None,
     )?;
 
     // Fill the molecule with claim data (requires both params and wallet)
@@ -479,7 +484,8 @@ async fn example_helper_functions() -> Result<(), Box<dyn std::error::Error>> {
         None,
         "TEST",
         None,
-        None
+        None,
+        None,
     )?;
 
     let recipient_wallet = Wallet::create(
@@ -487,7 +493,8 @@ async fn example_helper_functions() -> Result<(), Box<dyn std::error::Error>> {
         None,
         "TEST",
         None,
-        None
+        None,
+        None,
     )?;
 
     // Use helper to create value transfer

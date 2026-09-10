@@ -18,7 +18,7 @@
 //! use knishio_client::{Wallet, ValueAtomParams};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None).unwrap();
+//! let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None, None).unwrap();
 //!
 //! let molecule = TypeSafeMoleculeBuilder::new("test-secret")
 //!     .with_source_wallet(wallet.clone())
@@ -946,6 +946,7 @@ mod tests {
             "TEST",
             None,
             None,
+            None,
         ).unwrap();
 
         // Build molecule using type-safe builder
@@ -976,8 +977,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_type_safe_builder_with_remainder() {
-        let source_wallet = Wallet::create(Some("source-secret"), None, "TEST", None, None).unwrap();
-        let remainder_wallet = Wallet::create(Some("remainder-secret"), None, "TEST", None, None).unwrap();
+        let source_wallet = Wallet::create(Some("source-secret"), None, "TEST", None, None, None).unwrap();
+        let remainder_wallet = Wallet::create(Some("remainder-secret"), None, "TEST", None, None, None).unwrap();
 
         let molecule = TypeSafeMoleculeBuilder::new("test-secret")
             .with_source_wallet(source_wallet.clone())
@@ -1007,7 +1008,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_type_safe_builder_multi_isotope() {
-        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None).unwrap();
+        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None, None).unwrap();
 
         let molecule = TypeSafeMoleculeBuilder::new("test-secret")
             .with_source_wallet(wallet.clone())
@@ -1044,7 +1045,7 @@ mod tests {
 
     #[test]
     fn test_builder_validation() {
-        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None).unwrap();
+        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None, None).unwrap();
 
         let builder = TypeSafeMoleculeBuilder::new("test-secret")
             .with_source_wallet(wallet.clone())
@@ -1070,7 +1071,7 @@ mod tests {
 
     #[test]
     fn test_empty_molecule_validation() {
-        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None).unwrap();
+        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None, None).unwrap();
 
         // Test that attempting to ready_to_sign without atoms fails
         // This validates the state machine enforces atoms are present
@@ -1092,7 +1093,7 @@ mod tests {
 
     #[test]
     fn test_buffer_deposit_builder() {
-        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None).unwrap();
+        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None, None).unwrap();
 
         let result = TypeSafeMoleculeBuilder::new("test-secret")
             .with_source_wallet(wallet.clone())
@@ -1114,7 +1115,7 @@ mod tests {
 
     #[test]
     fn test_buffer_withdraw_builder() {
-        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None).unwrap();
+        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None, None).unwrap();
 
         let result = TypeSafeMoleculeBuilder::new("test-secret")
             .with_source_wallet(wallet.clone())
@@ -1136,7 +1137,7 @@ mod tests {
 
     #[test]
     fn test_fusion_builder() {
-        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None).unwrap();
+        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None, None).unwrap();
 
         let result = TypeSafeMoleculeBuilder::new("test-secret")
             .with_source_wallet(wallet.clone())
@@ -1158,7 +1159,7 @@ mod tests {
 
     #[test]
     fn test_buffer_and_fusion_multi_atom() {
-        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None).unwrap();
+        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None, None).unwrap();
 
         let result = TypeSafeMoleculeBuilder::new("test-secret")
             .with_source_wallet(wallet.clone())
@@ -1202,7 +1203,7 @@ mod tests {
         // 4. Then call ready_to_sign() (ReadyToSign state)
 
         // Instead, test the happy path that DOES compile
-        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None).unwrap();
+        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None, None).unwrap();
         let result = TypeSafeMoleculeBuilder::new("test-secret")
             .with_source_wallet(wallet.clone())
             .add_value_atom(ValueAtomParams {
@@ -1219,7 +1220,7 @@ mod tests {
 
     #[test]
     fn test_builder_with_parent_hashes() {
-        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None).unwrap();
+        let wallet = Wallet::create(Some("test-secret"), None, "TEST", None, None, None).unwrap();
         let parent_hashes = vec!["parent_hash_1".to_string(), "parent_hash_2".to_string()];
 
         let builder = TypeSafeMoleculeBuilder::new("test-secret")
@@ -1250,6 +1251,7 @@ mod tests {
             Some("offline-secret"),
             None,
             "MYTOKEN",
+            None,
             None,
             None,
         ).unwrap();
@@ -1289,6 +1291,7 @@ mod tests {
             Some("roundtrip-secret"),
             None,
             "TEST",
+            None,
             None,
             None,
         ).unwrap();
@@ -1333,6 +1336,7 @@ mod tests {
             "TICKETS",
             None,
             None,
+            None,
         ).unwrap();
         source_wallet.set_balance_i128(1000);
         source_wallet.batch_id = Some("batch-001".to_string());
@@ -1344,6 +1348,7 @@ mod tests {
             "TICKETS",
             Some("W2"),
             None,
+            None,
         ).unwrap();
 
         // Create recipient wallet
@@ -1351,6 +1356,7 @@ mod tests {
             Some("recipient-secret"),
             None,
             "TICKETS",
+            None,
             None,
             None,
         ).unwrap();
@@ -1407,7 +1413,7 @@ mod tests {
 
         // Source holds 2 units (u1, u2), balance 2; transfer u1, keep u2.
         let mut source_wallet =
-            Wallet::create(Some("stk-units-secret"), None, "NFT", None, None).unwrap();
+            Wallet::create(Some("stk-units-secret"), None, "NFT", None, None, None).unwrap();
         source_wallet.set_balance_i128(2);
         source_wallet.batch_id = Some("b-units".to_string());
         source_wallet.token_units = vec![
@@ -1416,9 +1422,9 @@ mod tests {
         ];
 
         let remainder_wallet =
-            Wallet::create(Some("stk-units-secret"), None, "NFT", Some("W2"), None).unwrap();
+            Wallet::create(Some("stk-units-secret"), None, "NFT", Some("W2"), None, None).unwrap();
         let recipient_wallet =
-            Wallet::create(Some("recipient-secret"), None, "NFT", None, None).unwrap();
+            Wallet::create(Some("recipient-secret"), None, "NFT", None, None, None).unwrap();
 
         let builder = TypeSafeMoleculeBuilder::new("stk-units-secret")
             .with_source_wallet(source_wallet.clone())
@@ -1467,6 +1473,7 @@ mod tests {
             "COINS",
             None,
             None,
+            None,
         ).unwrap();
         source_wallet.set_balance_i128(500);
 
@@ -1474,6 +1481,7 @@ mod tests {
             Some("recipient-exact"),
             None,
             "COINS",
+            None,
             None,
             None,
         ).unwrap();
@@ -1503,6 +1511,7 @@ mod tests {
             Some("poor-secret"),
             None,
             "RARE",
+            None,
             None,
             None,
         ).unwrap();
@@ -1535,6 +1544,7 @@ mod tests {
             "VCHECK",
             None,
             None,
+            None,
         ).unwrap();
         source_wallet.set_balance_i128(500);
         source_wallet.batch_id = Some("batch-v".to_string());
@@ -1545,12 +1555,14 @@ mod tests {
             "VCHECK",
             Some("W2"),
             None,
+            None,
         ).unwrap();
 
         let recipient = Wallet::create(
             Some("v-recipient"),
             None,
             "VCHECK",
+            None,
             None,
             None,
         ).unwrap();
@@ -1601,6 +1613,7 @@ mod tests {
             "NEWTOKEN",
             None,
             None,
+            None,
         ).unwrap();
 
         let signed = TypeSafeMoleculeBuilder::new("t-check-secret")
@@ -1644,6 +1657,7 @@ mod tests {
             "STKTEST",
             None,
             None,
+            None,
         ).unwrap();
         source_wallet.set_balance_i128(1000);
 
@@ -1653,12 +1667,14 @@ mod tests {
             "STKTEST",
             Some("W2"),
             None,
+            None,
         ).unwrap();
 
         let recipient = Wallet::create(
             Some("cons-recipient"),
             None,
             "STKTEST",
+            None,
             None,
             None,
         ).unwrap();

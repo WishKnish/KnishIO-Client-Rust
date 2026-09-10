@@ -145,6 +145,7 @@ async fn test_knishio_client_secret_storage_integration() {
         "USER",
         None,
         Some(&"0".repeat(64)),
+        None,
     ).unwrap();
 
     // create_molecule unwraps from storage, sets up remainder wallet, and sets molecule.bundle

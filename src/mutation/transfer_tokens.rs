@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn test_transfer_params() {
         let params = TransferTokensParams {
-            recipient_wallet: Wallet::new(Some("recipient-secret"), None, Some("TEST"), None, None, None, None).unwrap(),
+            recipient_wallet: Wallet::new(Some("recipient-secret"), None, Some("TEST"), None, None, None, None, None).unwrap(),
             amount: 50.0,
         };
         

@@ -185,6 +185,7 @@ mod tests {
             "TEST",
             None,
             None,
+            None,
         ).unwrap();
         
         let mut meta = HashMap::new();
@@ -208,6 +209,7 @@ mod tests {
             Some("recipient-secret"),
             None,
             "TEST",
+            None,
             None,
             None,
         ).unwrap();

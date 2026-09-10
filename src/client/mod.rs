@@ -121,6 +121,8 @@ pub struct KnishIOClient {
     
     /// Abort controllers for cancelling in-flight requests
     abort_controllers: Arc<Mutex<HashMap<String, bool>>>,
+    /// ML-KEM parameter set for quantum encryption
+    pub mlkem_parameter_set: crate::wallet::MlKemParameterSet,
 }
 
 impl KnishIOClient {
@@ -153,6 +155,7 @@ impl KnishIOClient {
             remainder_wallet: None,
             last_molecule_query: None,
             abort_controllers: Arc::new(Mutex::new(HashMap::new())),
+            mlkem_parameter_set: crate::wallet::MlKemParameterSet::default(),
         };
 
         client_instance.initialize(uri, cell_slug, socket, client, server_sdk_version, logging);
@@ -206,6 +209,15 @@ impl KnishIOClient {
         }
 
         self.server_sdk_version = server_sdk_version.unwrap_or(3);
+    }
+    /// Get the ML-KEM parameter set
+    pub fn mlkem_parameter_set(&self) -> crate::wallet::MlKemParameterSet {
+        self.mlkem_parameter_set
+    }
+
+    /// Set the ML-KEM parameter set
+    pub fn set_mlkem_parameter_set(&mut self, param_set: crate::wallet::MlKemParameterSet) {
+        self.mlkem_parameter_set = param_set;
     }
 
     /// Get the subscription manager for real-time subscriptions
@@ -653,6 +665,7 @@ impl KnishIOClient {
                 None,  // position will be auto-generated
                 None,  // batch_id
                 None,  // characters
+                Some(self.mlkem_parameter_set),
             )?
         };
 
@@ -745,6 +758,7 @@ impl KnishIOClient {
                 None,  // position will be generated
                 source_wallet.batch_id.as_deref(),
                 source_wallet.characters.as_deref(),
+                Some(self.mlkem_parameter_set),
             )?
         };
 
@@ -841,6 +855,7 @@ impl KnishIOClient {
                 None,
                 None,
                 None,
+                Some(self.mlkem_parameter_set),
             )?;
 
             // Create molecule with secret and source wallet
@@ -1524,6 +1539,7 @@ impl KnishIOClient {
             queried.position.as_deref(),
             None,
             queried.characters.as_deref(),
+            Some(self.mlkem_parameter_set),
         )?;
         source_wallet.balance = queried.balance.clone();
         // Preserve the queried stackable token units on the signing wallet. Wallet::new above
@@ -1805,6 +1821,7 @@ impl KnishIOClient {
             None,
             None,
             None,
+            Some(self.mlkem_parameter_set),
         )?;
 
         // Create mutation (matches JS lines 1021-1023)
@@ -1921,6 +1938,7 @@ impl KnishIOClient {
             None,                       // position (auto-generated)
             final_batch_id.as_deref(),  // batch_id
             None,                       // characters
+            Some(self.mlkem_parameter_set),
         )?;
 
         // Resolve the USER source wallet (ContinuID chain head) + a remainder, and set them on the
@@ -2019,6 +2037,7 @@ impl KnishIOClient {
             token,
             None,
             None,
+            Some(self.mlkem_parameter_set),
         )?;
 
         // Compute the batch ID for the recipient (matches JS lines 1678-1685)
@@ -2121,6 +2140,7 @@ impl KnishIOClient {
                 token,
                 None,
                 None,
+                Some(self.mlkem_parameter_set),
             )?;
             if let Some(ref bid) = recipient.batch_id {
                 recipient_wallet.batch_id = Some(bid.clone());
@@ -2242,6 +2262,7 @@ impl KnishIOClient {
                         token,
                         None,
                         None,
+                        Some(self.mlkem_parameter_set),
                     )?;
 
                     meta_map.insert("position".to_string(), Value::String(wallet.position.clone().unwrap_or_default()));
@@ -2525,6 +2546,7 @@ impl KnishIOClient {
             token_slug,
             None,
             None,
+            Some(self.mlkem_parameter_set),
         )?;
 
         // Set batch ID (matches JS line 1974)
@@ -2731,7 +2753,7 @@ impl KnishIOClient {
         // matches no shadow (matches JS Wallet.create({secret, token, batchId})).
         let secret = self.secret.as_deref().ok_or(KnishIOError::MissingSecret)?;
         let bundle = self.bundle.as_deref();
-        let mut wallet = Wallet::create(Some(secret), bundle, token, None, None)?;
+        let mut wallet = Wallet::create(Some(secret), bundle, token, None, None, Some(self.mlkem_parameter_set))?;
         wallet.batch_id = batch_id.map(|s| s.to_string());
 
         mutation.fill_molecule(params, &wallet)?;
@@ -3115,6 +3137,7 @@ impl KnishIOClient {
             None,
             None,
             None,
+            Some(self.mlkem_parameter_set),
         )?;
 
         // Create mutation
@@ -3209,6 +3232,7 @@ impl KnishIOClient {
             None,
             None,
             None,
+            Some(self.mlkem_parameter_set),
         )?;
 
         // Create molecule with secret and source wallet
@@ -3221,7 +3245,7 @@ impl KnishIOClient {
         // secret-fallback (which silently swallows Wallet::create errors with .ok()). The I-atom
         // registers the bundle's ContinuID relay head on-ledger so subsequent molecules advance the
         // chain instead of falling to fresh genesis. Carries the AUTH source's characters for parity.
-        let remainder = Wallet::create(Some(secret), None, "USER", None, wallet.characters.as_deref())?;
+        let remainder = Wallet::create(Some(secret), None, "USER", None, wallet.characters.as_deref(), Some(self.mlkem_parameter_set))?;
         molecule.remainder_wallet = Some(remainder);
 
         // Create mutation
@@ -3474,6 +3498,7 @@ impl Clone for KnishIOClient {
             last_molecule_query: self.last_molecule_query.clone(),
             secret_storage: self.secret_storage.clone(),
             abort_controllers: Arc::new(Mutex::new(HashMap::new())), // Create new Arc for clone
+            mlkem_parameter_set: self.mlkem_parameter_set,
         }
     }
 }
