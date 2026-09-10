@@ -14,7 +14,7 @@ The SDK can be installed via Cargo:
 ```bash
 # Add to Cargo.toml
 [dependencies]
-knishio-client = "0.9.5"
+knishio-client = "1.0.0"
 
 # Or install from the command line
 cargo add knishio-client
@@ -346,7 +346,8 @@ This method involves individually building Atoms and Molecules, triggering the s
        None,              // bundle (optional)
        "USER",            // token
        None,              // position (optional)
-       None               // characters (optional)
+       None,              // characters (optional)
+       None,              // mlkem_parameter_set (optional, defaults to ML-KEM-1024)
    )?;
    ```
 

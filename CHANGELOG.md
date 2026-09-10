@@ -16,7 +16,36 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
-## [0.10.0] — 2026-09-10
+## [1.0.0] — 2026-09-10
+
+### Added
+
+- **A wallet configured at ML-KEM-1024 now decrypts records addressed to its own ML-KEM-768
+  identity**, and vice versa. The 64-byte ML-KEM seed is derived from the Knish.IO wallet key
+  and takes no parameter-set input, so `Wallet::decrypt_message` dispatches on the ciphertext's
+  decoded length and derives the matching identity on demand. Reading records a pre-1.0 client
+  wrote needs no configuration change. The derived private key is zeroized and dropped inside
+  the call — it is never stored on the wallet — and encapsulation and the advertised public key
+  are unchanged and remain single-set: inbound is permissive, outbound stays strict.
+- `Wallet::hash_share` and `Wallet::decrypt_my_message_ml`: the post-quantum `CipherHash` map
+  key (`Base64(SHAKE256(pubkey, 8 bytes))`) and the map-addressed inbound path, matching the
+  Rust validator's `hash_share` and the other SDKs' `hashShare`/`decryptMyMessageML`. The
+  lookup tries the configured identity's share first and then the other parameter set's, so an
+  envelope a pre-1.0 sender addressed to `hashShare(our_768_pubkey)` is still found. Returns the
+  raw decrypted text rather than a parsed value.
+- `Wallet::mlkem_decrypt_to_string` — ML-KEM decapsulation plus AES-256-GCM decryption to the
+  raw plaintext string, for callers that need the response text rather than parsed JSON.
+- `Wallet::mlkem_parameter_set_from_pubkey` — the parameter set implied by a serialized public
+  key's raw byte length (1568 → ML-KEM-1024, 1184 → ML-KEM-768).
+- **Backwards-compatibility tests** (`tests/cross_platform_vectors.rs`): a build at the default
+  parameter set decrypts the frozen ML-KEM-768 envelope from
+  `cross-platform-test-vectors.json`, finds a 768-addressed `CipherHash` envelope, still rejects
+  a ciphertext matching neither set, and validates a frozen pre-1.0 ML-KEM-768 auth molecule —
+  both its molecular hash and, through `Molecule::check`, its WOTS+ signature.
+- **Cross-SDK envelope regression tests** (`tests/secret_storage.rs`): a frozen envelope produced
+  by the TypeScript SDK 0.9.7 is decrypted here, a frozen 0.9.5 snake_case envelope proves the
+  back-compat aliases, and the emitted key set is asserted against the peer-SDK contract. The
+  first two fail against 0.9.5's serialization.
 
 ### Changed
 
@@ -25,9 +54,8 @@ detail, the entry says so instead of guessing.
 - **Breaking API change:** `Wallet::new` and `Wallet::create` now accept an optional
   `mlkem_parameter_set: Option<MlKemParameterSet>`.
 - Client and molecule operations now preserve the configured ML-KEM parameter set.
-
-### Changed
-
+- Encapsulation is strict: `Wallet::encrypt_message` rejects a recipient public key whose length
+  does not match the wallet's own parameter set rather than silently downgrading.
 - **MSRV raised 1.75 → 1.89**, required by the RustCrypto 2026 line (`aes` 0.9.3). CI builds
   on rolling stable.
 - **RustCrypto 2026 line**: `sha3` 0.10 → `shake` 0.1 (`sha3` 0.12 moved `Shake256` into its
@@ -41,6 +69,16 @@ detail, the entry says so instead of guessing.
 
 ### Fixed
 
+- **A session snapshot now records its ML-KEM parameter set, and `AuthToken::restore` honours
+  it.** `WalletSnapshot` gained `mlkem_parameter_set: Option<MlKemParameterSet>`, and `restore`
+  resolves the set in three tiers: the snapshot's explicit value, else the set implied by the
+  stored `pubkey`'s length, else ML-KEM-768. A session persisted by an 0.9.x build carries
+  neither, and previously restored at the constructor default — which is now ML-KEM-1024 — so
+  the restored wallet advertised a public key the validator never recorded for that token and
+  outbound encryption failed against the stored 1184-byte validator key. The field is an
+  `Option` so that an absent parameter set stays distinguishable from an explicit one; the
+  fallback is deliberately ML-KEM-768 rather than the default, because a snapshot with neither
+  marker can only have come from a 768-only build.
 - **Cross-SDK envelope interoperability** (`src/storage/mod.rs`): `SecretStorageMetadata` and
   `EncryptedSecretPayload` now serialize their metadata keys as camelCase
   (`bundleHash`, `createdAt`, `hardwareBacked`, `providerType`), matching the TypeScript,
@@ -54,12 +92,17 @@ detail, the entry says so instead of guessing.
   crypto core and of molecular output (its self-test cross-validated 7/7 peers), but false of
   the envelope's JSON framing, which no shared vector covered at the time.
 
-### Added
+### Notes
 
-- **Cross-SDK envelope regression tests** (`tests/secret_storage.rs`): a frozen envelope produced
-  by the TypeScript SDK 0.9.7 is decrypted here, a frozen 0.9.5 snake_case envelope proves the
-  back-compat aliases, and the emitted key set is asserted against the peer-SDK contract. The
-  first two fail against 0.9.5's serialization.
+- `0.10.0` was staged in `Cargo.toml` and in this changelog but was never tagged or published to
+  crates.io; its entry became this one rather than being kept for a version that never shipped.
+  The ML-KEM-1024 cutover is a breaking API change, so it takes the 1.0.0 line.
+- Nothing on the wire changed and no algorithm identifier was added. The parameter set is
+  recoverable from FIPS 203's disjoint key and ciphertext lengths, and molecular hashing treats
+  `walletPubkey` as an opaque meta string, so no molecular hash changed and no migration is
+  required.
+- This SDK has no `CipherHash` request transport, so `decrypt_my_message_ml` is the inbound half
+  of that contract only; `Wallet::encrypt_message` remains the single outbound entry point.
 
 ## [0.9.5] — 2026-09-04
 
@@ -244,7 +287,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/0.9.5...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.0.0...HEAD
+[1.0.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.0.0
 [0.9.5]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/0.9.5
 [0.9.4]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/0.9.4
 [0.9.3]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/0.9.3

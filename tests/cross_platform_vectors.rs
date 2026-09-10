@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 // Import the Rust SDK's public API
+use base64::Engine as _;
 use knishio_client::{shake256, generate_bundle_hash, Wallet, Atom};
 use knishio_client::wallet::EncryptedMessage;
 use knishio_client::types::{Isotope, MetaItem};
@@ -36,6 +37,8 @@ struct Vectors {
     mlkem768: Mlkem768Section,
     #[serde(default)]
     mlkem1024: Option<Mlkem768Section>,
+    #[serde(rename = "legacyMlkem768AuthMolecule", default)]
+    legacy_mlkem768_auth_molecule: Option<LegacyMlkem768AuthMolecule>,
     edge_cases: EdgeCasesSection,
 }
 
@@ -229,6 +232,20 @@ struct Mlkem768Decrypt {
     cipher_text: String,
     encrypted_message: String,
     expected_plaintext: String,
+}
+
+// ── Frozen pre-bump ML-KEM-768 auth molecule ────────────────────────────
+
+// A signed U+I auth molecule whose U-atom `walletPubkey` meta is a 1184-byte ML-KEM-768 key —
+// the shape an 0.9.x client produced. Every SDK must validate it from a build whose default
+// parameter set is ML-KEM-1024.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyMlkem768AuthMolecule {
+    expected_molecular_hash: String,
+    expected_wallet_pubkey_bytes: usize,
+    atoms: Vec<MolecularHashAtom>,
+    molecule: serde_json::Value,
 }
 
 // ── Load vectors at compile time ────────────────────────────────────────
@@ -652,4 +669,181 @@ async fn test_mlkem1024_decrypt_cross_platform() {
         Some(decrypt.expected_plaintext.as_str()),
         "ML-KEM1024 decrypt plaintext mismatch (frozen @noble sample via libcrux)"
     );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Backwards compatibility: an ML-KEM-1024 default build reads pre-bump 768 records
+// ════════════════════════════════════════════════════════════════════════
+
+/// Build the wallet from `vectors.mlkem768.decrypt` at an explicit parameter set.
+fn legacy_decrypt_wallet(v: &Mlkem768Decrypt, set: Option<knishio_client::MlKemParameterSet>) -> Wallet {
+    Wallet::create(Some(&v.secret), None, &v.token, Some(&v.position), None, set)
+        .unwrap_or_else(|e| panic!("wallet creation failed: {:?}", e))
+}
+
+fn decoded_len(b64: &str) -> usize {
+    base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .unwrap_or_else(|e| panic!("invalid base64: {:?}", e))
+        .len()
+}
+
+/// (a) A wallet at the DEFAULT parameter set (ML-KEM-1024) decrypts the frozen ML-KEM-768
+/// envelope directly — no second wallet, no explicit step-back — and (b) still advertises its
+/// own 1568-byte ML-KEM-1024 public key, because dual-identity decryption must not move what
+/// the wallet advertises into molecule meta and auth.
+#[tokio::test]
+async fn test_default_1024_wallet_decrypts_frozen_768_envelope() {
+    let vectors = load_vectors();
+    let v = &vectors.vectors.mlkem768.decrypt;
+
+    let wallet = legacy_decrypt_wallet(v, None);
+
+    // (b) the advertised key is still ML-KEM-1024
+    assert_eq!(
+        decoded_len(wallet.pubkey.as_deref().expect("default wallet pubkey")),
+        1568,
+        "a default wallet must still advertise an ML-KEM-1024 public key"
+    );
+
+    let em = EncryptedMessage {
+        cipher_text: v.cipher_text.clone(),
+        encrypted_message: v.encrypted_message.clone(),
+    };
+    assert_eq!(decoded_len(&em.cipher_text), 1088, "frozen envelope must be a 768 ciphertext");
+
+    // (a) permissive inbound: the 768 identity is derived on demand from the same wallet seed
+    let plaintext = wallet.decrypt_message(&em).await
+        .unwrap_or_else(|e| panic!("default-1024 wallet failed to decrypt the frozen 768 envelope: {:?}", e));
+
+    assert_eq!(plaintext.as_str(), Some(v.expected_plaintext.as_str()));
+}
+
+/// (d) A ciphertext matching neither parameter set still fails on the existing observable —
+/// this SDK returns `Err(KnishIOError::DecryptionKey)`.
+#[tokio::test]
+async fn test_default_1024_wallet_rejects_unknown_ciphertext_length() {
+    let vectors = load_vectors();
+    let v = &vectors.vectors.mlkem768.decrypt;
+
+    let wallet = legacy_decrypt_wallet(v, None);
+    let em = EncryptedMessage {
+        cipher_text: base64::engine::general_purpose::STANDARD.encode([0u8; 64]),
+        encrypted_message: v.encrypted_message.clone(),
+    };
+
+    assert!(
+        wallet.decrypt_message(&em).await.is_err(),
+        "a 64-byte ciphertext matches neither parameter set and must still fail"
+    );
+}
+
+/// (e) The map-addressed `CipherHash` path finds an envelope a pre-bump sender addressed to
+/// `hashShare(our_768_pubkey)`. Without the second hash-share lookup the wallet returns before
+/// any decryption is attempted, so (a)'s length dispatch is unreachable on this path.
+#[tokio::test]
+async fn test_default_1024_wallet_finds_768_addressed_cipher_hash_envelope() {
+    let vectors = load_vectors();
+    let v = &vectors.vectors.mlkem768.decrypt;
+
+    let wallet_768 = legacy_decrypt_wallet(v, Some(knishio_client::MlKemParameterSet::MlKem768));
+    let pubkey_768 = wallet_768.pubkey.as_deref().expect("768 wallet pubkey");
+    assert_eq!(decoded_len(pubkey_768), 1184);
+
+    let mut map: HashMap<String, EncryptedMessage> = HashMap::new();
+    map.insert(
+        Wallet::hash_share(pubkey_768),
+        EncryptedMessage {
+            cipher_text: v.cipher_text.clone(),
+            encrypted_message: v.encrypted_message.clone(),
+        },
+    );
+
+    let wallet = legacy_decrypt_wallet(v, None);
+    assert!(
+        !map.contains_key(&Wallet::hash_share(wallet.pubkey.as_deref().unwrap())),
+        "the envelope must NOT be addressed to the configured (1024) identity"
+    );
+
+    // Returns the RAW decrypted text — the frozen payload is a JSON-encoded string.
+    let raw = wallet.decrypt_my_message_ml(&map).await
+        .expect("default-1024 wallet must find and decrypt the 768-addressed envelope");
+    let parsed: serde_json::Value = serde_json::from_str(&raw)
+        .unwrap_or_else(|e| panic!("raw decrypted text is not JSON: {:?} ({})", e, raw));
+
+    assert_eq!(parsed.as_str(), Some(v.expected_plaintext.as_str()));
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Frozen pre-bump ML-KEM-768 auth molecule (validated from a 1024 default build)
+// ════════════════════════════════════════════════════════════════════════
+
+fn legacy_molecule_vector(vectors: &TestVectors) -> &LegacyMlkem768AuthMolecule {
+    vectors
+        .vectors
+        .legacy_mlkem768_auth_molecule
+        .as_ref()
+        .expect("legacyMlkem768AuthMolecule section missing")
+}
+
+/// The frozen record really is a 768 record (its U-atom `walletPubkey` decodes to 1184 bytes),
+/// and its molecular hash still verifies under the same hashing function the
+/// `vectors.molecular_hash` cases use. The byte-length assertion fails loudly if the fixture is
+/// ever regenerated at ML-KEM-1024.
+#[test]
+fn test_legacy_768_auth_molecule_hash_cross_platform() {
+    let vectors = load_vectors();
+    let v = legacy_molecule_vector(&vectors);
+
+    let pubkeys: Vec<&str> = v.molecule["atoms"]
+        .as_array()
+        .expect("molecule.atoms array")
+        .iter()
+        .filter_map(|atom| atom["meta"].as_array())
+        .flatten()
+        .filter(|meta| meta["key"].as_str() == Some("walletPubkey"))
+        .filter_map(|meta| meta["value"].as_str())
+        .collect();
+
+    assert_eq!(pubkeys.len(), 1, "exactly one walletPubkey meta expected");
+    assert_eq!(
+        decoded_len(pubkeys[0]),
+        v.expected_wallet_pubkey_bytes,
+        "the fixture is no longer an ML-KEM-768 record"
+    );
+    assert_eq!(v.expected_wallet_pubkey_bytes, 1184);
+
+    let atoms: Vec<Atom> = v.atoms.iter().map(atom_from_vector).collect();
+    let hash = Atom::hash_atoms(&atoms, "base17")
+        .unwrap_or_else(|e| panic!("hash_atoms failed for the legacy 768 molecule: {:?}", e));
+
+    assert_eq!(
+        hash, v.expected_molecular_hash,
+        "legacy 768 auth molecule hash mismatch\n  got:      {}\n  expected: {}",
+        hash, v.expected_molecular_hash
+    );
+}
+
+/// Full validation: deserialize the frozen molecule and run the SDK's `check` (molecular hash +
+/// WOTS+ OTS) from a build whose default parameter set is ML-KEM-1024.
+#[test]
+fn test_legacy_768_auth_molecule_full_check() {
+    let vectors = load_vectors();
+    let v = legacy_molecule_vector(&vectors);
+
+    let json = serde_json::to_string(&v.molecule).expect("molecule re-serialization");
+    let molecule = knishio_client::Molecule::fromJSON(&json)
+        .unwrap_or_else(|e| panic!("legacy 768 molecule deserialization failed: {:?}", e));
+
+    assert_eq!(molecule.molecular_hash.as_deref(), Some(v.expected_molecular_hash.as_str()));
+
+    let source_wallet = molecule
+        .source_wallet
+        .clone()
+        .expect("molecule.sourceWallet reconstructed");
+
+    let valid = molecule.check(Some(&source_wallet))
+        .unwrap_or_else(|e| panic!("legacy 768 molecule check failed: {:?}", e));
+
+    assert!(valid, "a 1024-default build must validate a pre-bump 768 molecule");
 }

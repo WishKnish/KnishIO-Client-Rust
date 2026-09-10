@@ -7,6 +7,11 @@
 //! 3. Knish.IO `Wallet` discrete per-message encapsulation envelope throughput
 //! 4. Mathematical line rate models and single-core / multi-core CPU sizing for 1 Gbps and 10 Gbps
 //!
+//! These figures measure the ML-KEM-768 step-back path. The shipped transport default is
+//! ML-KEM-1024, whose keys and ciphertexts are 1,568 bytes each (against 768's 1,184-byte key
+//! and 1,088-byte ciphertext) and whose per-operation cost is correspondingly higher, so these
+//! numbers are not the default's cost.
+//!
 //! Run with:
 //! ```bash
 //! cargo bench --bench pq_line_rate
@@ -17,7 +22,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use knishio_client::Wallet;
+use knishio_client::{MlKemParameterSet, Wallet};
 use libcrux_ml_kem::mlkem768;
 use rand::Rng;
 use ring::aead::{Aad, BoundKey, Nonce as RingNonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM};
@@ -220,8 +225,9 @@ async fn bench_discrete_envelope() {
     println!("  ------------------------------------------------------------------");
 
     const POS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
-    let sender = Wallet::create(Some("bench-sender-secret-0123456789ABCDEF"), None, "AUTH", Some(POS), None).expect("sender wallet");
-    let receiver = Wallet::create(Some("bench-receiver-secret-0123456789ABCDEF"), None, "AUTH", Some(POS), None).expect("receiver wallet");
+    // Pinned to ML-KEM-768 so the labels above stay true: the wallet default is ML-KEM-1024.
+    let sender = Wallet::create(Some("bench-sender-secret-0123456789ABCDEF"), None, "AUTH", Some(POS), None, Some(MlKemParameterSet::MlKem768)).expect("sender wallet");
+    let receiver = Wallet::create(Some("bench-receiver-secret-0123456789ABCDEF"), None, "AUTH", Some(POS), None, Some(MlKemParameterSet::MlKem768)).expect("receiver wallet");
     let receiver_pubkey = receiver.pubkey.clone().expect("receiver pubkey");
 
     // 1,200 B WebRTC payload

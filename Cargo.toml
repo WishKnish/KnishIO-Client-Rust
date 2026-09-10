@@ -1,6 +1,6 @@
 [package]
 name = "knishio-client"
-version = "0.10.0"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.89"  # aes 0.9.3 / RustCrypto 2026 line floor; CI builds on stable
 authors = ["Eugene Teplitsky <eugene@wishknish.com>"]
@@ -75,7 +75,7 @@ libcrux-ml-kem = "0.0.10"        # Pinned: formally verified ML-KEM (FIPS 203); 
 hex = "0.4"
 base64 = "0.23"
 pbkdf2 = "0.13"                  # Key derivation
-aes-gcm = "0.11"                  # AES-GCM encryption for ML-KEM768
+aes-gcm = "0.11"                  # AES-GCM encryption for ML-KEM
 zeroize = { version = "1.9", features = ["derive", "alloc"] } # Memory zeroization
 # SIMD optimizations for crypto (2025 high performance)
 tiny-keccak = { version = "2.0", features = ["shake", "keccak"] } # Compact Keccak with SHAKE256 support
