@@ -1,4 +1,4 @@
-//! Hardware-compatible AES-GCM envelope encryption secret storage provider
+//! Software AES-GCM envelope encryption secret storage provider (never hardware-backed)
 //! Uses standard AES-256-GCM with PBKDF2-HMAC-SHA256 key derivation
 
 use super::{
@@ -25,7 +25,6 @@ const IV_LENGTH: usize = 12;
 pub struct AesGcmSecretStorageProvider {
     backend: Arc<dyn StorageBackend>,
     default_passphrase: Option<String>,
-    hardware_backed: bool,
 }
 
 impl AesGcmSecretStorageProvider {
@@ -33,12 +32,10 @@ impl AesGcmSecretStorageProvider {
     pub fn new(
         backend: Option<Arc<dyn StorageBackend>>,
         default_passphrase: Option<String>,
-        hardware_backed: bool,
     ) -> Self {
         Self {
             backend: backend.unwrap_or_else(|| Arc::new(MemoryStorageBackend::new())),
             default_passphrase,
-            hardware_backed,
         }
     }
 
@@ -96,22 +93,23 @@ impl AesGcmSecretStorageProvider {
 
 impl Default for AesGcmSecretStorageProvider {
     fn default() -> Self {
-        Self::new(None, None, false)
+        Self::new(None, None)
     }
 }
 
 #[async_trait]
 impl SecretStorageProvider for AesGcmSecretStorageProvider {
     fn provider_type(&self) -> &str {
-        if self.hardware_backed {
-            "tpm2-aes-gcm"
-        } else {
-            "aes-gcm"
-        }
+        "aes-gcm"
     }
 
+    /// True only when this provider holds a non-exportable key inside platform-secure
+    /// hardware (Android TEE/StrongBox, Secure Enclave, TPM) and learned that from the
+    /// platform itself — never from a caller argument. Software envelope providers
+    /// return false. The value is persisted as `metadata.hardwareBacked` in every
+    /// envelope this provider writes.
     fn is_hardware_backed(&self) -> bool {
-        self.hardware_backed
+        false
     }
 
     async fn is_available(&self) -> bool {
@@ -151,8 +149,8 @@ impl SecretStorageProvider for AesGcmSecretStorageProvider {
             bundle_hash: bundle_hash.to_string(),
             label: options.label,
             created_at: chrono::Utc::now().timestamp_millis(),
-            hardware_backed: self.hardware_backed,
-            provider_type: self.provider_type().to_string(),
+            hardware_backed: false,
+            provider_type: "aes-gcm".to_string(),
         };
 
         let payload = EncryptedSecretPayload {

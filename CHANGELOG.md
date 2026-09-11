@@ -16,6 +16,10 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`hardware_backed` is no longer a caller claim.** `AesGcmSecretStorageProvider::new` drops its third argument, `provider_type()` is always `aes-gcm` (it previously relabelled itself `tpm2-aes-gcm` on the flag alone), and `is_hardware_backed()` is always `false`. Envelopes previously written with a caller-supplied `true` were never attested and remain readable. Source-level break for callers that passed the option; the wire format (`metadata.hardwareBacked`, required boolean) is unchanged.
+
 ## [1.0.0] — 2026-09-10
 
 ### Added

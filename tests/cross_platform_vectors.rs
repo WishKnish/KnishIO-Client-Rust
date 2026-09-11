@@ -847,3 +847,14 @@ fn test_legacy_768_auth_molecule_full_check() {
 
     assert!(valid, "a 1024-default build must validate a pre-bump 768 molecule");
 }
+
+#[path = "fixtures/mod.rs"]
+mod fixtures;
+
+#[test]
+fn test_secret_storage_envelope_constant_matches_master_vector() {
+    let v: serde_json::Value = serde_json::from_str(VECTORS_JSON).expect("valid vectors JSON");
+    let master_payload = &v["vectors"]["secret_storage_envelope"]["tests"][0]["payload"];
+    let parsed_frozen: serde_json::Value = serde_json::from_str(fixtures::FROZEN_TS_ENVELOPE).expect("valid JSON");
+    assert_eq!(&parsed_frozen, master_payload, "inline FROZEN_TS_ENVELOPE must match the master vector");
+}

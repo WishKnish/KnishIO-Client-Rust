@@ -65,11 +65,11 @@ async fn test_aes_gcm_secret_storage_provider() {
     let provider = AesGcmSecretStorageProvider::new(
         None,
         Some("client-secure-passphrase".to_string()),
-        false,
     );
 
     assert!(provider.is_available().await);
     assert_eq!(provider.provider_type(), "aes-gcm");
+    assert!(!provider.is_hardware_backed());
 
     let bundle = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     let secret = "a".repeat(256);
@@ -112,7 +112,6 @@ async fn test_knishio_client_secret_storage_integration() {
     let storage = Arc::new(AesGcmSecretStorageProvider::new(
         None,
         Some("client-secure-pass".to_string()),
-        false,
     ));
 
     storage.store_secret(&canonical_bundle, &canonical_secret, StorageOptions::default()).await.unwrap();
@@ -230,23 +229,18 @@ async fn test_knishio_client_set_secret_auto_sync_and_reset() {
 // failure go away - it is the contract.
 // ---------------------------------------------------------------------------
 
-/// Envelope written by the TypeScript SDK 0.9.7 (camelCase metadata).
-const FROZEN_TS_ENVELOPE: &str = r#"{"version":1,"ciphertext":"dQjZ4cR+ZBefuF4xSib8Qv/H2oZ5Qv8mRCRmQuLaCDYoBaRMqPQRullxZsID","iv":"3Q8ArAH0ZEgYFpoE","salt":"4LWNzAFGrY4SzcPulKMVcg==","algorithm":"AES-GCM","iterations":100000,"metadata":{"bundleHash":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","label":"probe","createdAt":1788558526546,"hardwareBacked":false,"providerType":"webcrypto-aes-gcm"}}"#;
-
-/// Envelope written by this crate at 0.9.5 (snake_case metadata) - must stay readable.
-const FROZEN_LEGACY_0_9_5_ENVELOPE: &str = r#"{"version":1,"ciphertext":"jf1+FJAP8itTOuBH8gur0lnmkGYps1TQyx/Q+3Ah+kAk8eC9/gt2DjZ5tz4v","iv":"XjR5FNNDRipgM6hx","salt":"lhpi9ywH55D6ZnUIrnr8+Q==","algorithm":"AES-GCM","iterations":100000,"metadata":{"bundle_hash":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","label":"probe","created_at":1788558634482,"hardware_backed":false,"provider_type":"aes-gcm"}}"#;
-
-const XSDK_BUNDLE: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
-const XSDK_PASSPHRASE: &str = "cross-sdk-pass";
-const XSDK_PLAINTEXT: &str = "MASTER-SECRET-CROSS-SDK-PROBE";
-
+#[path = "fixtures/mod.rs"]
+mod fixtures;
+use fixtures::{
+    FROZEN_LEGACY_0_9_5_ENVELOPE, FROZEN_TS_ENVELOPE, XSDK_BUNDLE, XSDK_PASSPHRASE, XSDK_PLAINTEXT,
+};
 async fn decrypt_frozen(envelope: &str) -> Result<Option<String>, KnishIOError> {
     let backend = Arc::new(MemoryStorageBackend::new());
     backend.set_item(
         &format!("knishio:secret:{}", XSDK_BUNDLE),
         envelope.to_string(),
     );
-    AesGcmSecretStorageProvider::new(Some(backend), None, false)
+    AesGcmSecretStorageProvider::new(Some(backend), None)
         .retrieve_secret(XSDK_BUNDLE, StorageOptions::with_passphrase(XSDK_PASSPHRASE))
         .await
 }
@@ -272,7 +266,7 @@ async fn decrypts_legacy_snake_case_envelope_written_by_0_9_5() {
 #[tokio::test]
 async fn emits_camel_case_metadata_for_peer_sdks() {
     let backend = Arc::new(MemoryStorageBackend::new());
-    let provider = AesGcmSecretStorageProvider::new(Some(backend.clone()), None, false);
+    let provider = AesGcmSecretStorageProvider::new(Some(backend.clone()), None);
     provider
         .store_secret(
             XSDK_BUNDLE,
@@ -303,4 +297,6 @@ async fn emits_camel_case_metadata_for_peer_sdks() {
             key
         );
     }
+    assert_eq!(metadata["hardwareBacked"], serde_json::json!(false), "a software provider must never emit hardwareBacked=true");
+    assert_eq!(metadata["providerType"], serde_json::json!("aes-gcm"));
 }

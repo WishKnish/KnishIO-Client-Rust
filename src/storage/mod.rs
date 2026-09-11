@@ -1,4 +1,4 @@
-//! Hardware-backed envelope encryption and secure master secret storage
+//! Envelope encryption and secure master-secret storage
 
 pub mod secure_memory;
 pub mod memory;
@@ -33,7 +33,7 @@ pub struct SecretStorageMetadata {
     /// Creation timestamp in milliseconds
     #[serde(alias = "created_at")]
     pub created_at: i64,
-    /// Whether this secret is backed by hardware (TPM, Secure Enclave)
+    /// Whether the key protecting this secret lives in platform-secure hardware; set by the provider from the platform, never caller-supplied
     #[serde(alias = "hardware_backed")]
     pub hardware_backed: bool,
     /// Provider type identifier
@@ -156,7 +156,11 @@ pub trait SecretStorageProvider: Send + Sync {
     /// Identifier of this provider type
     fn provider_type(&self) -> &str;
 
-    /// Whether this provider is backed by hardware (TPM 2.0, Secure Enclave)
+    /// True only when this provider holds a non-exportable key inside platform-secure
+    /// hardware (Android TEE/StrongBox, Secure Enclave, TPM) and learned that from the
+    /// platform itself — never from a caller argument. Software envelope providers
+    /// return false. The value is persisted as `metadata.hardwareBacked` in every
+    /// envelope this provider writes.
     fn is_hardware_backed(&self) -> bool;
 
     /// Whether this provider is available in the current environment
