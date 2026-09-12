@@ -14,6 +14,10 @@ pub use os_keychain::OsKeychainSecretStorageProvider;
 pub mod tpm2;
 #[cfg(feature = "tpm")]
 pub use tpm2::{Tpm2Policy, Tpm2SecretStorageProvider, TpmIdentity};
+#[cfg(all(feature = "secure-enclave", target_os = "macos"))]
+pub mod secure_enclave;
+#[cfg(all(feature = "secure-enclave", target_os = "macos"))]
+pub use secure_enclave::SecureEnclaveSecretStorageProvider;
 pub use memory::MemorySecretStorageProvider;
 pub use aes_gcm::AesGcmSecretStorageProvider;
 

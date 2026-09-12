@@ -121,14 +121,19 @@ sha3-asm = { version = "0.1", optional = true }     # Assembly-optimized SHA-3
 # NEON optimizations for ARM64 (Apple Silicon)
 sha3-asm = { version = "0.1", optional = true }     # Assembly-optimized SHA-3
 
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { version = "3.7", optional = true, features = ["OSX_10_15"] }
+security-framework-sys = { version = "2.17", optional = true }
+core-foundation = { version = "0.10", optional = true }
+
 [features]
 # SIMD feature flags for optional acceleration
 default = []
 keyring = ["dep:keyring"]
 tpm = ["dep:tss-esapi"]
+secure-enclave = ["dep:security-framework", "dep:security-framework-sys", "dep:core-foundation"]
 simd-optimized = ["sha3-asm"]    # Enable SIMD optimizations
 benchmark-mode = []              # Enable benchmarking-specific optimizations
-
 [dev-dependencies]
 ring = "0.17"
 
@@ -140,6 +145,7 @@ harness = false
 [[bin]]
 name = "self-test"
 path = "src/bin/self-test.rs"
+
 
 [profile.release]
 opt-level = 3

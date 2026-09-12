@@ -105,6 +105,8 @@ pub use storage::{
 pub use storage::OsKeychainSecretStorageProvider;
 #[cfg(feature = "tpm")]
 pub use storage::{Tpm2Policy, Tpm2SecretStorageProvider, TpmIdentity};
+#[cfg(all(feature = "secure-enclave", target_os = "macos"))]
+pub use storage::SecureEnclaveSecretStorageProvider;
 // Rules system re-exports
 pub use rules::{Rule, Callback, Condition};
 
