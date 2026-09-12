@@ -13,7 +13,7 @@ pub use os_keychain::OsKeychainSecretStorageProvider;
 #[cfg(feature = "tpm")]
 pub mod tpm2;
 #[cfg(feature = "tpm")]
-pub use tpm2::Tpm2SecretStorageProvider;
+pub use tpm2::{Tpm2Policy, Tpm2SecretStorageProvider, TpmIdentity};
 pub use memory::MemorySecretStorageProvider;
 pub use aes_gcm::AesGcmSecretStorageProvider;
 
@@ -22,6 +22,10 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::RwLock;
+use zeroize::Zeroizing;
+
+/// Prefix for secondary recovery envelope keys in storage backends
+pub const RECOVERY_KEY_PREFIX: &str = "knishio:recovery:";
 
 /// Metadata associated with an encrypted secret in storage
 ///
@@ -84,6 +88,10 @@ pub struct StorageOptions {
     pub label: Option<String>,
     /// Passphrase used for PBKDF2 key derivation
     pub passphrase: Option<String>,
+    /// Optional recovery passphrase for sealing a secondary recovery envelope
+    pub recovery_passphrase: Option<Zeroizing<String>>,
+    /// Whether to allow storing a secret without a recovery path on non-exportable hardware providers
+    pub allow_unrecoverable: bool,
 }
 
 impl StorageOptions {
@@ -92,12 +100,31 @@ impl StorageOptions {
         Self {
             label: None,
             passphrase: Some(passphrase.into()),
+            recovery_passphrase: None,
+            allow_unrecoverable: false,
         }
     }
 
     /// Create storage options with a label and passphrase
     pub fn new(label: Option<String>, passphrase: Option<String>) -> Self {
-        Self { label, passphrase }
+        Self {
+            label,
+            passphrase,
+            recovery_passphrase: None,
+            allow_unrecoverable: false,
+        }
+    }
+
+    /// Set recovery passphrase
+    pub fn with_recovery_passphrase(mut self, recovery_passphrase: impl Into<String>) -> Self {
+        self.recovery_passphrase = Some(Zeroizing::new(recovery_passphrase.into()));
+        self
+    }
+
+    /// Set allow_unrecoverable
+    pub fn with_allow_unrecoverable(mut self, allow_unrecoverable: bool) -> Self {
+        self.allow_unrecoverable = allow_unrecoverable;
+        self
     }
 }
 
@@ -198,6 +225,16 @@ pub trait SecretStorageProvider: Send + Sync {
 
     /// List all stored secret metadata without exposing plaintext secrets
     async fn list_secrets(&self) -> Result<Vec<SecretStorageMetadata>>;
+
+    /// Recover a secret from its secondary recovery envelope and re-enroll it.
+    ///
+    /// Does not return or expose the plaintext secret.
+    async fn recover_secret(
+        &self,
+        bundle_hash: &str,
+        recovery_passphrase: &str,
+        options: StorageOptions,
+    ) -> Result<()>;
 }
 
 /// Execute a closure with the unwrapped secret and zeroize memory upon completion

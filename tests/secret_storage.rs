@@ -3,8 +3,9 @@ use knishio_client::crypto::{generate_bundle_hash, generate_secret};
 use knishio_client::error::KnishIOError;
 use knishio_client::storage::secure_memory::{constant_time_equals, with_secure_bytes, zeroize_bytes};
 use knishio_client::storage::{
-    AesGcmSecretStorageProvider, MemorySecretStorageProvider, MemoryStorageBackend,
-    SecretStorageProvider, StorageBackend, StorageOptions,
+    AesGcmSecretStorageProvider, EncryptedSecretPayload, MemorySecretStorageProvider,
+    MemoryStorageBackend, SecretStorageProvider, StorageBackend, StorageOptions,
+    RECOVERY_KEY_PREFIX,
 };
 use knishio_client::wallet::Wallet;
 use knishio_client::atom::Atom;
@@ -364,4 +365,93 @@ async fn file_storage_backend_round_trip_permissions_and_corruption() {
 
     // Cleanup
     let _ = fs::remove_file(&temp_path);
+}
+
+#[tokio::test]
+async fn test_aes_gcm_secret_storage_recovery_lifecycle() {
+    let backend = Arc::new(MemoryStorageBackend::new());
+    let provider = AesGcmSecretStorageProvider::new(Some(backend.clone()), Some("primary-pass".into()));
+
+    let bundle = "bundle_rec_aes_gcm_1234567890abcdef";
+    let secret = "MASTER-SECRET-AES-GCM-RECOVERY-TEST";
+    let recovery_pass = "recovery-passphrase-secret-77";
+
+    let opts = StorageOptions::default().with_recovery_passphrase(recovery_pass);
+    provider.store_secret(bundle, secret, opts).await.unwrap();
+
+    // Both primary and recovery records exist in backend
+    let prim_key = format!("knishio:secret:{}", bundle);
+    let rec_key = format!("{}{}", RECOVERY_KEY_PREFIX, bundle);
+    assert!(backend.get_item(&prim_key).unwrap().is_some());
+    let rec_raw = backend.get_item(&rec_key).unwrap().expect("recovery record");
+
+    // Recovery envelope metadata matches contract
+    let rec_payload: EncryptedSecretPayload = serde_json::from_str(&rec_raw).unwrap();
+    assert_eq!(rec_payload.metadata.bundle_hash, bundle);
+    assert_eq!(rec_payload.metadata.provider_type, "aes-gcm");
+    assert!(!rec_payload.metadata.hardware_backed);
+
+    // list_secrets ignores recovery record
+    let list = provider.list_secrets().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].bundle_hash, bundle);
+
+    // Corrupt primary record to simulate key loss
+    backend.remove_item(&prim_key).unwrap();
+    assert_eq!(provider.retrieve_secret(bundle, StorageOptions::default()).await.unwrap(), None);
+
+    // Wrong recovery passphrase fails with DecryptionFailed
+    let wrong_res = provider.recover_secret(bundle, "wrong-recovery-pass", StorageOptions::default()).await;
+    assert!(wrong_res.is_err());
+    assert!(matches!(wrong_res.unwrap_err(), KnishIOError::DecryptionFailed(_)));
+
+    // Recover secret re-enrolls under new primary passphrase
+    let new_opts = StorageOptions::with_passphrase("brand-new-primary-pass");
+    provider.recover_secret(bundle, recovery_pass, new_opts.clone()).await.unwrap();
+
+    // Primary retrieval with new passphrase succeeds
+    let recovered = provider.retrieve_secret(bundle, new_opts).await.unwrap().expect("recovered secret");
+    assert_eq!(recovered, secret);
+
+    // delete_secret removes both primary and recovery keys
+    assert!(provider.delete_secret(bundle).await.unwrap());
+    assert!(backend.get_item(&prim_key).unwrap().is_none());
+    assert!(backend.get_item(&rec_key).unwrap().is_none());
+}
+
+#[tokio::test]
+async fn test_memory_secret_storage_recovery_lifecycle() {
+    let provider = MemorySecretStorageProvider::new();
+
+    let bundle = "bundle_rec_memory_1234567890abcdef";
+    let secret = "MASTER-SECRET-MEMORY-RECOVERY-TEST";
+    let recovery_pass = "recovery-passphrase-mem-88";
+
+    let opts = StorageOptions::default().with_recovery_passphrase(recovery_pass);
+    provider.store_secret(bundle, secret, opts).await.unwrap();
+
+    // Recovery payload exists internally
+    assert!(provider.get_recovery_payload(bundle).is_some());
+
+    // list_secrets only counts primary
+    assert_eq!(provider.list_secrets().await.unwrap().len(), 1);
+
+    // Simulate loss by deleting primary internally
+    let wrong_res = provider.recover_secret("nonexistent", recovery_pass, StorageOptions::default()).await;
+    assert!(wrong_res.is_err());
+    assert!(matches!(wrong_res.unwrap_err(), KnishIOError::SecretNotFound(_)));
+
+    // Wrong recovery passphrase fails
+    let wrong_pass_res = provider.recover_secret(bundle, "bad-pass", StorageOptions::default()).await;
+    assert!(wrong_pass_res.is_err());
+    assert!(matches!(wrong_pass_res.unwrap_err(), KnishIOError::DecryptionFailed(_)));
+
+    // Successful recovery re-enrolls
+    provider.recover_secret(bundle, recovery_pass, StorageOptions::default()).await.unwrap();
+    let retrieved = provider.retrieve_secret(bundle, StorageOptions::default()).await.unwrap().expect("retrieved");
+    assert_eq!(retrieved, secret);
+
+    // Deleting cleans up both
+    assert!(provider.delete_secret(bundle).await.unwrap());
+    assert!(provider.get_recovery_payload(bundle).is_none());
 }

@@ -4,8 +4,8 @@
 
 use super::envelope;
 use super::{
-    EncryptedSecretPayload, MemoryStorageBackend, SecretStorageMetadata, SecretStorageProvider,
-    StorageBackend, StorageOptions,
+    EncryptedSecretPayload, SecretStorageMetadata, SecretStorageProvider, StorageBackend,
+    StorageOptions, RECOVERY_KEY_PREFIX,
 };
 use crate::error::{KnishIOError, Result};
 use crate::storage::secure_memory::with_secure_bytes;
@@ -33,8 +33,11 @@ impl OsKeychainSecretStorageProvider {
     ///
     /// Reads or generates a 256-bit random passphrase stored under `service` and account `knishio:kek:{alias}`.
     /// Fails closed if the platform credential store is unavailable (e.g. headless Linux without Secret Service).
+    ///
+    /// The KEK is durable; the backend must be too. Callers must supply an explicit storage backend
+    /// rather than relying on an ephemeral in-memory default.
     pub fn new(
-        backend: Option<Arc<dyn StorageBackend>>,
+        backend: Arc<dyn StorageBackend>,
         service: Option<&str>,
         alias: Option<&str>,
     ) -> Result<Self> {
@@ -64,7 +67,7 @@ impl OsKeychainSecretStorageProvider {
         };
 
         Ok(Self {
-            backend: backend.unwrap_or_else(|| Arc::new(MemoryStorageBackend::new())),
+            backend,
             passphrase,
             service,
             alias,
@@ -158,7 +161,7 @@ impl SecretStorageProvider for OsKeychainSecretStorageProvider {
 
         let metadata = SecretStorageMetadata {
             bundle_hash: bundle_hash.to_string(),
-            label: options.label,
+            label: options.label.clone(),
             created_at: chrono::Utc::now().timestamp_millis(),
             hardware_backed: false,
             provider_type: "os-keychain-aes-gcm".to_string(),
@@ -170,6 +173,22 @@ impl SecretStorageProvider for OsKeychainSecretStorageProvider {
 
         self.backend
             .set_item(&format!("{KEY_PREFIX}{bundle_hash}"), json_str)?;
+
+        if let Some(recovery_passphrase) = options.recovery_passphrase.as_ref() {
+            let recovery_metadata = SecretStorageMetadata {
+                bundle_hash: bundle_hash.to_string(),
+                label: options.label,
+                created_at: chrono::Utc::now().timestamp_millis(),
+                hardware_backed: false,
+                provider_type: "aes-gcm".to_string(),
+            };
+            let recovery_payload = envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
+            let recovery_json = serde_json::to_string(&recovery_payload)
+                .map_err(|e| KnishIOError::SecretStorage(format!("Serialization failed: {e}")))?;
+            self.backend
+                .set_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"), recovery_json)?;
+        }
+
         Ok(())
     }
 
@@ -203,8 +222,10 @@ impl SecretStorageProvider for OsKeychainSecretStorageProvider {
     }
 
     async fn delete_secret(&self, bundle_hash: &str) -> Result<bool> {
-        self.backend
-            .remove_item(&format!("{KEY_PREFIX}{bundle_hash}"))
+        let removed_primary = self.backend
+            .remove_item(&format!("{KEY_PREFIX}{bundle_hash}"))?;
+        let _ = self.backend.remove_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"));
+        Ok(removed_primary)
     }
 
     async fn has_secret(&self, bundle_hash: &str) -> Result<bool> {
@@ -217,7 +238,7 @@ impl SecretStorageProvider for OsKeychainSecretStorageProvider {
     async fn list_secrets(&self) -> Result<Vec<SecretStorageMetadata>> {
         let mut results = Vec::new();
         for key in self.backend.keys()? {
-            if key.starts_with(KEY_PREFIX) {
+            if key.starts_with(KEY_PREFIX) && !key.starts_with(RECOVERY_KEY_PREFIX) {
                 if let Some(raw) = self.backend.get_item(&key)? {
                     if let Ok(payload) = serde_json::from_str::<EncryptedSecretPayload>(&raw) {
                         results.push(payload.metadata);
@@ -226,5 +247,41 @@ impl SecretStorageProvider for OsKeychainSecretStorageProvider {
             }
         }
         Ok(results)
+    }
+
+    async fn recover_secret(
+        &self,
+        bundle_hash: &str,
+        recovery_passphrase: &str,
+        options: StorageOptions,
+    ) -> Result<()> {
+        if bundle_hash.is_empty() {
+            return Err(KnishIOError::SecretStorage("Bundle hash cannot be empty".to_string()));
+        }
+        if recovery_passphrase.is_empty() {
+            return Err(KnishIOError::SecretStorage("Recovery passphrase cannot be empty".to_string()));
+        }
+
+        let raw = self
+            .backend
+            .get_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"))?
+            .ok_or_else(|| KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}")))?;
+
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
+            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}")))?;
+
+        let decrypted = envelope::open(&payload, recovery_passphrase)?;
+
+        let secret_str = with_secure_bytes(decrypted.to_vec(), |bytes| {
+            String::from_utf8(bytes.to_vec())
+                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext in recovery envelope: {e}")))
+        })?;
+
+        let mut reenroll_options = options;
+        if reenroll_options.recovery_passphrase.is_none() {
+            reenroll_options.recovery_passphrase = Some(Zeroizing::new(recovery_passphrase.to_string()));
+        }
+
+        self.store_secret(bundle_hash, &secret_str, reenroll_options).await
     }
 }

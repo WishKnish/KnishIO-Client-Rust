@@ -1,9 +1,10 @@
 //! Thread-safe in-memory secret storage provider
 //! Used for testing, headless environments, and zero-dependency fallbacks
 
-use super::{SecretStorageMetadata, SecretStorageProvider, StorageOptions};
+use super::envelope;
+use super::{EncryptedSecretPayload, SecretStorageMetadata, SecretStorageProvider, StorageOptions};
 use crate::error::{KnishIOError, Result};
-use crate::storage::secure_memory::with_secure_string;
+use crate::storage::secure_memory::{with_secure_bytes, with_secure_string};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -12,6 +13,7 @@ use std::sync::{Arc, RwLock};
 #[derive(Clone)]
 pub struct MemorySecretStorageProvider {
     store: Arc<RwLock<HashMap<String, (String, SecretStorageMetadata)>>>,
+    recovery_store: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl MemorySecretStorageProvider {
@@ -19,6 +21,7 @@ impl MemorySecretStorageProvider {
     pub fn new() -> Self {
         Self {
             store: Arc::new(RwLock::new(HashMap::new())),
+            recovery_store: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -33,24 +36,49 @@ impl MemorySecretStorageProvider {
 
         let metadata = SecretStorageMetadata {
             bundle_hash: bundle_hash.to_string(),
-            label: options.label,
+            label: options.label.clone(),
             created_at: chrono::Utc::now().timestamp_millis(),
             hardware_backed: false,
             provider_type: "memory".to_string(),
         };
 
-        let mut store = self.store.write()
-            .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
-        store.insert(bundle_hash.to_string(), (secret.to_string(), metadata));
+        {
+            let mut store = self.store.write()
+                .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
+            store.insert(bundle_hash.to_string(), (secret.to_string(), metadata));
+        }
+
+        if let Some(recovery_passphrase) = options.recovery_passphrase.as_ref() {
+            let recovery_metadata = SecretStorageMetadata {
+                bundle_hash: bundle_hash.to_string(),
+                label: options.label,
+                created_at: chrono::Utc::now().timestamp_millis(),
+                hardware_backed: false,
+                provider_type: "aes-gcm".to_string(),
+            };
+            let recovery_payload = envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
+            let recovery_json = serde_json::to_string(&recovery_payload)
+                .map_err(|e| KnishIOError::SecretStorage(format!("Serialization failed: {e}")))?;
+            let mut recovery_store = self.recovery_store.write()
+                .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {e}")))?;
+            recovery_store.insert(bundle_hash.to_string(), recovery_json);
+        }
 
         Ok(())
     }
-
     /// Clear all stored secrets
     pub fn clear(&self) {
         if let Ok(mut store) = self.store.write() {
             store.clear();
         }
+        if let Ok(mut recovery_store) = self.recovery_store.write() {
+            recovery_store.clear();
+        }
+    }
+
+    /// Retrieve raw recovery envelope JSON if present
+    pub fn get_recovery_payload(&self, bundle_hash: &str) -> Option<String> {
+        self.recovery_store.read().ok()?.get(bundle_hash).cloned()
     }
 
     /// Execute a closure with the unwrapped secret and zeroize memory upon completion
@@ -102,6 +130,9 @@ impl SecretStorageProvider for MemorySecretStorageProvider {
     }
 
     async fn delete_secret(&self, bundle_hash: &str) -> Result<bool> {
+        if let Ok(mut recovery_store) = self.recovery_store.write() {
+            recovery_store.remove(bundle_hash);
+        }
         let mut store = self.store.write()
             .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
         Ok(store.remove(bundle_hash).is_some())
@@ -117,5 +148,43 @@ impl SecretStorageProvider for MemorySecretStorageProvider {
         let store = self.store.read()
             .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
         Ok(store.values().map(|(_, meta)| meta.clone()).collect())
+    }
+
+    async fn recover_secret(
+        &self,
+        bundle_hash: &str,
+        recovery_passphrase: &str,
+        options: StorageOptions,
+    ) -> Result<()> {
+        if bundle_hash.is_empty() {
+            return Err(KnishIOError::SecretStorage("Bundle hash cannot be empty".to_string()));
+        }
+        if recovery_passphrase.is_empty() {
+            return Err(KnishIOError::SecretStorage("Recovery passphrase cannot be empty".to_string()));
+        }
+
+        let raw = {
+            let recovery_store = self.recovery_store.read()
+                .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
+            recovery_store.get(bundle_hash).cloned()
+                .ok_or_else(|| KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}")))?
+        };
+
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
+            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}")))?;
+
+        let decrypted = envelope::open(&payload, recovery_passphrase)?;
+
+        let secret_str = with_secure_bytes(decrypted.to_vec(), |bytes| {
+            String::from_utf8(bytes.to_vec())
+                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext in recovery envelope: {e}")))
+        })?;
+
+        let mut reenroll_options = options;
+        if reenroll_options.recovery_passphrase.is_none() {
+            reenroll_options.recovery_passphrase = Some(zeroize::Zeroizing::new(recovery_passphrase.to_string()));
+        }
+
+        self.store_secret(bundle_hash, &secret_str, reenroll_options).await
     }
 }

@@ -87,7 +87,7 @@ jobs:
       - name: cargo test (tpm + keyring)
         env:
           KNISHIO_TPM_TCTI: "swtpm:host=127.0.0.1,port=2321"
-        run: cargo test --features tpm,keyring
+        run: cargo test --features tpm,keyring -- --test-threads=1
 
   audit:
     name: cargo audit (dependency advisories)

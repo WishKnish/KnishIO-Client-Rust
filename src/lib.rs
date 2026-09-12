@@ -99,12 +99,12 @@ pub use policy_meta::PolicyMeta;
 pub use storage::{
     SecretStorageProvider, SecretStorageMetadata, EncryptedSecretPayload,
     StorageOptions, StorageBackend, MemoryStorageBackend, FileStorageBackend,
-    MemorySecretStorageProvider, AesGcmSecretStorageProvider,
+    MemorySecretStorageProvider, AesGcmSecretStorageProvider, RECOVERY_KEY_PREFIX,
 };
 #[cfg(feature = "keyring")]
 pub use storage::OsKeychainSecretStorageProvider;
 #[cfg(feature = "tpm")]
-pub use storage::Tpm2SecretStorageProvider;
+pub use storage::{Tpm2Policy, Tpm2SecretStorageProvider, TpmIdentity};
 // Rules system re-exports
 pub use rules::{Rule, Callback, Condition};
 

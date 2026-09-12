@@ -17,18 +17,22 @@ detail, the entry says so instead of guessing.
 ## [Unreleased]
 ### Added
 
+- **Secondary recovery envelope (`knishio:recovery:`)**: `SecretStorageProvider` adds `recover_secret` for re-enrolling master secrets from a secondary recovery envelope sealed under a user-held `recovery_passphrase`. `StorageOptions` gains `recovery_passphrase: Option<Zeroizing<String>>` and `allow_unrecoverable: bool`. Implemented across `AesGcmSecretStorageProvider`, `MemorySecretStorageProvider`, `OsKeychainSecretStorageProvider`, and `Tpm2SecretStorageProvider`: when a recovery passphrase is provided, `store_secret` seals a software AES-GCM recovery envelope under `knishio:recovery:<bundleHash>`, `delete_secret` removes both primary and recovery records, and `list_secrets` excludes recovery keys.
+- **TPM 2.0 PCR policy authorization (`Tpm2Policy`)**: `Tpm2SecretStorageProvider::new` accepts an optional `Tpm2Policy` specifying PCR bank and slot indices (default PCR 7) with optional auth. Sealing calculates the PCR policy digest via a trial auth session (`SessionType::Trial`) and passes it to `with_auth_policy`, while unsealing satisfies the policy using an active `PolicySession`. Policy parameters are preserved in the sealed record JSON at `knishio:kek:tpm2:<alias>`.
 - **`envelope::seal` and `envelope::open`**: custody-agnostic functions for PBKDF2/AES-GCM-256 envelope encryption, extracted from `AesGcmSecretStorageProvider` so providers share one implementation.
 - **`FileStorageBackend`**: atomic file-based key-value persistence backend with 0o600 file mode permissions on Unix.
 - **`OsKeychainSecretStorageProvider`** (`keyring` feature): secret storage provider backed by platform credential store (macOS Keychain, Linux Secret Service, Windows Credential Manager).
 - **`Tpm2SecretStorageProvider`** (`tpm` feature): TPM 2.0 hardware-enclave secret storage provider sealing a random device passphrase into a KeyedHash object under a deterministic ECC P-256 storage primary.
-
 ### Changed
 
 - **Fallible `StorageBackend` trait**: `get_item`, `set_item`, `remove_item`, and `keys` now return `crate::error::Result<T>`, enabling proper I/O and lock-poisoning error propagation for file, keychain, and hardware backends.
 - **Optional metadata keys omitted when unset**: `SecretStorageMetadata` marks `label` with `#[serde(default, skip_serializing_if = "Option::is_none")]`, omitting unset optional keys from emitted envelope JSON instead of emitting `"label": null`, matching the cross-SDK convention.
+- **Durable storage backend required on hardware providers**: `OsKeychainSecretStorageProvider::new` and `Tpm2SecretStorageProvider::new` now require `backend: Arc<dyn StorageBackend>` instead of accepting `Option<Arc<dyn StorageBackend>>`. The KEK is durable; the backend must be too. Callers must supply an explicit storage backend rather than relying on an ephemeral in-memory default.
+- **Mandatory recovery on TPM PCR policy**: When `Tpm2Policy` is configured on `Tpm2SecretStorageProvider`, `store_secret` fails closed unless `recovery_passphrase` is supplied or `allow_unrecoverable: true` is explicitly opted into, preventing permanent identity loss across firmware updates or PCR drift.
 ### Fixed
 
 - **`hardware_backed` is no longer a caller claim.** `AesGcmSecretStorageProvider::new` drops its third argument, `provider_type()` is always `aes-gcm` (it previously relabelled itself `tpm2-aes-gcm` on the flag alone), and `is_hardware_backed()` is always `false`. Envelopes previously written with a caller-supplied `true` were never attested and remain readable. Source-level break for callers that passed the option; the wire format (`metadata.hardwareBacked`, required boolean) is unchanged.
+- **Fail-closed TPM custody check**: `tpm2::tpm_identity` classifies connected TPMs into `TpmIdentity::{Hardware, Software, Unknown}` by querying `PropertyTag::Manufacturer` and `VendorString1..4`. Unreadable properties or unexpected errors fail closed to `Unknown` (never claiming hardware custody). Known software signatures (`IBM ` + `SW*` for swtpm/libtpms, `MSFT` simulator strings) are classified as `Software`. Only verified non-software TPMs with readable identity properties evaluate to `hardware_backed = true`.
 
 ## [1.0.0] — 2026-09-10
 
