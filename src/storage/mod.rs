@@ -3,6 +3,17 @@
 pub mod secure_memory;
 pub mod memory;
 pub mod aes_gcm;
+pub mod envelope;
+pub mod file;
+pub use file::FileStorageBackend;
+#[cfg(feature = "keyring")]
+pub mod os_keychain;
+#[cfg(feature = "keyring")]
+pub use os_keychain::OsKeychainSecretStorageProvider;
+#[cfg(feature = "tpm")]
+pub mod tpm2;
+#[cfg(feature = "tpm")]
+pub use tpm2::Tpm2SecretStorageProvider;
 pub use memory::MemorySecretStorageProvider;
 pub use aes_gcm::AesGcmSecretStorageProvider;
 
@@ -29,6 +40,7 @@ pub struct SecretStorageMetadata {
     #[serde(alias = "bundle_hash")]
     pub bundle_hash: String,
     /// Optional human-readable label
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     /// Creation timestamp in milliseconds
     #[serde(alias = "created_at")]
@@ -92,13 +104,13 @@ impl StorageOptions {
 /// Pluggable key-value persistence backend (e.g. Memory, TPM NVRAM, OS Keyring, Disk)
 pub trait StorageBackend: Send + Sync {
     /// Retrieve item by key
-    fn get_item(&self, key: &str) -> Option<String>;
+    fn get_item(&self, key: &str) -> Result<Option<String>>;
     /// Store item by key
-    fn set_item(&self, key: &str, value: String);
+    fn set_item(&self, key: &str, value: String) -> Result<()>;
     /// Remove item by key, returning true if found
-    fn remove_item(&self, key: &str) -> bool;
+    fn remove_item(&self, key: &str) -> Result<bool>;
     /// List all keys
-    fn keys(&self) -> Vec<String>;
+    fn keys(&self) -> Result<Vec<String>>;
 }
 
 /// Default in-memory thread-safe storage backend
@@ -122,31 +134,37 @@ impl Default for MemoryStorageBackend {
 }
 
 impl StorageBackend for MemoryStorageBackend {
-    fn get_item(&self, key: &str) -> Option<String> {
-        let store = self.store.read().ok()?;
-        store.get(key).cloned()
+    fn get_item(&self, key: &str) -> Result<Option<String>> {
+        let store = self
+            .store
+            .read()
+            .map_err(|_| KnishIOError::SecretStorage("storage backend lock poisoned".into()))?;
+        Ok(store.get(key).cloned())
     }
 
-    fn set_item(&self, key: &str, value: String) {
-        if let Ok(mut store) = self.store.write() {
-            store.insert(key.to_string(), value);
-        }
+    fn set_item(&self, key: &str, value: String) -> Result<()> {
+        let mut store = self
+            .store
+            .write()
+            .map_err(|_| KnishIOError::SecretStorage("storage backend lock poisoned".into()))?;
+        store.insert(key.to_string(), value);
+        Ok(())
     }
 
-    fn remove_item(&self, key: &str) -> bool {
-        if let Ok(mut store) = self.store.write() {
-            store.remove(key).is_some()
-        } else {
-            false
-        }
+    fn remove_item(&self, key: &str) -> Result<bool> {
+        let mut store = self
+            .store
+            .write()
+            .map_err(|_| KnishIOError::SecretStorage("storage backend lock poisoned".into()))?;
+        Ok(store.remove(key).is_some())
     }
 
-    fn keys(&self) -> Vec<String> {
-        if let Ok(store) = self.store.read() {
-            store.keys().cloned().collect()
-        } else {
-            Vec::new()
-        }
+    fn keys(&self) -> Result<Vec<String>> {
+        let store = self
+            .store
+            .read()
+            .map_err(|_| KnishIOError::SecretStorage("storage backend lock poisoned".into()))?;
+        Ok(store.keys().cloned().collect())
     }
 }
 

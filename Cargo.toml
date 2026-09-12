@@ -108,6 +108,9 @@ num_cpus = "1.16"               # For system information in benchmarks
 # String and number utilities
 num-bigint = "0.5"
 num-traits = "0.2"
+# Hardware secret storage optional dependencies
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"], optional = true }
+tss-esapi = { version = "7", optional = true }
 
 # Optional SIMD acceleration - enabled per target architecture
 [target.'cfg(target_arch = "x86_64")'.dependencies]
@@ -121,6 +124,8 @@ sha3-asm = { version = "0.1", optional = true }     # Assembly-optimized SHA-3
 [features]
 # SIMD feature flags for optional acceleration
 default = []
+keyring = ["dep:keyring"]
+tpm = ["dep:tss-esapi"]
 simd-optimized = ["sha3-asm"]    # Enable SIMD optimizations
 benchmark-mode = []              # Enable benchmarking-specific optimizations
 

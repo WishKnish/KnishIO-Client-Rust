@@ -15,7 +15,17 @@ detail, the entry says so instead of guessing.
 
 
 ## [Unreleased]
+### Added
 
+- **`envelope::seal` and `envelope::open`**: custody-agnostic functions for PBKDF2/AES-GCM-256 envelope encryption, extracted from `AesGcmSecretStorageProvider` so providers share one implementation.
+- **`FileStorageBackend`**: atomic file-based key-value persistence backend with 0o600 file mode permissions on Unix.
+- **`OsKeychainSecretStorageProvider`** (`keyring` feature): secret storage provider backed by platform credential store (macOS Keychain, Linux Secret Service, Windows Credential Manager).
+- **`Tpm2SecretStorageProvider`** (`tpm` feature): TPM 2.0 hardware-enclave secret storage provider sealing a random device passphrase into a KeyedHash object under a deterministic ECC P-256 storage primary.
+
+### Changed
+
+- **Fallible `StorageBackend` trait**: `get_item`, `set_item`, `remove_item`, and `keys` now return `crate::error::Result<T>`, enabling proper I/O and lock-poisoning error propagation for file, keychain, and hardware backends.
+- **Optional metadata keys omitted when unset**: `SecretStorageMetadata` marks `label` with `#[serde(default, skip_serializing_if = "Option::is_none")]`, omitting unset optional keys from emitted envelope JSON instead of emitting `"label": null`, matching the cross-SDK convention.
 ### Fixed
 
 - **`hardware_backed` is no longer a caller claim.** `AesGcmSecretStorageProvider::new` drops its third argument, `provider_type()` is always `aes-gcm` (it previously relabelled itself `tpm2-aes-gcm` on the flag alone), and `is_hardware_backed()` is always `false`. Envelopes previously written with a caller-supplied `true` were never attested and remain readable. Source-level break for callers that passed the option; the wire format (`metadata.hardwareBacked`, required boolean) is unchanged.

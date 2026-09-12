@@ -236,10 +236,12 @@ use fixtures::{
 };
 async fn decrypt_frozen(envelope: &str) -> Result<Option<String>, KnishIOError> {
     let backend = Arc::new(MemoryStorageBackend::new());
-    backend.set_item(
-        &format!("knishio:secret:{}", XSDK_BUNDLE),
-        envelope.to_string(),
-    );
+    backend
+        .set_item(
+            &format!("knishio:secret:{}", XSDK_BUNDLE),
+            envelope.to_string(),
+        )
+        .unwrap();
     AesGcmSecretStorageProvider::new(Some(backend), None)
         .retrieve_secret(XSDK_BUNDLE, StorageOptions::with_passphrase(XSDK_PASSPHRASE))
         .await
@@ -278,6 +280,7 @@ async fn emits_camel_case_metadata_for_peer_sdks() {
 
     let raw = backend
         .get_item(&format!("knishio:secret:{}", XSDK_BUNDLE))
+        .unwrap()
         .expect("envelope stored");
     let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
     let metadata = json["metadata"].as_object().expect("metadata object");
@@ -297,6 +300,68 @@ async fn emits_camel_case_metadata_for_peer_sdks() {
             key
         );
     }
+    assert!(
+        !metadata.contains_key("label"),
+        "optional metadata keys like `label` must be omitted when unset, never emitted as null"
+    );
+
+    // When label is provided, it must be emitted
+    provider
+        .store_secret(
+            XSDK_BUNDLE,
+            XSDK_PLAINTEXT,
+            StorageOptions::new(Some("probe".into()), Some(XSDK_PASSPHRASE.into())),
+        )
+        .await
+        .unwrap();
+    let raw_with_label = backend
+        .get_item(&format!("knishio:secret:{}", XSDK_BUNDLE))
+        .unwrap()
+        .expect("envelope stored");
+    let json_with_label: serde_json::Value = serde_json::from_str(&raw_with_label).unwrap();
+    assert_eq!(json_with_label["metadata"]["label"], serde_json::json!("probe"));
     assert_eq!(metadata["hardwareBacked"], serde_json::json!(false), "a software provider must never emit hardwareBacked=true");
     assert_eq!(metadata["providerType"], serde_json::json!("aes-gcm"));
+}
+
+#[tokio::test]
+async fn file_storage_backend_round_trip_permissions_and_corruption() {
+    use knishio_client::storage::FileStorageBackend;
+    use std::fs;
+
+    let temp_path = std::env::temp_dir().join(format!("knishio-fsb-{}.json", uuid::Uuid::new_v4()));
+
+    // Scope 1: write items and check permissions
+    {
+        let backend1 = FileStorageBackend::new(&temp_path).expect("create file storage");
+        assert_eq!(backend1.get_item("key1").unwrap(), None);
+        backend1.set_item("key1", "val1".into()).unwrap();
+        assert_eq!(backend1.get_item("key1").unwrap(), Some("val1".into()));
+        assert!(backend1.keys().unwrap().contains(&"key1".to_string()));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = fs::metadata(&temp_path).expect("read metadata");
+            let mode = meta.permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "file mode must be 0600 on unix, got {:o}", mode);
+        }
+    }
+
+    // Scope 2: second instance reads existing file
+    {
+        let backend2 = FileStorageBackend::new(&temp_path).expect("open existing file storage");
+        assert_eq!(backend2.get_item("key1").unwrap(), Some("val1".into()));
+        assert!(backend2.remove_item("key1").unwrap());
+        assert_eq!(backend2.get_item("key1").unwrap(), None);
+        assert!(!backend2.remove_item("key1").unwrap());
+    }
+
+    // Corrupt the file
+    fs::write(&temp_path, "not valid json").unwrap();
+    let corrupt_res = FileStorageBackend::new(&temp_path);
+    assert!(corrupt_res.is_err(), "corrupted store must return Err");
+
+    // Cleanup
+    let _ = fs::remove_file(&temp_path);
 }
