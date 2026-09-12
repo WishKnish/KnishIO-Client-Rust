@@ -135,16 +135,8 @@ async fn secure_enclave_custody_lifecycle_and_key_loss_recovery() {
     fresh_provider.unenroll().expect("unenroll clean up");
 }
 
-#[tokio::test]
-async fn secure_enclave_requires_recovery_passphrase_unless_allowed() {
-    let alias = format!("test_se_{}", Uuid::new_v4().simple());
-    let backend = Arc::new(MemoryStorageBackend::new());
-
-    let provider = init_provider_or_skip!(backend.clone(), alias);
-
-    let bundle_hash = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff";
-    let secret = "TEST-RECOVERY-ENFORCEMENT";
-
+#[test]
+fn secure_enclave_requires_recovery_passphrase_unless_allowed() {
     // Attempt store without recovery_passphrase and allow_unrecoverable = false -> MUST fail
     let opts_disallowed = StorageOptions {
         label: None,
@@ -152,9 +144,7 @@ async fn secure_enclave_requires_recovery_passphrase_unless_allowed() {
         recovery_passphrase: None,
         allow_unrecoverable: false,
     };
-    let err = provider
-        .store_secret(bundle_hash, secret, opts_disallowed)
-        .await
+    let err = SecureEnclaveSecretStorageProvider::validate_store_options(&opts_disallowed)
         .unwrap_err();
     let msg = err.to_string();
     assert!(
@@ -162,31 +152,27 @@ async fn secure_enclave_requires_recovery_passphrase_unless_allowed() {
         "expected recovery_passphrase requirement error, got: {msg}"
     );
 
-    // Store with allow_unrecoverable = true -> succeeds
+    // Store with allow_unrecoverable = true -> Ok
     let opts_allowed = StorageOptions {
         label: None,
         passphrase: None,
         recovery_passphrase: None,
         allow_unrecoverable: true,
     };
-    provider
-        .store_secret(bundle_hash, secret, opts_allowed)
-        .await
-        .expect("store with allow_unrecoverable succeeded");
+    assert!(SecureEnclaveSecretStorageProvider::validate_store_options(&opts_allowed).is_ok());
 
-    provider.unenroll().expect("unenroll clean up");
+    // Store with recovery_passphrase -> Ok
+    let opts_with_rec = StorageOptions {
+        label: None,
+        passphrase: None,
+        recovery_passphrase: Some(Zeroizing::new("r".into())),
+        allow_unrecoverable: false,
+    };
+    assert!(SecureEnclaveSecretStorageProvider::validate_store_options(&opts_with_rec).is_ok());
 }
 
-#[tokio::test]
-async fn secure_enclave_rejects_caller_passphrase() {
-    let alias = format!("test_se_{}", Uuid::new_v4().simple());
-    let backend = Arc::new(MemoryStorageBackend::new());
-
-    let provider = init_provider_or_skip!(backend.clone(), alias);
-
-    let bundle_hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
-    let secret = "TEST-PASSPHRASE-REJECTION";
-
+#[test]
+fn secure_enclave_rejects_caller_passphrase() {
     let opts_with_pass = StorageOptions {
         label: None,
         passphrase: Some("caller-supplied-passphrase".to_string()),
@@ -194,16 +180,65 @@ async fn secure_enclave_rejects_caller_passphrase() {
         allow_unrecoverable: true,
     };
 
-    let err = provider
-        .store_secret(bundle_hash, secret, opts_with_pass)
-        .await
+    let err = SecureEnclaveSecretStorageProvider::validate_store_options(&opts_with_pass)
         .unwrap_err();
     assert!(
         err.to_string().contains("derives its passphrase from the Secure Enclave"),
         "expected passphrase rejection, got: {err}"
     );
+}
 
-    provider.unenroll().expect("unenroll clean up");
+#[test]
+fn secure_enclave_rejects_corrupted_kek_record() {
+    let alias = format!("test_se_corrupt_{}", Uuid::new_v4().simple());
+    let backend = Arc::new(MemoryStorageBackend::new());
+    let record_key = format!("knishio:kek:secure-enclave:{alias}");
+
+    // 1. Invalid JSON in backend record
+    backend.set_item(&record_key, "not json".to_string()).unwrap();
+    let err1 = SecureEnclaveSecretStorageProvider::new(backend.clone(), Some(&alias))
+        .err()
+        .expect("must fail on invalid JSON KEK record");
+    assert!(
+        err1.to_string().contains("Corrupted Secure Enclave KEK record"),
+        "expected corrupted KEK record error, got: {err1}"
+    );
+
+    // 2. Valid JSON but empty wrappedPassphrase
+    let empty_wrapped = serde_json::json!({
+        "version": 1,
+        "algorithm": "ECIES-Cofactor-VariableIV-X963-SHA256-AESGCM",
+        "wrappedPassphrase": ""
+    }).to_string();
+    backend.set_item(&record_key, empty_wrapped).unwrap();
+    let err2 = SecureEnclaveSecretStorageProvider::new(backend.clone(), Some(&alias))
+        .err()
+        .expect("must fail on empty wrappedPassphrase");
+    assert!(
+        err2.to_string().contains("Corrupted Secure Enclave KEK record"),
+        "expected corrupted KEK record error, got: {err2}"
+    );
+}
+
+#[tokio::test]
+async fn secure_enclave_constructor_fails_closed_or_succeeds_on_enclave() {
+    let alias = format!("test_se_ctor_{}", Uuid::new_v4().simple());
+    let backend = Arc::new(MemoryStorageBackend::new());
+
+    match SecureEnclaveSecretStorageProvider::new(backend, Some(&alias)) {
+        Ok(provider) => {
+            assert_eq!(provider.provider_type(), "secure-enclave-aes-gcm");
+            assert!(provider.is_hardware_backed());
+            provider.unenroll().expect("unenroll clean up");
+        }
+        Err(err) => {
+            let msg = err.to_string();
+            assert!(
+                msg.contains("Secure Enclave unavailable"),
+                "expected 'Secure Enclave unavailable' error on unentitled/restricted host, got: {msg}"
+            );
+        }
+    }
 }
 
 /// Positive-path Secure Enclave multi-instance persistence test.

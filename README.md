@@ -477,6 +477,22 @@ is **no response caching** (the connection pool is TCP-level only) — so a
 long-lived client never serves a stale read of ledger state. No fresh-read knob
 (e.g. a request policy) is required.
 
+## Secret storage
+
+Master secrets are stored at rest in the cross-SDK AES-256-GCM envelope (PBKDF2-HMAC-SHA256 ×100000, camelCase metadata; frozen in `sdks/shared-test-results/cross-platform-test-vectors.json`). Every SDK decrypts every other SDK's envelope.
+
+| Provider | `providerType` | Custody (`hardwareBacked`) | Where the key lives | Recovery passphrase |
+|---|---|---|---|---|
+| `MemorySecretStorageProvider` | `memory` | Software (`false`) | Process memory | Optional |
+| `AesGcmSecretStorageProvider` | `aes-gcm` | Software (`false`) | Any `StorageBackend` (`MemoryStorageBackend`, `FileStorageBackend` [0o600]) | Optional |
+| `OsKeychainSecretStorageProvider` | `os-keychain-aes-gcm` | Software (`false`) | OS login keychain ACL (feature `keyring`) | Optional |
+| `Tpm2SecretStorageProvider` | `tpm2-aes-gcm` | Hardware (`true` when `TpmIdentity::Hardware`) | Hardware TPM 2.0 NVRAM (feature `tpm`) | Required when `Tpm2Policy` is set unless `allow_unrecoverable` |
+| `SecureEnclaveSecretStorageProvider` | `secure-enclave-aes-gcm` | Hardware (`true`) | Apple Secure Enclave P-256 key via Data Protection Keychain (macOS, feature `secure-enclave`) | Required unless `allow_unrecoverable` |
+
+`hardwareBacked` is derived by the provider from the platform, never accepted from the caller; software providers always report `false`. A hardware provider refuses to store without a recovery passphrase unless `allow_unrecoverable` is set — the recovery envelope (`knishio:recovery:<bundleHash>`, `providerType: "aes-gcm"`) is *software* custody whose strength is bounded by that passphrase: enforce passphrase entropy or keep it on a second device.
+
+macOS note: `SecureEnclaveSecretStorageProvider` requires a process entitled with `keychain-access-groups` running inside an app bundle with an active Apple provisioning profile; unbundled CLI binaries fail closed safely (`errSecMissingEntitlement` / AMFI -413).
+
 ## Getting Help
 
 Knish.IO is under active development, and our team is ready to assist with integration questions. The best way to seek help is to stop by our [Telegram Support Channel](https://t.me/wishknish). You can also [send us a contact request](https://knish.io/contact) via our website.

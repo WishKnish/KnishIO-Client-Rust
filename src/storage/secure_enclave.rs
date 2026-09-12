@@ -174,6 +174,25 @@ impl SecureEnclaveSecretStorageProvider {
         let _ = self.backend.remove_item(&record_key);
         Ok(())
     }
+
+    /// Policy gates applied to every `store_secret`; pure so callers and tests can evaluate them without an enclave.
+    pub fn validate_store_options(options: &StorageOptions) -> Result<()> {
+        if options.passphrase.is_some() {
+            return Err(KnishIOError::SecretStorage(
+                "SecureEnclaveSecretStorageProvider derives its passphrase from the Secure Enclave; StorageOptions.passphrase is not accepted"
+                    .to_string(),
+            ));
+        }
+
+        if options.recovery_passphrase.is_none() && !options.allow_unrecoverable {
+            return Err(KnishIOError::SecretStorage(
+                "SecureEnclaveSecretStorageProvider requires recovery_passphrase unless allow_unrecoverable is true"
+                    .to_string(),
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -202,19 +221,7 @@ impl SecretStorageProvider for SecureEnclaveSecretStorageProvider {
         if secret.is_empty() {
             return Err(KnishIOError::SecretStorage("Secret cannot be empty".to_string()));
         }
-        if options.passphrase.is_some() {
-            return Err(KnishIOError::SecretStorage(
-                "SecureEnclaveSecretStorageProvider derives its passphrase from the Secure Enclave; StorageOptions.passphrase is not accepted"
-                    .to_string(),
-            ));
-        }
-
-        if options.recovery_passphrase.is_none() && !options.allow_unrecoverable {
-            return Err(KnishIOError::SecretStorage(
-                "SecureEnclaveSecretStorageProvider requires recovery_passphrase unless allow_unrecoverable is true"
-                    .to_string(),
-            ));
-        }
+        Self::validate_store_options(&options)?;
 
         let metadata = SecretStorageMetadata {
             bundle_hash: bundle_hash.to_string(),
