@@ -14,9 +14,11 @@ rather than written at release time; where the history does not substantiate a
 detail, the entry says so instead of guessing.
 
 
-## [Unreleased]
+## [1.1.0] — 2026-09-12
 ### Added
 
+- **`SecureEnclaveSecretStorageProvider`** (`secure-enclave` feature, macOS only): hardware-backed secret storage. A P-256 key generated inside the Apple Secure Enclave (`security-framework` 3.7 / `security-framework-sys` 2.17) wraps a random device passphrase with `ECIES-Cofactor-VariableIV-X963-SHA256-AESGCM`; the wrapped passphrase is kept in the storage backend under `knishio:kek:secure-enclave:<alias>` and the key in the Data Protection Keychain under label `io.knish.secret-storage:kek:<alias>`. The master secret is stored as the standard cross-SDK envelope under that passphrase, so the wire format is unchanged. `provider_type()` is `secure-enclave-aes-gcm`, `is_hardware_backed()` is `true`, `store_secret` requires `recovery_passphrase` unless `allow_unrecoverable`, and `unenroll()` deletes the enclave key and its KEK record. Construction fails closed with `Secure Enclave unavailable: the process needs a keychain-access-groups entitlement (errSecMissingEntitlement); code-sign the binary or run inside an app bundle` whenever the process is not entitled for the Data Protection Keychain — which includes every unbundled CLI and `cargo test` (AMFI kills even a Developer-signed unbundled binary that carries `keychain-access-groups` without a provisioning profile, error -413). The positive path therefore requires a provisioned `.app` bundle and is covered only by the two `#[ignore]` tests in `tests/secure_enclave.rs`; the fail-closed and option-policy tests run in CI on `macos-latest`.
+- **`SecureEnclaveSecretStorageProvider::validate_store_options(&StorageOptions) -> Result<()>`**: the pure policy check `store_secret` applies (`StorageOptions.passphrase` rejected; `recovery_passphrase` required unless `allow_unrecoverable`), exposed so callers and tests can evaluate it without an enclave.
 - **Secondary recovery envelope (`knishio:recovery:`)**: `SecretStorageProvider` adds `recover_secret` for re-enrolling master secrets from a secondary recovery envelope sealed under a user-held `recovery_passphrase`. `StorageOptions` gains `recovery_passphrase: Option<Zeroizing<String>>` and `allow_unrecoverable: bool`. Implemented across `AesGcmSecretStorageProvider`, `MemorySecretStorageProvider`, `OsKeychainSecretStorageProvider`, and `Tpm2SecretStorageProvider`: when a recovery passphrase is provided, `store_secret` seals a software AES-GCM recovery envelope under `knishio:recovery:<bundleHash>`, `delete_secret` removes both primary and recovery records, and `list_secrets` excludes recovery keys.
 - **TPM 2.0 PCR policy authorization (`Tpm2Policy`)**: `Tpm2SecretStorageProvider::new` accepts an optional `Tpm2Policy` specifying PCR bank and slot indices (default PCR 7) with optional auth. Sealing calculates the PCR policy digest via a trial auth session (`SessionType::Trial`) and passes it to `with_auth_policy`, while unsealing satisfies the policy using an active `PolicySession`. Policy parameters are preserved in the sealed record JSON at `knishio:kek:tpm2:<alias>`.
 - **`envelope::seal` and `envelope::open`**: custody-agnostic functions for PBKDF2/AES-GCM-256 envelope encryption, extracted from `AesGcmSecretStorageProvider` so providers share one implementation.
@@ -25,13 +27,14 @@ detail, the entry says so instead of guessing.
 - **`Tpm2SecretStorageProvider`** (`tpm` feature): TPM 2.0 hardware-enclave secret storage provider sealing a random device passphrase into a KeyedHash object under a deterministic ECC P-256 storage primary.
 ### Changed
 
-- **Fallible `StorageBackend` trait**: `get_item`, `set_item`, `remove_item`, and `keys` now return `crate::error::Result<T>`, enabling proper I/O and lock-poisoning error propagation for file, keychain, and hardware backends.
+- **BREAKING:** **`hardware_backed` is no longer a caller claim.** `AesGcmSecretStorageProvider::new` drops its third argument, `provider_type()` is always `aes-gcm` (it previously relabelled itself `tpm2-aes-gcm` on the flag alone), and `is_hardware_backed()` is always `false`. Envelopes previously written with a caller-supplied `true` were never attested and remain readable. Source-level break for callers that passed the option; the wire format (`metadata.hardwareBacked`, required boolean) is unchanged.
+- **BREAKING:** **Fallible `StorageBackend` trait**: `get_item`, `set_item`, `remove_item`, and `keys` now return `crate::error::Result<T>`, enabling proper I/O and lock-poisoning error propagation for file, keychain, and hardware backends.
 - **Optional metadata keys omitted when unset**: `SecretStorageMetadata` marks `label` with `#[serde(default, skip_serializing_if = "Option::is_none")]`, omitting unset optional keys from emitted envelope JSON instead of emitting `"label": null`, matching the cross-SDK convention.
-- **Durable storage backend required on hardware providers**: `OsKeychainSecretStorageProvider::new` and `Tpm2SecretStorageProvider::new` now require `backend: Arc<dyn StorageBackend>` instead of accepting `Option<Arc<dyn StorageBackend>>`. The KEK is durable; the backend must be too. Callers must supply an explicit storage backend rather than relying on an ephemeral in-memory default.
+- **BREAKING:** **Durable storage backend required on hardware providers**: `OsKeychainSecretStorageProvider::new` and `Tpm2SecretStorageProvider::new` now require `backend: Arc<dyn StorageBackend>` instead of accepting `Option<Arc<dyn StorageBackend>>`. The KEK is durable; the backend must be too. Callers must supply an explicit storage backend rather than relying on an ephemeral in-memory default.
 - **Mandatory recovery on TPM PCR policy**: When `Tpm2Policy` is configured on `Tpm2SecretStorageProvider`, `store_secret` fails closed unless `recovery_passphrase` is supplied or `allow_unrecoverable: true` is explicitly opted into, preventing permanent identity loss across firmware updates or PCR drift.
+- **BREAKING:** `SecretStorageProvider` gains the required trait method `recover_secret(bundle_hash, recovery_passphrase, options)`; third-party implementations of the trait must add it (every in-tree provider implements it).
 ### Fixed
 
-- **`hardware_backed` is no longer a caller claim.** `AesGcmSecretStorageProvider::new` drops its third argument, `provider_type()` is always `aes-gcm` (it previously relabelled itself `tpm2-aes-gcm` on the flag alone), and `is_hardware_backed()` is always `false`. Envelopes previously written with a caller-supplied `true` were never attested and remain readable. Source-level break for callers that passed the option; the wire format (`metadata.hardwareBacked`, required boolean) is unchanged.
 - **Fail-closed TPM custody check**: `tpm2::tpm_identity` classifies connected TPMs into `TpmIdentity::{Hardware, Software, Unknown}` by querying `PropertyTag::Manufacturer` and `VendorString1..4`. Unreadable properties or unexpected errors fail closed to `Unknown` (never claiming hardware custody). Known software signatures (`IBM ` + `SW*` for swtpm/libtpms, `MSFT` simulator strings) are classified as `Software`. Only verified non-software TPMs with readable identity properties evaluate to `hardware_backed = true`.
 
 ## [1.0.0] — 2026-09-10
@@ -305,7 +308,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.0.0...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.1.0...HEAD
+[1.1.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.1.0
 [1.0.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.0.0
 [0.9.5]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/0.9.5
 [0.9.4]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/0.9.4

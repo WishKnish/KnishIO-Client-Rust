@@ -1,6 +1,6 @@
 [package]
 name = "knishio-client"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.89"  # aes 0.9.3 / RustCrypto 2026 line floor; CI builds on stable
 authors = ["Eugene Teplitsky <eugene@wishknish.com>"]

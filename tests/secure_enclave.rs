@@ -29,12 +29,18 @@ macro_rules! init_provider_or_skip {
     };
 }
 
-/// Positive-path Secure Enclave custody test. Requires codesigned binary with keychain-access-groups
-/// entitlement (e.g. within an macOS .app bundle or signed with an Apple Developer identity).
+/// Positive-path Secure Enclave custody test.
 ///
-/// To run on an entitled Apple Silicon binary:
-/// `codesign -f -s - --entitlements se.entitlements <test_binary>`
-/// `cargo test --features secure-enclave --test secure_enclave -- --ignored`
+/// Requires a process that AMFI will validate for the restricted `keychain-access-groups`
+/// entitlement, i.e. a code-signed `.app` bundle carrying an active Apple provisioning profile
+/// whose application identifier matches the entitlement's access group. Not yet achieved on any
+/// host (2026-09-12): on Apple M4 / Darwin 25 an *unbundled* test binary signed with an Apple
+/// Development identity and carrying `keychain-access-groups` was killed at launch by amfid with
+/// `AppleMobileFileIntegrityError Code=-413 "No matching profile found"`, with and without
+/// `com.apple.application-identifier`. Ad-hoc signing (`codesign -s -`) cannot carry the
+/// entitlement, and `cargo test -- --ignored` relinks the test binary and discards any signature;
+/// once an entitled binary exists, run it directly:
+/// `<test_binary> --ignored --nocapture --test-threads=1`.
 #[tokio::test]
 #[ignore = "requires codesigned binary with keychain-access-groups entitlement"]
 async fn secure_enclave_custody_lifecycle_and_key_loss_recovery() {
