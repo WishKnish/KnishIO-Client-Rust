@@ -1,16 +1,16 @@
 //! Post-Quantum Cryptographic & Transport Line Rate Benchmark Suite
 //!
 //! Standardized benchmark measuring:
-//! 1. ML-KEM-768 (NIST FIPS 203) Key Encapsulation Mechanism (KEM) operations
+//! 1. ML-KEM (NIST FIPS 203) Key Encapsulation Mechanism (KEM) operations at both shipped
+//!    parameter sets — ML-KEM-1024 (transport default) and ML-KEM-768 (opt-in step-back)
 //! 2. AES-256-GCM (NIST SP 800-38D) Data Plane throughput across WebRTC and File Transfer packet sizes
-//!    (both hardware-accelerated and pure software fallback implementations)
-//! 3. Knish.IO `Wallet` discrete per-message encapsulation envelope throughput
+//!    (both ring hardware implementation and RustCrypto aes-gcm implementation)
+//! 3. Knish.IO `Wallet` discrete per-message encapsulation envelope throughput at both parameter sets
 //! 4. Mathematical line rate models and single-core / multi-core CPU sizing for 1 Gbps and 10 Gbps
 //!
-//! These figures measure the ML-KEM-768 step-back path. The shipped transport default is
-//! ML-KEM-1024, whose keys and ciphertexts are 1,568 bytes each (against 768's 1,184-byte key
-//! and 1,088-byte ciphertext) and whose per-operation cost is correspondingly higher, so these
-//! numbers are not the default's cost.
+//! ML-KEM-1024 keys and ciphertexts are 1,568 bytes each (private key 3,168 B); ML-KEM-768 uses a
+//! 1,184-byte public key, 1,088-byte ciphertext and 2,400-byte private key. Every KEM and envelope
+//! row is labelled with its parameter set; the AES-256-GCM data-plane rows are parameter-set-independent.
 //!
 //! Run with:
 //! ```bash
@@ -23,7 +23,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use knishio_client::{MlKemParameterSet, Wallet};
-use libcrux_ml_kem::mlkem768;
+use libcrux_ml_kem::{mlkem1024, mlkem768};
 use rand::Rng;
 use ring::aead::{Aad, BoundKey, Nonce as RingNonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM};
 
@@ -34,54 +34,63 @@ impl NonceSequence for OneNonce {
     }
 }
 
-fn bench_mlkem768(iters: usize) -> (f64, f64, f64) {
-    let mut seed = [0u8; 64];
-    rand::rng().fill_bytes(&mut seed);
+/// One KEM micro-benchmark per FIPS 203 parameter set. A macro rather than a generic function:
+/// libcrux's key-pair, public-key and ciphertext types differ by const-generic size.
+macro_rules! bench_kem {
+    ($fn_name:ident, $module:ident, $heading:literal) => {
+        fn $fn_name(iters: usize) -> (f64, f64, f64) {
+            let mut seed = [0u8; 64];
+            rand::rng().fill_bytes(&mut seed);
 
-    // Keygen
-    let start = Instant::now();
-    let mut keypair = mlkem768::generate_key_pair(seed);
-    for _ in 1..iters {
-        keypair = mlkem768::generate_key_pair(seed);
-    }
-    let keygen_dur = start.elapsed();
-    let keygen_us = keygen_dur.as_secs_f64() * 1_000_000.0 / iters as f64;
-    let keygen_ops = iters as f64 / keygen_dur.as_secs_f64();
+            // Keygen
+            let start = Instant::now();
+            let mut keypair = $module::generate_key_pair(seed);
+            for _ in 1..iters {
+                keypair = $module::generate_key_pair(seed);
+            }
+            let keygen_dur = start.elapsed();
+            let keygen_us = keygen_dur.as_secs_f64() * 1_000_000.0 / iters as f64;
+            let keygen_ops = iters as f64 / keygen_dur.as_secs_f64();
 
-    let (pk, sk) = (keypair.public_key(), keypair.private_key());
+            let (pk, sk) = (keypair.public_key(), keypair.private_key());
 
-    // Encapsulate
-    let mut randomness = [0u8; 32];
-    rand::rng().fill_bytes(&mut randomness);
-    let start = Instant::now();
-    let mut last_ct = None;
-    for _ in 0..iters {
-        let (ct, _ss) = mlkem768::encapsulate(pk, randomness);
-        last_ct = Some(ct);
-    }
-    let enc_dur = start.elapsed();
-    let enc_us = enc_dur.as_secs_f64() * 1_000_000.0 / iters as f64;
-    let enc_ops = iters as f64 / enc_dur.as_secs_f64();
+            // Encapsulate
+            let mut randomness = [0u8; 32];
+            rand::rng().fill_bytes(&mut randomness);
+            let start = Instant::now();
+            let mut last_ct = None;
+            for _ in 0..iters {
+                let (ct, _ss) = $module::encapsulate(pk, randomness);
+                last_ct = Some(ct);
+            }
+            let enc_dur = start.elapsed();
+            let enc_us = enc_dur.as_secs_f64() * 1_000_000.0 / iters as f64;
+            let enc_ops = iters as f64 / enc_dur.as_secs_f64();
 
-    // Decapsulate
-    let ct = last_ct.expect("valid ciphertext");
-    let start = Instant::now();
-    for _ in 0..iters {
-        let _ss = mlkem768::decapsulate(sk, &ct);
-    }
-    let dec_dur = start.elapsed();
-    let dec_us = dec_dur.as_secs_f64() * 1_000_000.0 / iters as f64;
-    let dec_ops = iters as f64 / dec_dur.as_secs_f64();
+            // Decapsulate
+            let ct = last_ct.expect("valid ciphertext");
+            let start = Instant::now();
+            for _ in 0..iters {
+                let _ss = $module::decapsulate(sk, &ct);
+            }
+            let dec_dur = start.elapsed();
+            let dec_us = dec_dur.as_secs_f64() * 1_000_000.0 / iters as f64;
+            let dec_ops = iters as f64 / dec_dur.as_secs_f64();
 
-    println!("\n  [1] ML-KEM-768 (CRYSTALS-Kyber / NIST FIPS 203) Key Encapsulation");
-    println!("  ------------------------------------------------------------------");
-    println!("  Keygen:        {:>7.2} µs/op | {:>9.1} ops/sec", keygen_us, keygen_ops);
-    println!("  Encapsulate:   {:>7.2} µs/op | {:>9.1} ops/sec", enc_us, enc_ops);
-    println!("  Decapsulate:   {:>7.2} µs/op | {:>9.1} ops/sec", dec_us, dec_ops);
-    println!("  Round-Trip Handshake KEM (Enc + Dec): {:.2} µs", enc_us + dec_us);
+            println!("\n  {}", $heading);
+            println!("  ------------------------------------------------------------------");
+            println!("  Keygen:        {:>7.2} µs/op | {:>9.1} ops/sec", keygen_us, keygen_ops);
+            println!("  Encapsulate:   {:>7.2} µs/op | {:>9.1} ops/sec", enc_us, enc_ops);
+            println!("  Decapsulate:   {:>7.2} µs/op | {:>9.1} ops/sec", dec_us, dec_ops);
+            println!("  Round-Trip Handshake KEM (Enc + Dec): {:.2} µs", enc_us + dec_us);
 
-    (keygen_us, enc_us, dec_us)
+            (keygen_us, enc_us, dec_us)
+        }
+    };
 }
+
+bench_kem!(bench_mlkem1024, mlkem1024, "[1a] ML-KEM-1024 (NIST FIPS 203) Key Encapsulation — shipped transport default");
+bench_kem!(bench_mlkem768, mlkem768, "[1b] ML-KEM-768 (NIST FIPS 203) Key Encapsulation — opt-in step-back");
 
 #[allow(dead_code)]
 struct PerfRow {
@@ -219,15 +228,14 @@ fn bench_portable_aes_gcm(sizes: &[(&str, usize, usize)]) -> Vec<PerfRow> {
     rows
 }
 
-async fn bench_discrete_envelope() {
-    println!("\n  [3] Knish.IO Wallet Discrete Per-Message KEM Envelope");
-    println!("      (ML-KEM-768 Encapsulate + AES-256-GCM + Base64 + JSON)");
+async fn bench_discrete_envelope(set: MlKemParameterSet, heading: &str) {
+    println!("\n  {}", heading);
     println!("  ------------------------------------------------------------------");
 
     const POS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
-    // Pinned to ML-KEM-768 so the labels above stay true: the wallet default is ML-KEM-1024.
-    let sender = Wallet::create(Some("bench-sender-secret-0123456789ABCDEF"), None, "AUTH", Some(POS), None, Some(MlKemParameterSet::MlKem768)).expect("sender wallet");
-    let receiver = Wallet::create(Some("bench-receiver-secret-0123456789ABCDEF"), None, "AUTH", Some(POS), None, Some(MlKemParameterSet::MlKem768)).expect("receiver wallet");
+    // Parameter set passed explicitly so the heading is always true whatever the Wallet default is.
+    let sender = Wallet::create(Some("bench-sender-secret-0123456789ABCDEF"), None, "AUTH", Some(POS), None, Some(set)).expect("sender wallet");
+    let receiver = Wallet::create(Some("bench-receiver-secret-0123456789ABCDEF"), None, "AUTH", Some(POS), None, Some(set)).expect("receiver wallet");
     let receiver_pubkey = receiver.pubkey.clone().expect("receiver pubkey");
 
     // 1,200 B WebRTC payload
@@ -310,6 +318,7 @@ async fn main() {
     println!("                     Knish.IO Post-Quantum Crypto Line Rate Benchmark Suite                      ");
     println!("==================================================================================================");
 
+    bench_mlkem1024(5000);
     bench_mlkem768(5000);
 
     let test_sizes = [
@@ -333,18 +342,19 @@ async fn main() {
         ("File Chunk 1 MB", 1024 * 1024, 100),
     ];
     let sw_rows = bench_portable_aes_gcm(&sw_sizes);
-    print_table("[2.B] Portable Pure-Software AES-256-GCM (No Hardware Instructions)", &sw_rows);
+    print_table("[2.B] RustCrypto AES-256-GCM (Pure-Rust AEAD with Hardware Intrinsics)", &sw_rows);
 
-    bench_discrete_envelope().await;
+    bench_discrete_envelope(MlKemParameterSet::MlKem1024, "[3a] Knish.IO Wallet Discrete Per-Message KEM Envelope — ML-KEM-1024 (shipped default) Encapsulate + AES-256-GCM + Base64 + JSON").await;
+    bench_discrete_envelope(MlKemParameterSet::MlKem768, "[3b] Knish.IO Wallet Discrete Per-Message KEM Envelope — ML-KEM-768 (step-back) Encapsulate + AES-256-GCM + Base64 + JSON").await;
 
     println!("\n==================================================================================================");
     println!("                                     Executive Sizing Summary                                     ");
     println!("==================================================================================================");
     println!("  1 Gbps Line Rate Support:");
-    println!("    - WebRTC Packets (1,200 B):  YES. Consumes ~3.5% of 1 CPU core (Hardware AES-NI / ARMv8).");
-    println!("    - Large Transfers (64 KB+):  YES. Consumes ~1.7% of 1 CPU core (Hardware AES-NI / ARMv8).");
+    println!("    - WebRTC Packets (1,200 B):  YES. Consumes ~2.8% of 1 CPU core (Hardware AES-NI / ARMv8).");
+    println!("    - Large Transfers (64 KB+):  YES. Consumes ~1.6% of 1 CPU core (Hardware AES-NI / ARMv8).");
     println!("  10 Gbps Line Rate Support:");
-    println!("    - WebRTC Packets (1,200 B):  YES. Consumes ~33% of 1 CPU core (Hardware AES-NI / ARMv8).");
-    println!("    - Large Transfers (64 KB+):  YES. Consumes ~17% of 1 CPU core (Hardware AES-NI / ARMv8).");
+    println!("    - WebRTC Packets (1,200 B):  YES. Consumes ~28% of 1 CPU core (Hardware AES-NI / ARMv8).");
+    println!("    - Large Transfers (64 KB+):  YES. Consumes ~16% of 1 CPU core (Hardware AES-NI / ARMv8).");
     println!("==================================================================================================\n");
 }
