@@ -233,7 +233,9 @@ async fn test_knishio_client_set_secret_auto_sync_and_reset() {
 #[path = "fixtures/mod.rs"]
 mod fixtures;
 use fixtures::{
-    FROZEN_LEGACY_0_9_5_ENVELOPE, FROZEN_TS_ENVELOPE, XSDK_BUNDLE, XSDK_PASSPHRASE, XSDK_PLAINTEXT,
+    FROZEN_JS_1_1_0_RECOVERY_ENVELOPE, FROZEN_LEGACY_0_9_5_ENVELOPE, FROZEN_TS_ENVELOPE,
+    XSDK_BUNDLE, XSDK_PASSPHRASE, XSDK_PLAINTEXT, XSDK_RECOVERY_PASSPHRASE,
+    XSDK_RECOVERY_PLAINTEXT, XSDK_REENROLLED_PRIMARY_PASSPHRASE,
 };
 async fn decrypt_frozen(envelope: &str) -> Result<Option<String>, KnishIOError> {
     let backend = Arc::new(MemoryStorageBackend::new());
@@ -323,6 +325,57 @@ async fn emits_camel_case_metadata_for_peer_sdks() {
     assert_eq!(json_with_label["metadata"]["label"], serde_json::json!("probe"));
     assert_eq!(metadata["hardwareBacked"], serde_json::json!(false), "a software provider must never emit hardwareBacked=true");
     assert_eq!(metadata["providerType"], serde_json::json!("aes-gcm"));
+}
+
+#[tokio::test]
+async fn recovers_the_frozen_cross_sdk_recovery_record_and_reenrolls_the_primary() {
+    let backend = Arc::new(MemoryStorageBackend::new());
+    let recovery_key = format!("knishio:recovery:{}", XSDK_BUNDLE);
+    let secret_key = format!("knishio:secret:{}", XSDK_BUNDLE);
+
+    backend
+        .set_item(&recovery_key, FROZEN_JS_1_1_0_RECOVERY_ENVELOPE.to_string())
+        .unwrap();
+    assert!(backend.get_item(&secret_key).unwrap().is_none());
+
+    let provider = AesGcmSecretStorageProvider::new(Some(backend.clone()), None);
+    provider
+        .recover_secret(
+            XSDK_BUNDLE,
+            XSDK_RECOVERY_PASSPHRASE,
+            StorageOptions::with_passphrase(XSDK_REENROLLED_PRIMARY_PASSPHRASE),
+        )
+        .await
+        .unwrap();
+
+    let decrypted = provider
+        .retrieve_secret(
+            XSDK_BUNDLE,
+            StorageOptions::with_passphrase(XSDK_REENROLLED_PRIMARY_PASSPHRASE),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        decrypted,
+        Some(XSDK_RECOVERY_PLAINTEXT.to_string()),
+        "recovered secret must match the expected plaintext"
+    );
+
+    let stored_secret_raw = backend.get_item(&secret_key).unwrap();
+    let stored_recovery_raw = backend.get_item(&recovery_key).unwrap();
+    assert!(stored_secret_raw.is_some());
+    assert!(stored_recovery_raw.is_some());
+
+    let stored_json: serde_json::Value =
+        serde_json::from_str(&stored_secret_raw.unwrap()).unwrap();
+    let metadata = &stored_json["metadata"];
+    assert_eq!(metadata["hardwareBacked"], serde_json::json!(false));
+    for key in &["bundleHash", "createdAt", "hardwareBacked", "providerType"] {
+        assert!(!metadata[key].is_null(), "emitted metadata must contain {key}");
+    }
+    for key in &["bundle_hash", "created_at", "hardware_backed", "provider_type"] {
+        assert!(metadata.get(key).is_none(), "snake_case key {key} must never be emitted");
+    }
 }
 
 #[tokio::test]

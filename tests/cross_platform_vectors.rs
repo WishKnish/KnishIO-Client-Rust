@@ -858,3 +858,29 @@ fn test_secret_storage_envelope_constant_matches_master_vector() {
     let parsed_frozen: serde_json::Value = serde_json::from_str(fixtures::FROZEN_TS_ENVELOPE).expect("valid JSON");
     assert_eq!(&parsed_frozen, master_payload, "inline FROZEN_TS_ENVELOPE must match the master vector");
 }
+
+#[test]
+fn test_secret_storage_envelope_tests1_is_a_recovery_record() {
+    let v: serde_json::Value = serde_json::from_str(VECTORS_JSON).expect("valid vectors JSON");
+    let test1 = &v["vectors"]["secret_storage_envelope"]["tests"][1];
+    let bundle_hash = test1["bundleHash"].as_str().unwrap();
+    assert_eq!(
+        test1["storageKey"].as_str().unwrap(),
+        format!("knishio:recovery:{}", bundle_hash)
+    );
+    assert_eq!(test1["payload"]["metadata"]["hardwareBacked"], false);
+    assert!(test1.get("recoveryPassphrase").is_some());
+    assert!(test1.get("passphrase").is_none());
+    assert_eq!(
+        test1["expectedPlaintext"].as_str().unwrap(),
+        fixtures::XSDK_RECOVERY_PLAINTEXT
+    );
+
+    let parsed_frozen: serde_json::Value =
+        serde_json::from_str(fixtures::FROZEN_JS_1_1_0_RECOVERY_ENVELOPE).expect("valid JSON");
+    assert_eq!(
+        &parsed_frozen,
+        &test1["payload"],
+        "inline FROZEN_JS_1_1_0_RECOVERY_ENVELOPE must match master vector payload"
+    );
+}
