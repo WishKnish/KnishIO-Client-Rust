@@ -170,7 +170,7 @@ fn bench_hardware_aes_gcm(sizes: &[(&str, usize, usize)]) -> Vec<PerfRow> {
     rows
 }
 
-fn bench_portable_aes_gcm(sizes: &[(&str, usize, usize)]) -> Vec<PerfRow> {
+fn bench_rustcrypto_aes_gcm(sizes: &[(&str, usize, usize)]) -> Vec<PerfRow> {
     let mut rows = Vec::new();
     let mut key_bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut key_bytes);
@@ -335,14 +335,14 @@ async fn main() {
     let hw_rows = bench_hardware_aes_gcm(&test_sizes);
     print_table("[2.A] Hardware-Accelerated AES-256-GCM (ARMv8-A Crypto / AES-NI PMULL)", &hw_rows);
 
-    let sw_sizes = [
+    let rustcrypto_sizes = [
         ("WebRTC (1,200 B)", 1_200, 20_000),
         ("WebRTC (1,400 B)", 1_400, 20_000),
         ("File Chunk 64 KB", 64 * 1024, 2_000),
         ("File Chunk 1 MB", 1024 * 1024, 100),
     ];
-    let sw_rows = bench_portable_aes_gcm(&sw_sizes);
-    print_table("[2.B] RustCrypto AES-256-GCM (Pure-Rust AEAD with Hardware Intrinsics)", &sw_rows);
+    let rustcrypto_rows = bench_rustcrypto_aes_gcm(&rustcrypto_sizes);
+    print_table("[2.B] RustCrypto AES-256-GCM (Pure-Rust AEAD with Hardware Intrinsics)", &rustcrypto_rows);
 
     bench_discrete_envelope(MlKemParameterSet::MlKem1024, "[3a] Knish.IO Wallet Discrete Per-Message KEM Envelope — ML-KEM-1024 (shipped default) Encapsulate + AES-256-GCM + Base64 + JSON").await;
     bench_discrete_envelope(MlKemParameterSet::MlKem768, "[3b] Knish.IO Wallet Discrete Per-Message KEM Envelope — ML-KEM-768 (step-back) Encapsulate + AES-256-GCM + Base64 + JSON").await;
