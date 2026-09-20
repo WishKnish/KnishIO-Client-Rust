@@ -49,6 +49,50 @@ pub use retry_policy::{
     RetryPolicy, RetryStrategy, RetryCondition, RetryExecutor, execute_with_retry
 };
 
+/// The post-quantum `CipherHash` wrapper query. The validator intercepts this
+/// operation, ML-KEM-decrypts `$Hash`, executes the inner request, and returns the
+/// encrypted response in `{ data: { CipherHash: { hash } } }`. Byte-identical to
+/// the string the other seven SDKs send.
+const CIPHER_HASH_QUERY: &str = "query ( $Hash: String! ) { CipherHash ( Hash: $Hash ) { hash } }";
+
+/// Light parse of a GraphQL body's operation type + root field name, for the
+/// CipherHash bypass decision (no full GraphQL parse needed). Operation type is the
+/// first `query`/`mutation`/`subscription` keyword (default `query` for an anonymous
+/// `{ ... }`); root field is the first identifier inside the top-level selection set.
+fn parse_operation(query: &str) -> (String, String) {
+    let lowered = query.to_ascii_lowercase();
+    let op_type = ["query", "mutation", "subscription"]
+        .iter()
+        .filter_map(|kw| {
+            lowered.find(kw).and_then(|idx| {
+                let before_ok = idx == 0
+                    || !lowered.as_bytes()[idx - 1].is_ascii_alphanumeric();
+                let after = idx + kw.len();
+                let after_ok = after >= lowered.len()
+                    || !lowered.as_bytes()[after].is_ascii_alphanumeric();
+                (before_ok && after_ok).then_some((idx, (*kw).to_string()))
+            })
+        })
+        .min_by_key(|(idx, _)| *idx)
+        .map(|(_, kw)| kw)
+        .unwrap_or_else(|| "query".to_string());
+
+    let name = query
+        .find('{')
+        .map(|brace| &query[brace + 1..])
+        .and_then(|rest| {
+            let start = rest.find(|c: char| c.is_ascii_alphabetic() || c == '_')?;
+            let tail = &rest[start..];
+            let end = tail
+                .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                .unwrap_or(tail.len());
+            Some(tail[..end].to_string())
+        })
+        .unwrap_or_default();
+
+    (op_type, name)
+}
+
 /// GraphQL request structure
 #[derive(Debug, Clone, Serialize)]
 pub struct GraphQLRequest {
@@ -173,10 +217,12 @@ pub struct GraphQLClient {
     socket_config: Option<SocketConfig>,
     /// Current authentication token
     auth_token: Option<String>,
-    /// Public key for cryptographic operations
+    /// The validator's advertised ML-KEM public key (the CipherHash encryption
+    /// target), learned at auth.
     pubkey: Option<String>,
-    /// Wallet identifier
-    wallet: Option<String>,
+    /// The client's AUTH wallet — holds the ML-KEM private key that decrypts
+    /// CipherHash responses addressed to us.
+    wallet: Option<crate::wallet::Wallet>,
     /// Whether to encrypt communications
     encrypt: bool,
     /// HTTP client with connection pooling
@@ -289,8 +335,16 @@ impl GraphQLClient {
         client
     }
 
-    /// Set authentication data (equivalent to setAuthData in JS)
-    pub fn set_auth_data(&mut self, token: String, pubkey: Option<String>, wallet: Option<String>) {
+    /// Set authentication data (equivalent to setAuthData in JS).
+    ///
+    /// `pubkey` is the validator's ML-KEM public key and `wallet` the client's AUTH
+    /// wallet; both are required before the CipherHash transport can encrypt.
+    pub fn set_auth_data(
+        &mut self,
+        token: String,
+        pubkey: Option<String>,
+        wallet: Option<crate::wallet::Wallet>,
+    ) {
         self.auth_token = Some(token);
         self.pubkey = pubkey;
         self.wallet = wallet;
@@ -326,14 +380,42 @@ impl GraphQLClient {
         self.auth_token.clone()
     }
 
-    /// Execute a GraphQL query
-    pub async fn query(&self, request: GraphQLRequest) -> Result<GraphQLResponse> {
-        let payload = json!({
-            "query": request.query,
-            "variables": request.variables,
-            "operationName": request.operation_name
-        });
+    /// Whether an outgoing GraphQL body should be wrapped in the CipherHash
+    /// envelope. Bypass (plaintext): introspection `__schema`, `ContinuId`, the
+    /// `AccessToken` mutation, and the U-isotope `ProposeMolecule` auth bootstrap —
+    /// the key exchange itself cannot be encrypted. Mirrors the JS/Kotlin/validator
+    /// bypass set exactly.
+    fn should_encrypt(&self, payload: &Value) -> bool {
+        let query = payload.get("query").and_then(Value::as_str).unwrap_or("");
+        let (op_type, name) = parse_operation(query);
 
+        if op_type == "query" && (name == "__schema" || name == "ContinuId") {
+            return false;
+        }
+        if op_type == "mutation" && name == "AccessToken" {
+            return false;
+        }
+        if op_type == "mutation" && name == "ProposeMolecule" {
+            let isotope = payload
+                .get("variables")
+                .and_then(|v| v.get("molecule"))
+                .and_then(|m| m.get("atoms"))
+                .and_then(|a| a.get(0))
+                .and_then(|a| a.get("isotope"))
+                .and_then(Value::as_str);
+            if isotope == Some("U") {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// POST a GraphQL payload, wrapping it in the ML-KEM `CipherHash` envelope when
+    /// encryption is enabled and the operation is not on the bypass list.
+    ///
+    /// Fails closed: if encryption is requested but no ML-KEM transport key is
+    /// available, the request is refused rather than silently sent in plaintext.
+    async fn send(&self, payload: Value) -> Result<GraphQLResponse> {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             "Content-Type",
@@ -341,8 +423,8 @@ impl GraphQLClient {
                 .parse()
                 .map_err(|_| KnishIOError::custom("Invalid Content-Type header"))?,
         );
-        
-        if let Some(ref token) = self.auth_token {
+
+        if let Some(token) = &self.auth_token {
             headers.insert(
                 "X-Auth-Token",
                 token
@@ -351,11 +433,38 @@ impl GraphQLClient {
             );
         }
 
+        let encrypt_this = self.encrypt && self.should_encrypt(&payload);
+
+        let (body, wallet) = if encrypt_this {
+            let wallet = self.wallet.as_ref().ok_or_else(|| {
+                KnishIOError::custom(
+                    "CipherHash: encryption is enabled but no ML-KEM transport key is available \
+                     — authenticate first, or the validator advertised no ML-KEM pubkey",
+                )
+            })?;
+            let server_pubkey = self.pubkey.as_deref().ok_or_else(|| {
+                KnishIOError::custom(
+                    "CipherHash: encryption is enabled but no ML-KEM transport key is available \
+                     — authenticate first, or the validator advertised no ML-KEM pubkey",
+                )
+            })?;
+
+            let hash_var = wallet
+                .encrypt_string_ml(&payload.to_string(), server_pubkey)
+                .await?;
+            (
+                json!({ "query": CIPHER_HASH_QUERY, "variables": { "Hash": hash_var } }),
+                Some(wallet),
+            )
+        } else {
+            (payload, None)
+        };
+
         let response = self
             .http_client
             .post(&self.server_uri)
             .headers(headers)
-            .json(&payload)
+            .json(&body)
             .send()
             .await
             .map_err(KnishIOError::from_network_error)?;
@@ -367,61 +476,60 @@ impl GraphQLClient {
             )));
         }
 
-        let graphql_response: GraphQLResponse = response
-            .json()
-            .await
-            .map_err(KnishIOError::from_network_error)?;
+        let text = response.text().await.map_err(KnishIOError::from_network_error)?;
+
+        let graphql_response: GraphQLResponse = match wallet {
+            Some(wallet) => {
+                let parsed: Value = serde_json::from_str(&text)
+                    .map_err(|e| KnishIOError::custom(format!("Invalid response JSON: {e}")))?;
+                match parsed
+                    .get("data")
+                    .and_then(|d| d.get("CipherHash"))
+                    .and_then(|c| c.get("hash"))
+                    .and_then(Value::as_str)
+                {
+                    // Encrypted reply → decrypt back to the inner GraphQL response.
+                    Some(hash) => {
+                        let map: HashMap<String, crate::wallet::EncryptedMessage> =
+                            serde_json::from_str(hash).map_err(|e| {
+                                KnishIOError::custom(format!("CipherHash: malformed response map: {e}"))
+                            })?;
+                        let inner = wallet
+                            .decrypt_my_message_ml(&map)
+                            .await
+                            .ok_or(KnishIOError::DecryptionKey)?;
+                        serde_json::from_str(&inner).map_err(|e| {
+                            KnishIOError::custom(format!("CipherHash: malformed inner response: {e}"))
+                        })?
+                    }
+                    // Plaintext (e.g. a validator-side error) — pass through unchanged.
+                    None => serde_json::from_str(&text)
+                        .map_err(|e| KnishIOError::custom(format!("Invalid response JSON: {e}")))?,
+                }
+            }
+            None => serde_json::from_str(&text)
+                .map_err(|e| KnishIOError::custom(format!("Invalid response JSON: {e}")))?,
+        };
 
         self.format_response(graphql_response)
     }
 
+    /// Execute a GraphQL query
+    pub async fn query(&self, request: GraphQLRequest) -> Result<GraphQLResponse> {
+        self.send(json!({
+            "query": request.query,
+            "variables": request.variables,
+            "operationName": request.operation_name
+        })).await
+    }
+
     /// Execute a GraphQL mutation
     pub async fn mutate(&self, request: GraphQLRequest) -> Result<GraphQLResponse> {
-        let payload = json!({
+        self.send(json!({
             "query": request.mutation,
             "variables": request.variables,
             "operationName": request.operation_name
-        });
-
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            "Content-Type",
-            "application/json"
-                .parse()
-                .map_err(|_| KnishIOError::custom("Invalid Content-Type header"))?,
-        );
-        
-        if let Some(ref token) = self.auth_token {
-            headers.insert(
-                "X-Auth-Token",
-                token
-                    .parse()
-                    .map_err(|_| KnishIOError::custom("Invalid auth token header"))?,
-            );
-        }
-
-        let response = self
-            .http_client
-            .post(&self.server_uri)
-            .headers(headers)
-            .json(&payload)
-            .send()
-            .await
-            .map_err(KnishIOError::from_network_error)?;
-
-        if !response.status().is_success() {
-            return Err(KnishIOError::custom(format!(
-                "HTTP error: {}",
-                response.status()
-            )));
-        }
-
-        let graphql_response: GraphQLResponse = response
-            .json()
-            .await
-            .map_err(KnishIOError::from_network_error)?;
-
-        self.format_response(graphql_response)
+        })).await
     }
 
     /// Subscribe to GraphQL subscription (WebSocket-based)
@@ -586,5 +694,91 @@ impl GraphQLClient {
     pub fn unsubscribe_all(&self) {
         // This is a simplified version for now - just a compatibility stub
         // Real implementations would use unsubscribe_all_async()
+    }
+}
+
+#[cfg(test)]
+mod cipher_hash_transport_tests {
+    use super::*;
+
+    fn body(query: &str, variables: Value) -> Value {
+        json!({ "query": query, "variables": variables, "operationName": Value::Null })
+    }
+
+    fn client() -> GraphQLClient {
+        GraphQLClient::new("http://127.0.0.1:1/graphql")
+    }
+
+    /// The auth bootstrap and introspection must stay plaintext — the key exchange
+    /// cannot be encrypted with a key it has not established yet.
+    #[test]
+    fn bypass_set_is_not_encrypted() {
+        let c = client();
+
+        assert!(!c.should_encrypt(&body("query { __schema { types { name } } }", Value::Null)));
+        assert!(!c.should_encrypt(&body("query ( $bundle: String ) { ContinuId ( bundle: $bundle ) { address } }", Value::Null)));
+        assert!(!c.should_encrypt(&body("mutation { AccessToken { token } }", Value::Null)));
+        assert!(!c.should_encrypt(&body(
+            "mutation ( $molecule: MoleculeInput! ) { ProposeMolecule ( molecule: $molecule ) { status } }",
+            json!({ "molecule": { "atoms": [ { "isotope": "U" } ] } }),
+        )));
+    }
+
+    /// Everything else — including a ProposeMolecule that is NOT the U-isotope auth
+    /// bootstrap — goes through the encrypted envelope.
+    #[test]
+    fn ordinary_operations_are_encrypted() {
+        let c = client();
+
+        assert!(c.should_encrypt(&body("query { Balance { address } }", Value::Null)));
+        assert!(c.should_encrypt(&body(
+            "mutation ( $molecule: MoleculeInput! ) { ProposeMolecule ( molecule: $molecule ) { status } }",
+            json!({ "molecule": { "atoms": [ { "isotope": "M" } ] } }),
+        )));
+    }
+
+    #[test]
+    fn parse_operation_reads_type_and_root_field() {
+        assert_eq!(parse_operation("query { Balance { address } }"), ("query".into(), "Balance".into()));
+        assert_eq!(
+            parse_operation("mutation ( $m: MoleculeInput! ) { ProposeMolecule ( molecule: $m ) { status } }"),
+            ("mutation".into(), "ProposeMolecule".into())
+        );
+        // Anonymous selection sets default to `query`.
+        assert_eq!(parse_operation("{ ContinuId { address } }"), ("query".into(), "ContinuId".into()));
+    }
+
+    /// Encryption enabled with no transport key must FAIL CLOSED rather than
+    /// silently falling back to plaintext.
+    #[tokio::test]
+    async fn encryption_without_a_transport_key_fails_closed() {
+        let mut c = client();
+        c.set_encryption(true);
+
+        let err = c
+            .query(create_query_request("query { Balance { address } }", None))
+            .await
+            .expect_err("an encrypted request with no key must not be sent");
+        assert!(
+            err.to_string().contains("CipherHash: encryption is enabled but no ML-KEM transport key"),
+            "expected the fail-closed error, got: {err}"
+        );
+    }
+
+    /// A bypassed operation is NOT blocked by the missing-key check — it is allowed
+    /// to reach the network (and fails there, against an unroutable URI).
+    #[tokio::test]
+    async fn bypassed_operation_is_not_blocked_by_the_key_check() {
+        let mut c = client();
+        c.set_encryption(true);
+
+        let err = c
+            .query(create_query_request("query { __schema { types { name } } }", None))
+            .await
+            .expect_err("an unroutable URI must fail at the network layer");
+        assert!(
+            !err.to_string().contains("CipherHash:"),
+            "introspection must bypass the CipherHash key check, got: {err}"
+        );
     }
 }

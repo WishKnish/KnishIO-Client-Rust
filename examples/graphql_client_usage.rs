@@ -47,11 +47,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         retry_config,
     );
 
-    // Set authentication (in a real app, you'd get this from auth flow)
+    // Set authentication (in a real app, you'd get this from the auth flow, which
+    // also supplies the AUTH wallet that the CipherHash transport encrypts with).
     client.set_auth_data(
         "your-auth-token-here".to_string(),
         Some("your-public-key".to_string()),
-        Some("your-wallet-id".to_string()),
+        None,
     );
 
     println!("Client created and configured\n");
@@ -178,7 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ws_client.set_auth_data(
         "your-auth-token-here".to_string(),
         Some("your-public-key".to_string()),
-        Some("your-wallet-id".to_string()),
+        None,
     );
 
     let subscription_request = create_subscription_request(

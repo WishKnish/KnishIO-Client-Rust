@@ -943,6 +943,36 @@ impl Wallet {
         base64::engine::general_purpose::STANDARD.encode(digest)
     }
 
+    /// Post-quantum `CipherHash` request envelope: a stringified single-recipient map
+    /// `{ "<hash_share(recipient_pubkey)>": {cipherText, encryptedMessage} }`.
+    ///
+    /// This is the wire shape the Rust validator's `CipherHash` handler decrypts, and
+    /// the one the JS/TS/Kotlin/PHP/Python/C/C++ SDKs produce from `encryptStringML`.
+    /// The plaintext is the request body as a JSON string literal, matching the
+    /// reference clients (`encryptMessage(JSON.stringify(body))`).
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - The GraphQL request body to seal
+    /// * `recipient_pubkey` - Base64 ML-KEM public key of the validator
+    ///
+    /// # Returns
+    ///
+    /// The stringified single-recipient envelope map
+    pub async fn encrypt_string_ml(&self, message: &str, recipient_pubkey: &str) -> Result<String> {
+        let envelope = self
+            .encrypt_message(
+                &serde_json::Value::String(message.to_string()),
+                recipient_pubkey,
+            )
+            .await?;
+
+        let mut map: HashMap<String, EncryptedMessage> = HashMap::new();
+        map.insert(Self::hash_share(recipient_pubkey), envelope);
+
+        serde_json::to_string(&map).map_err(Into::into)
+    }
+
     /// Decrypt a `CipherHash` map addressed to THIS wallet's ML-KEM public key
     ///
     /// Returns the RAW decrypted text (not JSON-parsed; it replaces the response body for the
@@ -1433,5 +1463,72 @@ mod tests {
         let json = r#"{"balance":1000,"token":"TEST","tokenUnits":[],"tradeRates":{},"molecules":{}}"#;
         let wallet: Wallet = serde_json::from_str(json).unwrap();
         assert_eq!(wallet.balance, "1000");
+    }
+
+    /// The `CipherHash` request envelope must decapsulate on the receiving wallet —
+    /// the exact path the Rust validator executes in `decrypt_request_with_identity`.
+    /// Proven at both parameter sets.
+    async fn encrypt_string_ml_round_trip(set: MlKemParameterSet) {
+        let client = Wallet::create(
+            Some(&"a".repeat(2048)),
+            None,
+            "AUTH",
+            Some(&"1".repeat(64)),
+            Some("BASE64"),
+            Some(set),
+        ).expect("client wallet");
+        let validator = Wallet::create(
+            Some(&"b".repeat(2048)),
+            None,
+            "AUTH",
+            Some(&"2".repeat(64)),
+            Some("BASE64"),
+            Some(set),
+        ).expect("validator wallet");
+
+        let validator_pubkey = validator.pubkey.clone().expect("validator pubkey");
+        let body = r#"{"query":"query { Balance { address } }","variables":null}"#;
+
+        let envelope_json = client
+            .encrypt_string_ml(body, &validator_pubkey)
+            .await
+            .expect("encrypt_string_ml");
+
+        let map: HashMap<String, EncryptedMessage> =
+            serde_json::from_str(&envelope_json).expect("envelope parses as a recipient map");
+
+        // Single recipient, addressed by hash_share — matches the validator's lookup.
+        assert_eq!(map.len(), 1, "the request envelope addresses exactly one recipient");
+        assert!(
+            map.contains_key(&Wallet::hash_share(&validator_pubkey)),
+            "envelope must be keyed by hash_share(validator_pubkey)"
+        );
+
+        // The validator recovers the inner request with `decrypt_message` and unwraps
+        // the JSON string (see the validator's `decrypt_request_with_identity`). The
+        // request direction seals a JSON *string*; the response direction seals a JSON
+        // *object*, which is why the reply path reads the raw text instead.
+        let envelope = map
+            .get(&Wallet::hash_share(&validator_pubkey))
+            .expect("envelope addressed to the validator");
+        let decrypted = validator
+            .decrypt_message(envelope)
+            .await
+            .expect("the validator's wallet must decrypt the envelope");
+        let recovered = match decrypted {
+            serde_json::Value::String(s) => s,
+            other => other.to_string(),
+        };
+        assert_eq!(recovered, body, "decrypted plaintext must be the original request body");
+    }
+
+    #[tokio::test]
+    async fn encrypt_string_ml_envelope_decrypts_on_the_validator_1024() {
+        encrypt_string_ml_round_trip(MlKemParameterSet::MlKem1024).await;
+    }
+
+    #[tokio::test]
+    async fn encrypt_string_ml_envelope_decrypts_on_the_validator_768() {
+        encrypt_string_ml_round_trip(MlKemParameterSet::MlKem768).await;
     }
 }

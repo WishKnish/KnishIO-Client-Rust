@@ -19,11 +19,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     println!("✓ GraphQL client created successfully");
     
-    // Test authentication
+    // Test authentication. The wallet carries the ML-KEM private key used by the
+    // CipherHash transport; `None` leaves the client on the plaintext path.
     client.set_auth_data(
         "test-token".to_string(),
         Some("test-pubkey".to_string()),
-        Some("test-wallet".to_string()),
+        None,
     );
     
     println!("✓ Authentication data set");

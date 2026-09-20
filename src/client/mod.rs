@@ -984,6 +984,21 @@ impl KnishIOClient {
         self.auth_token.as_ref()
     }
     
+    /// Push the current auth token's transport material (JWT, the validator's
+    /// ML-KEM pubkey, and our AUTH wallet) down to the GraphQL client.
+    ///
+    /// The transport reads its OWN copies: the JWT for `X-Auth-Token`, and the
+    /// pubkey/wallet pair for the `CipherHash` encrypted channel. Without this the
+    /// transport stays unauthenticated and cannot encrypt.
+    fn propagate_auth_to_transport(&mut self) {
+        let Some(auth_data) = self.auth_token.as_ref().map(AuthToken::get_auth_data) else {
+            return;
+        };
+        if let Some(client) = self.client.as_mut() {
+            client.set_auth_data(auth_data.token, auth_data.pubkey, auth_data.wallet);
+        }
+    }
+
     /// Set an authentication token (equivalent to setAuthToken in JS)
     ///
     /// # Arguments
@@ -991,11 +1006,13 @@ impl KnishIOClient {
     /// * `token` - AuthToken to set as current
     pub fn set_auth_token(&mut self, token: AuthToken) {
         self.auth_token = Some(token.clone());
-        
+
         // Store for current URI
         if let Some(current_uri) = self.get_current_uri() {
             self.auth_token_objects.insert(current_uri, token);
         }
+
+        self.propagate_auth_to_transport();
     }
     
     /// Clear the current authentication token (equivalent to clearAuthToken in JS)
@@ -3193,6 +3210,7 @@ impl KnishIOClient {
 
                 // Set in client (matches JS: this.setAuthToken(authToken))
                 self.auth_token = Some(auth_token.clone());
+                self.propagate_auth_to_transport();
 
                 Ok(auth_token)
             } else {
@@ -3259,6 +3277,15 @@ impl KnishIOClient {
                 serde_json::json!(encrypt.unwrap_or(false).to_string())
             );
 
+            // PQ-transport: convey the AUTH source wallet's ML-KEM public key as a
+            // SIGNED `walletPubkey` meta on the U-atom, so the validator can encrypt
+            // CipherHash responses back to THIS wallet (the one holding the private
+            // key that decrypts them). Signed → tamper-proof. Matches the JS reference
+            // and the validator's `extract_enc_pubkey`. Only when present.
+            if let Some(pk) = wallet.pubkey.as_ref() {
+                meta_map.insert("walletPubkey".to_string(), serde_json::json!(pk));
+            }
+
             mutation.fill_molecule(crate::mutation::request_authorization::RequestAuthorizationParams {
                 meta: meta_map
             })?;
@@ -3295,14 +3322,6 @@ impl KnishIOClient {
                     .and_then(|p| p.as_str())
                     .map(|s| s.to_string());
 
-                // Propagate the JWT to the GraphQL client so subsequent (non-public) requests
-                // carry the X-Auth-Token header — the client's mutate()/query() read their OWN
-                // auth_token, which is otherwise never set (only the KnishIOClient field was),
-                // causing 401 on every post-auth request.
-                if let Some(ref mut client) = self.client {
-                    client.set_auth_data(token_str.clone(), pubkey.clone(), None);
-                }
-
                 // Create AuthToken (matches JS: AuthToken.create(response.payload(), wallet))
                 let auth_token = AuthToken::create(
                     token_str,
@@ -3314,6 +3333,12 @@ impl KnishIOClient {
 
                 // Store in self.auth_token
                 self.auth_token = Some(auth_token.clone());
+
+                // Propagate the JWT, the validator's ML-KEM pubkey and our AUTH wallet
+                // to the GraphQL client: subsequent requests need the X-Auth-Token
+                // header, and the CipherHash transport needs the key pair to encrypt
+                // requests and decrypt the replies addressed back to this wallet.
+                self.propagate_auth_to_transport();
 
                 Ok(auth_token)
             } else {
