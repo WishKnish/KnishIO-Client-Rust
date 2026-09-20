@@ -93,6 +93,23 @@ impl MetaItem {
             value: value.into(),
         }
     }
+
+    /// Build a metadata item from a JSON value, preserving string values verbatim.
+    ///
+    /// `Value::to_string()` JSON-encodes a string, so `json!("true")` becomes the six
+    /// bytes `"true"` — quotes included. Every other SDK signs the bare literal, and the
+    /// validator matches bare literals (`encrypt == "true"`, base64 `walletPubkey`), so
+    /// the quoted form silently disabled encrypted-transport enforcement for Rust
+    /// sessions. Non-string values keep their JSON encoding.
+    pub fn from_json(key: impl Into<String>, value: &serde_json::Value) -> Self {
+        MetaItem {
+            key: key.into(),
+            value: match value {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            },
+        }
+    }
 }
 
 // Re-export TokenUnit from the dedicated token_unit module

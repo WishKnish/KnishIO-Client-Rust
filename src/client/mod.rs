@@ -866,7 +866,7 @@ impl KnishIOClient {
             // Convert meta HashMap to Vec<MetaItem> if provided
             let meta_items: Vec<MetaItem> = meta.unwrap_or_default()
                 .iter()
-                .map(|(k, v)| MetaItem::new(k, v.to_string()))
+                .map(|(k, v)| MetaItem::from_json(k, v))
                 .collect();
 
             // Initialize authorization on molecule
@@ -1164,6 +1164,13 @@ impl KnishIOClient {
     /// * `encrypt` - Whether to enable ML-KEM quantum encryption
     pub fn set_encrypt(&mut self, encrypt: bool) {
         self.encrypt = encrypt;
+        // The transport carries its own flag and `GraphQLClient::send` reads THAT one, so a
+        // client-only assignment leaves the session signed `encrypt: "true"` while every request
+        // still goes out in the clear — the downgrade an enforcing validator refuses. Mirrors
+        // `switch_encryption`, which always propagated.
+        if let Some(client) = self.client.as_mut() {
+            client.set_encryption(encrypt);
+        }
         self.log("info", &format!("Encryption {}", if encrypt { "enabled" } else { "disabled" }));
     }
     
@@ -3540,5 +3547,36 @@ impl std::fmt::Debug for KnishIOClient {
             .field("encrypt", &self.encrypt)
             .field("logging", &self.logging)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KnishIOClient;
+
+    /// `set_encrypt` must reach the GraphQL transport, not just the client's own flag:
+    /// `GraphQLClient::send` decides encryption from ITS copy, so a client-only assignment
+    /// authenticates as an encrypted session and then sends plaintext.
+    #[tokio::test]
+    async fn set_encrypt_reaches_the_transport() {
+        let mut client = KnishIOClient::new(
+            "http://localhost:8081/graphql",
+            None,
+            None,
+            None,
+            None,
+            Some(false),
+        );
+
+        client.set_encrypt(true);
+        let stats = client.client.as_ref().expect("transport").get_stats().await;
+        assert!(
+            stats.encryption_enabled,
+            "set_encrypt(true) must enable encryption on the GraphQL transport, not only on the client"
+        );
+
+        client.set_encrypt(false);
+        let stats = client.client.as_ref().expect("transport").get_stats().await;
+        assert!(!stats.encryption_enabled, "set_encrypt(false) must disable it again");
     }
 }

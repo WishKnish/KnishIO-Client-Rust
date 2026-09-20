@@ -48,7 +48,7 @@ impl MutationRequestAuthorization {
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
             // Convert HashMap to Vec<MetaItem>
             let meta_items: Vec<MetaItem> = params.meta.iter()
-                .map(|(k, v)| MetaItem::new(k, v.to_string()))
+                .map(|(k, v)| MetaItem::from_json(k, v))
                 .collect();
             
             molecule.init_authorization(meta_items)?;
@@ -72,10 +72,7 @@ impl MutationRequestAuthorization {
             let meta = &params.meta;
             // Convert HashMap to Vec<MetaItem> for JavaScript compatibility
             let meta_items: Vec<crate::types::MetaItem> = meta.iter()
-                .map(|(k, v)| crate::types::MetaItem {
-                    key: k.clone(),
-                    value: v.to_string(),
-                })
+                .map(|(k, v)| crate::types::MetaItem::from_json(k, v))
                 .collect();
                 
             // Initialize authorization metadata like JavaScript SDK
@@ -158,5 +155,48 @@ mod tests {
         };
         
         assert_eq!(params.meta.len(), 2);
+    }
+
+    /// The validator matches the signed literals (`encrypt == "true"`, base64 `walletPubkey`).
+    /// `serde_json::Value::to_string()` would JSON-encode them, so the U-atom used to carry
+    /// `"true"` — quotes included — and enforcement silently never applied to a Rust session.
+    #[test]
+    fn signed_auth_meta_carries_bare_literals_not_json_encoded_strings() {
+        use crate::wallet::Wallet;
+
+        let secret = crate::crypto::generate_secret("auth-meta-parity");
+        let wallet = Wallet::new(Some(&secret), None, Some("AUTH"), None, None, None, None, None).unwrap();
+        let pubkey = wallet.pubkey.clone().expect("AUTH wallet ML-KEM pubkey");
+
+        let mut molecule = Molecule::new();
+        molecule.secret = Some(secret.clone());
+        molecule.source_wallet = Some(wallet);
+        molecule.remainder_wallet =
+            Some(Wallet::create(Some(&secret), None, "USER", None, None, None).unwrap());
+
+        let mut meta = HashMap::new();
+        meta.insert("encrypt".to_string(), json!(true.to_string()));
+        meta.insert("walletPubkey".to_string(), json!(pubkey.clone()));
+
+        let mut mutation = MutationRequestAuthorization::from_molecule(molecule);
+        mutation.fill_molecule(RequestAuthorizationParams { meta }).unwrap();
+
+        let u_atom = mutation
+            .molecule()
+            .atoms
+            .iter()
+            .find(|a| a.isotope == crate::types::Isotope::U)
+            .expect("authorization U-atom");
+        let value = |key: &str| {
+            u_atom
+                .meta
+                .iter()
+                .find(|m| m.key == key)
+                .map(|m| m.value.clone())
+                .unwrap_or_else(|| panic!("{key} meta missing"))
+        };
+
+        assert_eq!(value("encrypt"), "true");
+        assert_eq!(value("walletPubkey"), pubkey);
     }
 }
