@@ -14,6 +14,47 @@ rather than written at release time; where the history does not substantiate a
 detail, the entry says so instead of guessing.
 
 
+## [1.2.0] — 2026-09-20
+
+### Added
+
+- **Outbound ML-KEM `CipherHash` transport**: `Wallet::encrypt_string_ml`, and
+  `GraphQLClient::send` wraps every non-bypassed operation in `CIPHER_HASH_QUERY` and decrypts
+  the reply. Authentication signs the `walletPubkey` U-atom meta and propagates the token, the
+  validator's ML-KEM pubkey and the AUTH wallet to the transport (`propagate_auth_to_transport`).
+  Before this, `set_encrypt(true)` was a no-op on the wire and the Rust SDK could not use the
+  encrypted channel at all.
+
+### Changed
+
+- Encryption **fails closed**: `GraphQLClient::send` returns an error when encryption is enabled
+  but no ML-KEM transport key is available, instead of sending the request in plaintext.
+
+### Fixed
+
+- **Signed metas are no longer JSON-encoded.** `MetaItem::from_json` keeps a `Value::String`
+  verbatim, where `Value::to_string()` produced the six bytes `"true"` — quotes included — for
+  `encrypt` and a quoted base64 for `walletPubkey`. The validator matches bare literals
+  (`encrypt == "true"`) and base64-decodes `walletPubkey`, so a Rust session was recorded as
+  plaintext no matter what it signed: encrypted-transport enforcement never applied to it, and
+  CipherHash replies were addressed to an unparseable key. All seven meta-building sites now use
+  `from_json` (`client/mod.rs`, `mutation/{request_authorization,create_meta,create_token,
+  request_tokens,mod}.rs`); non-string values keep their JSON encoding, so the frozen cross-SDK
+  vectors are unchanged. Pinned by
+  `signed_auth_meta_carries_bare_literals_not_json_encoded_strings`.
+- **`KnishIOClient::set_encrypt` now reaches the transport.** Only `switch_encryption` propagated
+  to the GraphQL client, and `GraphQLClient::send` reads its own flag — so a client that enabled
+  encryption through `set_encrypt` authenticated as an encrypted session and then sent plaintext,
+  which an enforcing validator refuses. Pinned by `set_encrypt_reaches_the_transport`.
+
+### Notes
+
+- `tests/cipherhash_live.rs` now carries the same two cases as the other SDKs (transparent
+  round-trip; `encrypt: true` session refused when it drops to plaintext) and passed against
+  `testnet.knish.io` on 2026-09-20 at ML-KEM-1024 and ML-KEM-768. Run as found before the two
+  fixes above, its single case passed only because the validator never saw this SDK's `encrypt`
+  request.
+
 ## [1.1.0] — 2026-09-12
 ### Added
 
@@ -308,7 +349,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.1.0...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.2.0...HEAD
+[1.2.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.2.0
 [1.1.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.1.0
 [1.0.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.0.0
 [0.9.5]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/0.9.5
