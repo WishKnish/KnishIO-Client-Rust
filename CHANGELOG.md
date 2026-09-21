@@ -54,6 +54,12 @@ detail, the entry says so instead of guessing.
   `testnet.knish.io` on 2026-09-20 at ML-KEM-1024 and ML-KEM-768. Run as found before the two
   fixes above, its single case passed only because the validator never saw this SDK's `encrypt`
   request.
+- Ledger compatibility of the signed-meta fix: any STRING meta a Rust client ≤ 1.1.0 wrote through
+  `create_meta`, `create_token` or `request_tokens` is stored on-ledger with its JSON quotes
+  (`"foo"`), because the same `Value::to_string()` conversion applied there too. 1.2.0 writes them
+  bare, as every other SDK always did, so a value-equality query against meta written by an older
+  Rust client must include the quotes. Numbers, objects and arrays are unaffected. No in-repo
+  consumer (`apps/knishsec`, `apps/knishio-cli`) uses those paths.
 
 ## [1.1.0] — 2026-09-12
 ### Added
