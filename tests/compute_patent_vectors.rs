@@ -1,14 +1,17 @@
 /// Compute test vectors for patent Appendix B
-/// Run with: cargo test --test compute_patent_vectors -- --nocapture
+/// Run with: cargo test --test compute_patent_vectors -- --ignored --nocapture
 ///
 /// This generates actual cryptographic outputs for the provisional patent's
-/// test vector appendix, replacing [TO BE COMPUTED] placeholders.
+/// test vector appendix, replacing [TO BE COMPUTED] placeholders. It asserts no
+/// canonical expectation, so every test is ignored by default; the canonical values
+/// are asserted by `patent_vector_verification.rs`.
 
 use knishio_client::crypto::{generate_key, generate_address, generate_ots_signature};
 use knishio_client::atom::Atom;
 use knishio_client::types::Isotope;
 
 #[test]
+#[ignore = "generator: prints vector values; asserts no canonical expectation"]
 fn compute_tv1_standard_hex_key_derivation() {
     let secret = "d4f5a6b7c8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4";
     let token = "KNISH";
@@ -28,6 +31,7 @@ fn compute_tv1_standard_hex_key_derivation() {
 }
 
 #[test]
+#[ignore = "generator: prints vector values; asserts no canonical expectation"]
 fn compute_tv2_non_hex_secret_normalization() {
     let secret = "my_secret_passphrase";
     let token = "KNISH";
@@ -47,6 +51,7 @@ fn compute_tv2_non_hex_secret_normalization() {
 }
 
 #[test]
+#[ignore = "generator: prints vector values; asserts no canonical expectation"]
 fn compute_tv3_non_hex_position_normalization() {
     let secret = "d4f5a6b7c8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4";
     let token = "GOLD";
@@ -66,6 +71,7 @@ fn compute_tv3_non_hex_position_normalization() {
 }
 
 #[test]
+#[ignore = "generator: prints vector values; asserts no canonical expectation"]
 fn compute_tv4_leading_zeros_position() {
     let secret = "d4f5a6b7c8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4";
     let token = "KNISH";
@@ -85,6 +91,7 @@ fn compute_tv4_leading_zeros_position() {
 }
 
 #[test]
+#[ignore = "generator: prints vector values; asserts no canonical expectation"]
 fn compute_tv5_bigint_carry() {
     let secret = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
     let token = "KNISH";
@@ -104,6 +111,7 @@ fn compute_tv5_bigint_carry() {
 }
 
 #[test]
+#[ignore = "generator: prints vector values; asserts no canonical expectation"]
 fn compute_tv6_molecular_hash() {
     // Create 3 V-atoms matching the patent's test vector specification
     let atom0 = Atom {
@@ -170,6 +178,7 @@ fn compute_tv6_molecular_hash() {
 }
 
 #[test]
+#[ignore = "generator: prints vector values; asserts no canonical expectation"]
 fn compute_tv7_wots_signature() {
     // First compute TV1's key
     let secret = "d4f5a6b7c8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4";
@@ -255,6 +264,7 @@ fn compute_tv7_wots_signature() {
 
 /// Print all test vectors in a consolidated summary
 #[test]
+#[ignore = "generator: prints vector values; asserts no canonical expectation"]
 fn compute_all_vectors_summary() {
     println!("\n============================================================");
     println!("PATENT APPENDIX B — COMPUTED TEST VECTORS");

@@ -89,6 +89,11 @@ jobs:
           KNISHIO_TPM_TCTI: "swtpm:host=127.0.0.1,port=2321"
         run: cargo test --features tpm,keyring -- --test-threads=1
 
+      - name: cargo test (TPM hardware tests, ignored by default)
+        env:
+          KNISHIO_TPM_TCTI: "swtpm:host=127.0.0.1,port=2321"
+        run: cargo test --features tpm --test tpm2 -- --ignored --test-threads=1
+
   features-macos:
     name: features (Secure Enclave on macOS)
     runs-on: macos-latest

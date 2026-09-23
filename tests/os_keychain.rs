@@ -8,6 +8,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[tokio::test]
+#[ignore = "needs an OS keychain; run with -- --ignored on a host that has one"]
 async fn os_keychain_secret_storage_provider_lifecycle() {
     let service = format!("io.knish.test.{}", Uuid::new_v4());
     let alias = "test_wallet";
@@ -19,16 +20,7 @@ async fn os_keychain_secret_storage_provider_lifecycle() {
         Some(alias),
     ) {
         Ok(p) => p,
-        Err(e) => {
-            let msg = e.to_string();
-            assert!(
-                msg.contains("OS keychain unavailable"),
-                "unexpected error from OS keychain: {}",
-                msg
-            );
-            println!("OS keychain unavailable in this environment ({}); skipping positive assertions", msg);
-            return;
-        }
+        Err(e) => panic!("needs an OS keychain; run with -- --ignored on a host that has one ({e})"),
     };
 
     let user = format!("knishio:kek:{}", alias);
@@ -94,6 +86,7 @@ async fn os_keychain_secret_storage_provider_lifecycle() {
 }
 
 #[tokio::test]
+#[ignore = "needs an OS keychain; run with -- --ignored on a host that has one"]
 async fn os_keychain_secret_storage_provider_recovery_lifecycle() {
     let service = format!("io.knish.test.{}", Uuid::new_v4());
     let alias1 = "test_wallet_orig";
@@ -105,11 +98,7 @@ async fn os_keychain_secret_storage_provider_recovery_lifecycle() {
         Some(alias1),
     ) {
         Ok(p) => p,
-        Err(e) => {
-            let msg = e.to_string();
-            println!("OS keychain unavailable ({}); skipping recovery test", msg);
-            return;
-        }
+        Err(e) => panic!("needs an OS keychain; run with -- --ignored on a host that has one ({e})"),
     };
 
     let bundle_hash = "deadbeef1111222233334444555566667777888899990000aaaabbbbccccdddd";

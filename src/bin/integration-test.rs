@@ -533,7 +533,7 @@ async fn main() -> Result<()> {
                     "passed": false,
                     "error": e.to_string()
                 });
-                // Don't fail overall for auth issues (known server problem)
+                overall_success = false;
             }
         }
         
@@ -566,13 +566,14 @@ async fn main() -> Result<()> {
                     "queryType": "ContinuId",
                     "language": "Rust"
                 });
-                // Don't affect overall success for query issues (known server problem)
+                overall_success &= success;
             },
             Err(e) => {
                 results["tests"]["queryValidation"] = json!({
                     "passed": false,
                     "error": e.to_string()
                 });
+                overall_success = false;
             }
         }
     }

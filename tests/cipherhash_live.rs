@@ -1,9 +1,9 @@
 //! Live ML-KEM `CipherHash` encrypted-transport round-trip against a running validator
 //! (PQ-transport, Rust SDK).
 //!
-//! Gated on `CIPHERHASH_TEST_URL` (skips cleanly when unset). Run live against a dev
-//! validator:
-//!   CIPHERHASH_TEST_URL=http://localhost:8081/graphql cargo test --test cipherhash_live
+//! Both tests are `#[ignore]`d, so a default `cargo test` reports them as ignored rather
+//! than passed. Run them live against a validator (without `CIPHERHASH_TEST_URL` they fail):
+//!   CIPHERHASH_TEST_URL=http://localhost:8081/graphql cargo test --test cipherhash_live -- --ignored
 //! `CIPHERHASH_MLKEM_PARAMETER_SET=768` selects ML-KEM-768 (default: ML-KEM-1024).
 //!
 //! Mirrors the JS reference suite (`tests/cipherhash-live.test.js`): the encrypted
@@ -42,14 +42,9 @@ fn client_for(uri: &str) -> KnishIOClient {
 /// plaintext baseline leg a silent downgrade, which an enforcing validator rejects (that
 /// rejection is the second case below).
 #[tokio::test]
+#[ignore = "live: needs CIPHERHASH_TEST_URL; run with cargo test --test cipherhash_live -- --ignored"]
 async fn encrypted_query_round_trips_and_matches_plaintext() {
-    let Some(uri) = test_url() else {
-        eprintln!(
-            "skipping: set CIPHERHASH_TEST_URL (e.g. http://localhost:8081/graphql) to run the \
-             live ML-KEM CipherHash round-trip"
-        );
-        return;
-    };
+    let uri = test_url().expect("set CIPHERHASH_TEST_URL to run the live CipherHash test");
 
     let secret = generate_secret_with_params(None, 2048);
     let mut client = client_for(&uri);
@@ -90,11 +85,9 @@ async fn encrypted_query_round_trips_and_matches_plaintext() {
 /// literal is the one the validator honours — a JSON-encoded `"true"` (the pre-1.2.0 Rust form)
 /// leaves the session plaintext and this case cannot pass.
 #[tokio::test]
+#[ignore = "live: needs CIPHERHASH_TEST_URL; run with cargo test --test cipherhash_live -- --ignored"]
 async fn an_encrypt_true_session_is_refused_when_it_drops_to_plaintext() {
-    let Some(uri) = test_url() else {
-        eprintln!("skipping: set CIPHERHASH_TEST_URL to run the live enforcement case");
-        return;
-    };
+    let uri = test_url().expect("set CIPHERHASH_TEST_URL to run the live CipherHash test");
 
     let secret = generate_secret_with_params(None, 2048);
     let mut client = client_for(&uri);

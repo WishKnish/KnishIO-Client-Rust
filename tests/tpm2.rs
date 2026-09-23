@@ -8,22 +8,14 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[tokio::test]
+#[ignore = "needs a TPM 2.0 device; run with -- --ignored on a host that has one"]
 async fn tpm2_secret_storage_provider_lifecycle() {
     let alias = format!("test_tpm_{}", Uuid::new_v4().simple());
     let backend = Arc::new(MemoryStorageBackend::new());
 
     let provider = match Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), None) {
         Ok(p) => p,
-        Err(e) => {
-            let msg = e.to_string();
-            assert!(
-                msg.contains("TPM unavailable"),
-                "unexpected error when TPM absent: {}",
-                msg
-            );
-            println!("TPM unavailable in this environment ({}); skipping positive assertions", msg);
-            return;
-        }
+        Err(e) => panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})"),
     };
 
     assert_eq!(provider.provider_type(), "tpm2-aes-gcm");
@@ -130,17 +122,14 @@ fn test_tpm2_policy_struct_and_builder() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TPM 2.0 device; run with -- --ignored on a host that has one"]
 async fn tpm2_secret_storage_provider_recovery_lifecycle() {
     let alias = format!("test_tpm_rec_{}", Uuid::new_v4().simple());
     let backend = Arc::new(MemoryStorageBackend::new());
 
     let provider = match Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), None) {
         Ok(p) => p,
-        Err(e) => {
-            let msg = e.to_string();
-            println!("TPM unavailable ({}); skipping recovery test", msg);
-            return;
-        }
+        Err(e) => panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})"),
     };
 
     let bundle_hash = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff";
@@ -196,6 +185,7 @@ async fn tpm2_secret_storage_provider_recovery_lifecycle() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TPM 2.0 device; run with -- --ignored on a host that has one"]
 async fn tpm2_policy_fail_closed_without_recovery() {
     use tss_esapi::interface_types::algorithm::HashingAlgorithm;
 
@@ -205,11 +195,7 @@ async fn tpm2_policy_fail_closed_without_recovery() {
 
     let provider = match Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), Some(policy)) {
         Ok(p) => p,
-        Err(e) => {
-            let msg = e.to_string();
-            println!("TPM unavailable ({}); skipping policy fail-closed test", msg);
-            return;
-        }
+        Err(e) => panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})"),
     };
 
     let bundle_hash = "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef";
@@ -256,6 +242,7 @@ async fn tpm2_policy_fail_closed_without_recovery() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TPM 2.0 device; run with -- --ignored on a host that has one"]
 async fn tpm2_policy_pcr_extend_fails_unseal() {
     use std::str::FromStr;
     use tss_esapi::{
@@ -272,10 +259,7 @@ async fn tpm2_policy_pcr_extend_fails_unseal() {
 
     let provider = match Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), Some(policy)) {
         Ok(p) => p,
-        Err(e) => {
-            println!("TPM unavailable ({}); skipping pcr_extend negative test", e);
-            return;
-        }
+        Err(e) => panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})"),
     };
 
     let bundle_hash = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff";
@@ -300,17 +284,11 @@ async fn tpm2_policy_pcr_extend_fails_unseal() {
     let tcti_str = std::env::var("KNISHIO_TPM_TCTI").unwrap_or_else(|_| "device:/dev/tpmrm0".to_string());
     let tcti_conf = match TctiNameConf::from_str(&tcti_str) {
         Ok(c) => c,
-        Err(e) => {
-            println!("TCTI parse failed ({}); skipping pcr_extend", e);
-            return;
-        }
+        Err(e) => panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one (TCTI parse failed: {e})"),
     };
     let mut direct_context = match Context::new(tcti_conf) {
         Ok(c) => c,
-        Err(e) => {
-            println!("Direct TPM context creation failed ({}); skipping pcr_extend", e);
-            return;
-        }
+        Err(e) => panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one (direct TPM context: {e})"),
     };
 
     let mut dv = DigestValues::new();

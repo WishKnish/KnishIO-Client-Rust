@@ -28,7 +28,7 @@ use chrono::{DateTime, Utc};
 
 // KnishIO SDK imports
 use knishio_client::{
-    Molecule, Wallet, Atom, Isotope,
+    Molecule, Wallet, Atom, Isotope, KnishIOError,
     crypto::{generate_secret, generate_bundle_hash},
     types::MetaItem,
     wallet::EncryptedMessage,
@@ -46,6 +46,22 @@ mod colors {
 
 // Fixed timestamp for deterministic testing (preserves timestamp in hash while ensuring consistency)
 const FIXED_TEST_TIMESTAMP_BASE: u64 = 1700000000000; // Fixed base timestamp for deterministic testing
+
+/// Report a negative case: it passes only when verification failed with `expected`. Any other
+/// error, `Ok(false)` or `Ok(true)` fails it and says what came back instead.
+fn expect_rejection(name: &str, result: &knishio_client::Result<bool>, expected: &KnishIOError) -> bool {
+    let passed = matches!(result, Err(e) if std::mem::discriminant(e) == std::mem::discriminant(expected));
+    if passed {
+        Logger::test(name, true, None);
+    } else {
+        let got = match result {
+            Ok(valid) => format!("Ok({valid})"),
+            Err(e) => format!("Err({e:?})"),
+        };
+        Logger::test(name, false, Some(&format!("expected Err({expected:?}), got {got}")));
+    }
+    passed
+}
 
 /// Helper function to set fixed timestamps for deterministic testing
 fn set_fixed_timestamps(molecule: &mut Molecule) {
@@ -749,8 +765,9 @@ impl SelfTestRunner {
             println!("{}Cross-SDK Compatible: {}{}", compat_color, compat_status, colors::RESET);
             Logger::message("═══════════════════════════════════════════", colors::BLUE);
 
-            // Exit based on cross-validation results only
-            if !cross_sdk_result {
+            // Exit based on cross-validation results only (`None` only under
+            // KNISHIO_DISABLE_CROSS_VALIDATION, which holds no verdict)
+            if cross_sdk_result == Some(false) {
                 std::process::exit(1);
             }
             return Ok(());
@@ -772,7 +789,8 @@ impl SelfTestRunner {
         let buffer_family_result = self.test_buffer_family().await?;
         let mlkem_result = self.test_mlkem768().await?;
         let negative_result = self.test_negative_cases().await?;
-        let _cross_sdk_result = self.test_cross_sdk_validation().await?;
+        // `None`: Round 1, or a standalone run with no peer results — no verdict to count.
+        let cross_sdk_result = self.test_cross_sdk_validation().await?;
 
         // Save results
         self.save_results().await?;
@@ -787,7 +805,11 @@ impl SelfTestRunner {
             .filter(|&&x| x)
             .count();
 
-        if passed_tests != total_tests {
+        if cross_sdk_result == Some(false) {
+            Logger::message("\n❌ Cross-SDK validation ran and failed — the self-test fails", colors::RED);
+        }
+
+        if passed_tests != total_tests || cross_sdk_result == Some(false) {
             std::process::exit(1);
         }
 
@@ -1700,7 +1722,11 @@ impl SelfTestRunner {
         let seed = self.config.get_string("tests.crypto.seed").unwrap_or_else(|| "TESTSEED".to_string());
         let mut all_negative_tests_passed = true;
 
-        // Execute the negative test cases
+        // Execute the negative test cases. Each case corrupts ONE property of a molecule that
+        // otherwise verifies (the positive control below), and passes only when verification
+        // fails with the error that property's check raises. The old `Ok(true) => fail,
+        // _ => pass` counted any rejection, and Ok(false), as the defect caught — so a verifier
+        // that skipped the targeted check but tripped over an unrelated one still "passed".
         let test_result = async {
             let secret = generate_secret(&seed);
             let bundle = generate_bundle_hash(&secret);
@@ -1716,10 +1742,21 @@ impl SelfTestRunner {
                 None,
             )?;
             source_wallet.balance = "1000".to_string();
+            let recipient_wallet = Wallet::new(
+                Some(&secret),
+                None,
+                Some("TEST"),
+                None,
+                Some("fedcba98765432100123456789abcdef0123456789abcdef0123456789abcdef"),
+                None,
+                None,
+                None,
+            )?;
 
-            // Test 1: Missing Molecular Hash (should fail)
-            {
-                let mut invalid_molecule = Molecule::with_params(
+            // A two-atom V transfer: debit the source, credit the recipient.
+            let transfer = |debit: &str, credit: &str| -> Result<Molecule> {
+                let created_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_millis().to_string();
+                let mut molecule = Molecule::with_params(
                     Some(secret.clone()),
                     Some(bundle.clone()),
                     Some(source_wallet.clone()),
@@ -1727,145 +1764,80 @@ impl SelfTestRunner {
                     None,
                     None,
                 );
-
-                // Add a valid atom but don't sign (no molecular hash)
-                let atom = Atom {
-                    position: source_wallet.position.clone().unwrap_or_default(),
-                    wallet_address: source_wallet.address.clone().unwrap_or_default(),
-                    isotope: Isotope::V,
-                    token: "TEST".to_string(),
-                    value: Some("-100.0".to_string()),
-                    created_at: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_millis().to_string(),
-                    index: Some(0),
-                    batch_id: None,
-                    meta_type: None,
-                    meta_id: None,
-                    meta: Vec::new(),
-                    ots_fragment: None,
-                    version: None,
-                };
-                invalid_molecule.add_atom(atom);
-
-                // This should fail because there's no molecular hash
-                let validation_result = invalid_molecule.verify().await;
-                match validation_result {
-                    Ok(true) => {
-                        Logger::test("Missing molecular hash validation (should FAIL)", false,
-                                   Some("Invalid molecule passed validation"));
-                        all_negative_tests_passed = false;
-                    }
-                    _ => {
-                        Logger::test("Missing molecular hash validation (should FAIL)", true, None);
-                    }
+                for (index, (wallet, value)) in [(&source_wallet, debit), (&recipient_wallet, credit)].into_iter().enumerate() {
+                    molecule.add_atom(Atom {
+                        position: wallet.position.clone().unwrap_or_default(),
+                        wallet_address: wallet.address.clone().unwrap_or_default(),
+                        isotope: Isotope::V,
+                        token: "TEST".to_string(),
+                        value: Some(value.to_string()),
+                        created_at: created_at.clone(),
+                        index: Some(index as u32),
+                        batch_id: None,
+                        meta_type: None,
+                        meta_id: None,
+                        meta: Vec::new(),
+                        ots_fragment: None,
+                        version: None,
+                    });
                 }
+                Ok(molecule)
+            };
+
+            // Positive control: the uncorrupted, signed, balanced transfer must verify, or a
+            // rejection below could come from the setup rather than from the corruption.
+            let mut control = transfer("-1000", "1000")?;
+            control.sign(Some(bundle.clone()), false, true)?;
+            match control.verify().await {
+                Ok(true) => {}
+                other => anyhow::bail!("negative-case control molecule does not verify: {other:?}"),
+            }
+
+            // Test 1: Missing Molecular Hash (should fail)
+            {
+                let unsigned = transfer("-1000", "1000")?;
+                anyhow::ensure!(unsigned.molecular_hash.is_none(), "unsigned molecule already carries a molecular hash");
+                let validation_result = unsigned.verify().await;
+                all_negative_tests_passed &= expect_rejection(
+                    "Missing molecular hash validation (should FAIL)",
+                    &validation_result,
+                    &KnishIOError::MolecularHashMissing,
+                );
             }
 
             // Test 2: Invalid Molecular Hash (should fail)
             {
-                let mut invalid_molecule = Molecule::with_params(
-                    Some(secret.clone()),
-                    Some(bundle.clone()),
-                    Some(source_wallet.clone()),
-                    None,
-                    None,
-                    None,
+                let mut corrupted = transfer("-1000", "1000")?;
+                corrupted.sign(Some(bundle.clone()), false, true)?;
+
+                // Then corrupt the molecular hash: one base17 digit changes, so the value keeps
+                // its shape and a parse error cannot stand in for the hash comparison.
+                let signed_hash = corrupted.molecular_hash.clone().context("signed molecule has no molecular hash")?;
+                let first = signed_hash.chars().next().context("empty molecular hash")?;
+                let swapped = if first == '0' { '1' } else { '0' };
+                let corrupted_hash = format!("{swapped}{}", &signed_hash[first.len_utf8()..]);
+                anyhow::ensure!(corrupted_hash != signed_hash, "hash corruption changed nothing");
+                corrupted.molecular_hash = Some(corrupted_hash);
+
+                let validation_result = corrupted.verify().await;
+                all_negative_tests_passed &= expect_rejection(
+                    "Invalid molecular hash validation (should FAIL)",
+                    &validation_result,
+                    &KnishIOError::MolecularHashMismatch,
                 );
-
-                let atom = Atom {
-                    position: source_wallet.position.clone().unwrap_or_default(),
-                    wallet_address: source_wallet.address.clone().unwrap_or_default(),
-                    isotope: Isotope::V,
-                    token: "TEST".to_string(),
-                    value: Some("-100.0".to_string()),
-                    created_at: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_millis().to_string(),
-                    index: Some(0),
-                    batch_id: None,
-                    meta_type: None,
-                    meta_id: None,
-                    meta: Vec::new(),
-                    ots_fragment: None,
-                    version: None,
-                };
-                invalid_molecule.add_atom(atom);
-
-                // Sign normally
-                invalid_molecule.sign(Some(bundle.clone()), false, true)?;
-
-                // Then corrupt the molecular hash
-                invalid_molecule.molecular_hash = Some("invalid_hash_that_should_fail_validation_check_12345678".to_string());
-
-                let validation_result = invalid_molecule.verify().await;
-                match validation_result {
-                    Ok(true) => {
-                        Logger::test("Invalid molecular hash validation (should FAIL)", false,
-                                   Some("Corrupted molecule passed validation"));
-                        all_negative_tests_passed = false;
-                    }
-                    _ => {
-                        Logger::test("Invalid molecular hash validation (should FAIL)", true, None);
-                    }
-                }
             }
 
-            // Test 3: Unbalanced Transfer (should fail)
+            // Test 3: Unbalanced Transfer (should fail): debit 1000, credit only 500.
             {
-                let mut invalid_molecule = Molecule::with_params(
-                    Some(secret.clone()),
-                    Some(bundle.clone()),
-                    Some(source_wallet.clone()),
-                    None,
-                    None,
-                    None,
+                let mut unbalanced = transfer("-1000", "500")?;
+                unbalanced.sign(Some(bundle.clone()), false, true)?;
+
+                let validation_result = unbalanced.verify().await;
+                all_negative_tests_passed &= expect_rejection(
+                    "Unbalanced transfer validation (should FAIL)",
+                    &validation_result,
+                    &KnishIOError::TransferUnbalanced,
                 );
-
-                // Create unbalanced atoms (doesn't sum to zero)
-                let atom1 = Atom {
-                    position: source_wallet.position.clone().unwrap_or_default(),
-                    wallet_address: source_wallet.address.clone().unwrap_or_default(),
-                    isotope: Isotope::V,
-                    token: "TEST".to_string(),
-                    value: Some("-1000.0".to_string()), // Debit full balance
-                    created_at: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_millis().to_string(),
-                    index: Some(0),
-                    batch_id: None,
-                    meta_type: None,
-                    meta_id: None,
-                    meta: Vec::new(),
-                    ots_fragment: None,
-                    version: None,
-                };
-                invalid_molecule.add_atom(atom1);
-
-                let atom2 = Atom {
-                    position: source_wallet.position.clone().unwrap_or_default(),
-                    wallet_address: source_wallet.address.clone().unwrap_or_default(),
-                    isotope: Isotope::V,
-                    token: "TEST".to_string(),
-                    value: Some("500.0".to_string()), // Credit only half - unbalanced!
-                    created_at: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_millis().to_string(),
-                    index: Some(1),
-                    batch_id: None,
-                    meta_type: None,
-                    meta_id: None,
-                    meta: Vec::new(),
-                    ots_fragment: None,
-                    version: None,
-                };
-                invalid_molecule.add_atom(atom2);
-
-                invalid_molecule.sign(Some(bundle.clone()), false, true)?;
-
-                let validation_result = invalid_molecule.verify().await;
-                match validation_result {
-                    Ok(true) => {
-                        Logger::test("Unbalanced transfer validation (should FAIL)", false,
-                                   Some("Unbalanced molecule passed validation"));
-                        all_negative_tests_passed = false;
-                    }
-                    _ => {
-                        Logger::test("Unbalanced transfer validation (should FAIL)", true, None);
-                    }
-                }
             }
 
             Ok::<bool, anyhow::Error>(all_negative_tests_passed)
@@ -1897,7 +1869,11 @@ impl SelfTestRunner {
         }
     }
 
-    async fn test_cross_sdk_validation(&mut self) -> Result<bool> {
+    /// `Some(verdict)` when cross-validation ran against at least one canonical peer
+    /// results file. `None` when it did not run: Round 1 (`KNISHIO_DISABLE_CROSS_VALIDATION`),
+    /// or a standalone run with no peer results. `None` holds no verdict and does not fail a
+    /// standalone run; `KNISHIO_CROSS_VALIDATION_ONLY` with no peers is `Some(false)`.
+    async fn test_cross_sdk_validation(&mut self) -> Result<Option<bool>> {
         Logger::message("\n7. Cross-SDK Validation", colors::BLUE);
 
         // Round 1 generates molecules and does not cross-validate, so it holds no opinion
@@ -1909,43 +1885,7 @@ impl SelfTestRunner {
                 targets_expected: 0,
                 targets_validated: 0,
             };
-            return Ok(true);
-        }
-
-        Logger::message("  📋 Loading molecules from other SDKs...", colors::CYAN);
-
-        let results_dir = std::env::var("KNISHIO_SHARED_RESULTS")
-            .unwrap_or_else(|_| "../shared-test-results".to_string());
-        self.results.cross_validation.ran = true;
-
-        // A missing shared directory in Round 2 is a HARD FAILURE, not a skip. This
-        // returned Ok(true) — "compatible" — having found nothing to check. Absence of
-        // evidence must never be reported as evidence of compatibility.
-        if !std::path::Path::new(&results_dir).exists() {
-            Logger::message("  ❌ Shared results directory not found — cross-validation CANNOT run", colors::RED);
-            self.results.cross_sdk_compatible = false;
-            return Ok(false);
-        }
-
-        // Scope to *-results.json. `ends_with(".json")` also matched the canonical vector
-        // MASTERS that live in this directory (canonical-patent-vectors.json,
-        // cross-platform-test-vectors.json) and fed them into the peer loop as SDK
-        // results; they carry no `molecules` object, so they inflated the apparent peer
-        // count while contributing to neither pass nor fail.
-        let result_files: Vec<_> = fs::read_dir(&results_dir)?
-            .filter_map(std::result::Result::ok)
-            .filter(|entry| {
-                entry.file_name()
-                    .to_str()
-                    .is_some_and(|name| name.ends_with("-results.json") && !name.contains("rust"))
-            })
-            .collect();
-
-        // Zero peers in Round 2 means Round 2 did not happen.
-        if result_files.is_empty() {
-            Logger::message("  ❌ No peer SDK results found — nothing to cross-validate", colors::RED);
-            self.results.cross_sdk_compatible = false;
-            return Ok(false);
+            return Ok(None);
         }
 
         // Canonical set mirrors requiredMoleculeKeys in sdks/canonical-test-keys.json.
@@ -1953,26 +1893,83 @@ impl SelfTestRunner {
             "metadata", "simpleTransfer", "complexTransfer", "tokenCreation",
             "walletCreation", "shadowWalletClaim", "mlkem768",
         ];
+        // the eight SDKs' results files (edge-kit/aggregate.mjs EXPECTED_LANES)
+        const CANONICAL_RESULTS_FILES: [&str; 8] = [
+            "javascript", "typescript", "python", "php", "kotlin", "rust", "c", "cpp",
+        ];
+        const OWN_RESULTS_FILE: &str = "rust";
 
-        self.results.cross_validation.targets_expected = result_files.len();
+        let cross_validation_only =
+            std::env::var("KNISHIO_CROSS_VALIDATION_ONLY").unwrap_or_default() == "true";
+        let results_dir = std::env::var("KNISHIO_SHARED_RESULTS")
+            .unwrap_or_else(|_| "../shared-test-results".to_string());
+        let results_path = |name: &str| std::path::Path::new(&results_dir).join(format!("{name}-results.json"));
+
+        // The expected peers are the seven canonical SDKs other than this one, whatever
+        // else the directory holds: counting the files found let a missing peer shrink
+        // the denominator, so "6/6" read as full coverage. Other *-results.json files
+        // (e.g. rust-integration-results.json) are ignored.
+        let peers: Vec<&str> = CANONICAL_RESULTS_FILES
+            .iter()
+            .copied()
+            .filter(|name| *name != OWN_RESULTS_FILE)
+            .collect();
+        let expected = peers.len();
+
+        if !peers.iter().any(|name| results_path(name).is_file()) {
+            self.results.cross_validation = CrossValidationCoverage {
+                ran: cross_validation_only,
+                targets_expected: expected,
+                targets_validated: 0,
+            };
+            self.results.cross_sdk_compatible = false;
+            if cross_validation_only {
+                // Zero peers in Round 2 means Round 2 did not happen: a hard failure. Absence
+                // of evidence must never be reported as evidence of compatibility.
+                if std::path::Path::new(&results_dir).exists() {
+                    Logger::message("  ❌ No peer SDK results found — nothing to cross-validate", colors::RED);
+                } else {
+                    Logger::message("  ❌ Shared results directory not found — cross-validation CANNOT run", colors::RED);
+                }
+                return Ok(Some(false));
+            }
+            Logger::message(
+                &format!("  ⏭️  Cross-validation skipped: no peer results in {results_dir}"),
+                colors::YELLOW,
+            );
+            return Ok(None);
+        }
+
+        Logger::message("  📋 Loading molecules from other SDKs...", colors::CYAN);
+        self.results.cross_validation = CrossValidationCoverage {
+            ran: true,
+            targets_expected: expected,
+            targets_validated: 0,
+        };
         let mut peers_validated = 0usize;
         let mut all_valid = true;
 
-        for result_file in result_files {
-            let file_path = result_file.path();
-            let sdk_name = file_path.file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("unknown")
-                .replace("-results", "");
+        for sdk_name in peers {
+            let file_path = results_path(sdk_name);
+            if !file_path.is_file() {
+                Logger::message(&format!("\n  ❌ {sdk_name}-results.json missing"), colors::RED);
+                continue;
+            }
 
             Logger::message(&format!("\n  🧪 Validating {} SDK molecules:", sdk_name.to_uppercase()), colors::CYAN);
 
-            // Read and parse the result file
-            let file_contents = fs::read_to_string(&file_path)
-                .with_context(|| format!("Failed to read {}", file_path.display()))?;
-
-            let other_results: Value = serde_json::from_str(&file_contents)
-                .with_context(|| format!("Failed to parse {} JSON", file_path.display()))?;
+            // An unreadable peer file fails that peer; it must not abort the whole round.
+            let parsed = fs::read_to_string(&file_path)
+                .map_err(anyhow::Error::from)
+                .and_then(|contents| serde_json::from_str::<Value>(&contents).map_err(anyhow::Error::from));
+            let other_results = match parsed {
+                Ok(value) => value,
+                Err(error) => {
+                    Logger::message(&format!("    ❌ Could not read {}: {error}", file_path.display()), colors::RED);
+                    all_valid = false;
+                    continue;
+                }
+            };
 
             // A peer must publish every molecule type before we can claim to have
             // validated it. The loop below iterates the keys that are PRESENT, so an
@@ -1998,7 +1995,10 @@ impl SelfTestRunner {
                 all_valid = false;
             }
 
-            peers_validated += 1;
+            // A peer counts as validated only when every required type is present and every
+            // check run against it passed (the mlkem768 check decrypts its ciphertext to its
+            // originalPlaintext).
+            let mut peer_ok = absent.is_empty();
 
             // Validate molecules from this SDK
             if let Some(molecules) = other_results.get("molecules").and_then(|m| m.as_object()) {
@@ -2018,6 +2018,7 @@ impl SelfTestRunner {
 
                         if !validation_success {
                             all_valid = false;
+                            peer_ok = false;
                         }
                     } else {
                         // Standard molecule validation for non-ML-KEM768 types
@@ -2034,17 +2035,21 @@ impl SelfTestRunner {
 
                         if !validation_success {
                             all_valid = false;
+                            peer_ok = false;
                         }
                     }
                 }
+            }
+
+            if peer_ok {
+                peers_validated += 1;
             }
         }
 
         // COVERAGE FLOOR. `all_valid` starts true and only becomes false on a DETECTED
         // failure, so it records "nothing went wrong", not "everything was checked". Those
-        // differ whenever the loop examined fewer peers than it should have. Require both.
+        // differ whenever fewer than all seven canonical peers were validated. Require both.
         self.results.cross_validation.targets_validated = peers_validated;
-        let expected = self.results.cross_validation.targets_expected;
         let full_coverage = peers_validated == expected;
 
         if !full_coverage {
@@ -2068,7 +2073,7 @@ impl SelfTestRunner {
         }
 
         self.results.cross_sdk_compatible = compatible;
-        Ok(compatible)
+        Ok(Some(compatible))
     }
 
     /// Validate a single molecule from another SDK

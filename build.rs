@@ -5,9 +5,10 @@
 //! the monorepo (one level above this crate) and are ABSENT in a standalone CI checkout
 //! of this SDK alone, where `include_str!` of a missing file is a COMPILE error (which
 //! fails `cargo clippy --all-targets`). Set the `has_shared_fixtures` cfg when they
-//! exist so those tests compile only in the monorepo and are cfg'd out (empty) in a
-//! standalone checkout. This mirrors the JS `jest.config.cjs` / TS `vitest.config.ts`
-//! fixture gates added the same cycle.
+//! exist. Each of those files holds its suite in a `#[cfg(has_shared_fixtures)]` module
+//! and, under `#[cfg(not(has_shared_fixtures))]`, one ignored `shared_fixtures_absent`
+//! test, so a standalone checkout reports the missing suite as ignored instead of
+//! running an empty test binary.
 use std::path::Path;
 
 fn main() {
