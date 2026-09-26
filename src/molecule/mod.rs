@@ -1274,12 +1274,7 @@ impl Molecule {
     /// Initialize withdraw buffer molecule (matches JS initWithdrawBuffer)
     /// # Arguments
     /// * `recipients` - Map of recipient bundle hashes to amounts
-    /// * `signing_wallet` - Optional wallet for signing
-    pub fn init_withdraw_buffer(
-        &mut self,
-        recipients: HashMap<String, f64>,
-        _signing_wallet: Option<&Wallet>,
-    ) -> Result<()> {
+    pub fn init_withdraw_buffer(&mut self, recipients: HashMap<String, f64>) -> Result<()> {
         // Calculate total amount from all recipients
         let total_amount: f64 = recipients.values().sum();
         let total_amount_i128 = total_amount as i128;

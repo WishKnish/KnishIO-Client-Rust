@@ -690,30 +690,9 @@ impl<'a> CheckMolecule<'a> {
         // Squeeze the sponge to retrieve a 128 byte (64 character) string that should match the sender's wallet address
         let address = shake256(&digest, 256);
 
-        // Signing atom
-        let signing_atom = &self.molecule.atoms[0];
-
-        // Get a signing address
-        let mut signing_address = signing_atom.wallet_address.clone();
-
-        // Get signing wallet from first atom's metas
-        let meta_map = signing_atom.aggregated_meta();
-        let signing_wallet = meta_map.get("signingWallet");
-
-        // Try to get custom signing address from the metas (local molecule with server secret)
-        if let Some(signing_wallet_json) = signing_wallet {
-            if let Ok(wallet_data) = serde_json::from_str::<HashMap<String, serde_json::Value>>(signing_wallet_json) {
-                if let Some(addr) = wallet_data.get("address").and_then(|v| v.as_str()) {
-                    signing_address = addr.to_string();
-                }
-            }
-        }
-
-        // JavaScript compares hex addresses directly
-        // The signing_address from wallet is already in hex format
-        // No conversion needed - both are hex
-        
-        if address != signing_address {
+        // The recovered address must be the address the signing atom claims. No atom meta may
+        // substitute another wallet's address.
+        if address != self.molecule.atoms[0].wallet_address {
             return Err(KnishIOError::SignatureMismatch);
         }
 

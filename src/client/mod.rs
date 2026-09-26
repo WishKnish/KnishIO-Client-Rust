@@ -2676,13 +2676,12 @@ impl KnishIOClient {
 
     /// Withdraw tokens from buffer
     ///
-    /// Matches TS withdrawBufferToken({ tokenSlug, amount, sourceWallet, signingWallet }) at lines 1877-1916
+    /// Matches TS withdrawBufferToken({ tokenSlug, amount, sourceWallet })
     ///
     /// # Parameters
     /// - `token`: Token slug
     /// - `amount`: Amount to withdraw
     /// - `source_wallet`: Optional source wallet (will use default if not provided)
-    /// - `signing_wallet`: Optional signing wallet for the withdrawal
     ///
     /// # Returns
     /// Withdrawal response
@@ -2691,7 +2690,6 @@ impl KnishIOClient {
         token: &str,
         amount: f64,
         source_wallet: Option<Wallet>,
-        signing_wallet: Option<Wallet>
     ) -> Result<Box<dyn Response>> {
         use crate::mutation::withdraw_buffer_token::{MutationWithdrawBufferToken, WithdrawBufferTokenParams};
         use crate::mutation::Mutation;
@@ -2722,10 +2720,7 @@ impl KnishIOClient {
             .ok_or(KnishIOError::MissingBundle)?;
         recipients.insert(bundle.to_string(), amount);
 
-        mutation.fill_molecule(WithdrawBufferTokenParams {
-            recipients,
-            signing_wallet,
-        })?;
+        mutation.fill_molecule(WithdrawBufferTokenParams { recipients })?;
 
         // Execute mutation (matches TS line 1909)
         let client = self.client.as_ref()

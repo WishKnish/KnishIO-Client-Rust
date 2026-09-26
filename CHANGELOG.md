@@ -14,6 +14,27 @@ rather than written at release time; where the history does not substantiate a
 detail, the entry says so instead of guessing.
 
 
+## [Unreleased]
+
+### Security
+
+- **`CheckMolecule::ots` no longer honours the `signingWallet` meta.** It compared the address
+  recovered from the OTS signature against `atoms[0].meta.signingWallet.address` whenever that
+  meta was present, instead of `atoms[0].walletAddress`. A molecule that claimed one wallet's
+  address but carried another wallet's signature therefore verified as valid, and was attributed
+  to the claimed address. The validator already rejects the meta, but offline verifiers built on
+  `Molecule::check` (knishproof) accepted the forgery. The recovered address is now compared only
+  with `atoms[0].walletAddress`. Pinned by `tests/signing_wallet_forgery.rs` against the shared
+  cross-SDK fixture `tests/fixtures/signing-wallet-forgery.json`, built with the JS SDK 1.2.1.
+
+### Changed
+
+- **BREAKING:** the `signing_wallet` parameter is removed from
+  `KnishIOClient::withdraw_buffer_token`, `Molecule::init_withdraw_buffer` and
+  `WithdrawBufferTokenParams`, and `AtomMeta::set_signing_wallet` is removed. Code that passes a
+  signing wallet no longer compiles. `init_withdraw_buffer` already ignored the argument, and a
+  molecule carrying the meta is rejected by validator 0.5.0 and later, so no working call is lost.
+
 ## [1.2.0] — 2026-09-20
 
 ### Added

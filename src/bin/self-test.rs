@@ -127,7 +127,7 @@ async fn run_negative_buffer_case(secret: &str, token: &str, tv: &Value) -> Resu
             );
             let mut recipients = HashMap::new();
             recipients.insert(recipient_bundle, amount as f64);
-            m.init_withdraw_buffer(recipients, None)?;
+            m.init_withdraw_buffer(recipients)?;
             m
         }
         other => return Err(anyhow::anyhow!("unknown buildFrom '{other}'")),
@@ -1517,7 +1517,7 @@ impl SelfTestRunner {
             );
             let mut recipients = HashMap::new();
             recipients.insert(recipient_bundle, amount as f64);
-            molecule.init_withdraw_buffer(recipients, None)?;
+            molecule.init_withdraw_buffer(recipients)?;
             set_fixed_timestamps(&mut molecule);
             molecule.sign(molecule.bundle.clone(), false, true)?;
 

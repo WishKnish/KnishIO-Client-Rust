@@ -7,20 +7,17 @@ use crate::mutation::{Mutation, propose_molecule::MutationProposeMolecule};
 use crate::query::Query;
 use crate::response::{Response, ResponseProposeMolecule};
 use crate::molecule::Molecule;
-use crate::wallet::Wallet;
 use crate::graphql::GraphQLClient;
 use crate::client::KnishIOClient;
 use serde_json::Value;
 use std::collections::HashMap;
 
 /// Parameters for withdrawing buffer tokens (matches JS fillMolecule parameters)
-/// JS: fillMolecule({ recipients, signingWallet })
+/// JS: fillMolecule({ recipients })
 #[derive(Debug, Clone)]
 pub struct WithdrawBufferTokenParams {
     /// The recipients for the withdrawal
     pub recipients: HashMap<String, f64>,
-    /// The signing wallet (matches JS signingWallet, not signing_wallet)
-    pub signing_wallet: Option<Wallet>,
 }
 
 /// Mutation for withdrawing tokens from a buffer
@@ -45,14 +42,11 @@ impl MutationWithdrawBufferToken {
     }
     
     /// Fill the molecule with withdraw buffer data (matches JS fillMolecule exactly)
-    /// JS: fillMolecule({ recipients, signingWallet })
+    /// JS: fillMolecule({ recipients })
     pub fn fill_molecule(&mut self, params: WithdrawBufferTokenParams) -> crate::error::Result<()> {
-        // Call molecule's initWithdrawBuffer method (matches JS: this.$__molecule.initWithdrawBuffer({ recipients, signingWallet }))
-        if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
-            molecule.init_withdraw_buffer(
-                params.recipients,
-                params.signing_wallet.as_ref()
-            )?;
+        // Call molecule's initWithdrawBuffer method (matches JS: this.$__molecule.initWithdrawBuffer({ recipients }))
+        if let Some(molecule) = self.propose_molecule.get_molecule_mut() {
+            molecule.init_withdraw_buffer(params.recipients)?;
             
             // Sign with empty params (matches JS: this.$__molecule.sign({}))
             molecule.sign(None, false, true)?;
@@ -70,17 +64,7 @@ impl MutationWithdrawBufferToken {
     
     /// Create from withdraw buffer parameters
     pub fn from_params(_params: WithdrawBufferTokenParams, _secret: &str) -> Self {
-        let molecule = Molecule::new();
-        
-        // Initialize withdraw buffer in molecule
-        // molecule.init_withdraw_buffer(
-        //     &params.recipients,
-        //     &params.signing_wallet
-        // );
-        // molecule.sign(None);
-        // molecule.check(&molecule.source_wallet);
-        
-        Self::from_molecule(molecule)
+        Self::from_molecule(Molecule::new())
     }
 }
 
@@ -135,29 +119,5 @@ mod tests {
         
         // Test basic creation
         assert!(mutation.propose_molecule.remainder_wallet().is_none());
-    }
-    
-    #[test]
-    fn test_withdraw_buffer_token_params() {
-        let mut recipients = HashMap::new();
-        recipients.insert("addr1".to_string(), 50.0);
-        
-        let signing_wallet = Wallet::new(
-            Some("test_secret"),
-            Some("test_bundle"),
-            Some("TEST"),
-            Some("test_address"),
-            Some("test_position"),
-            None,
-            None,
-            None,
-        ).expect("Failed to create wallet");
-        
-        let params = WithdrawBufferTokenParams {
-            recipients,
-            signing_wallet: Some(signing_wallet),
-        };
-        
-        assert_eq!(params.recipients.len(), 1);
     }
 }

@@ -275,7 +275,6 @@ This document will explain both ways.
       "CRZY",  // token_slug
       50.0,    // amount
       None,    // source_wallet (optional)
-      None,    // signing_wallet (optional)
   ).await?;
 
   println!("{} {}", deposit_response.data(), withdraw_response.data());

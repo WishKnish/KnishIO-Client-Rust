@@ -285,7 +285,7 @@ mod patent_vectors {
             // Withdraw `amount` to the caller's own bundle (mirrors the client wrapper).
             let mut recipients: HashMap<String, f64> = HashMap::new();
             recipients.insert(bundle.clone(), test.amount);
-            mol.init_withdraw_buffer(recipients, None)
+            mol.init_withdraw_buffer(recipients)
                 .expect("init_withdraw_buffer");
 
             // Inspect the wire form (isotope + value as strings). Withdraw emits TWO B atoms

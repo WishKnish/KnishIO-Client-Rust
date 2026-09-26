@@ -233,47 +233,6 @@ impl AtomMeta {
         self.merge_map(claim_meta)
     }
 
-    /// Set signing wallet metadata
-    ///
-    /// Equivalent to AtomMeta.setSigningWallet() in JavaScript
-    ///
-    /// # Arguments
-    ///
-    /// * `signing_wallet` - Wallet used for signing the operation
-    pub fn set_signing_wallet(&mut self, signing_wallet: &crate::wallet::Wallet) -> &mut Self {
-        let mut signing_data = HashMap::new();
-        
-        signing_data.insert("tokenSlug".to_string(), signing_wallet.token.clone());
-        
-        if let Some(ref bundle) = signing_wallet.bundle {
-            signing_data.insert("bundleHash".to_string(), bundle.clone());
-        }
-        
-        if let Some(ref address) = signing_wallet.address {
-            signing_data.insert("address".to_string(), address.clone());
-        }
-        
-        if let Some(ref position) = signing_wallet.position {
-            signing_data.insert("position".to_string(), position.clone());
-        }
-        
-        if let Some(ref pubkey) = signing_wallet.pubkey {
-            signing_data.insert("pubkey".to_string(), pubkey.clone());
-        }
-        
-        if let Some(ref characters) = signing_wallet.characters {
-            signing_data.insert("characters".to_string(), characters.clone());
-        }
-
-        if let Ok(signing_json) = serde_json::to_string(&signing_data) {
-            let mut signing_meta = HashMap::new();
-            signing_meta.insert("signingWallet".to_string(), signing_json);
-            self.merge_map(signing_meta);
-        }
-
-        self
-    }
-
     /// Add policy metadata
     ///
     /// Equivalent to AtomMeta.addPolicy() in JavaScript
