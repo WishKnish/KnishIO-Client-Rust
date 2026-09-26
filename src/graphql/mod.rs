@@ -220,8 +220,8 @@ pub struct GraphQLClient {
     /// The validator's advertised ML-KEM public key (the CipherHash encryption
     /// target), learned at auth.
     pubkey: Option<String>,
-    /// The client's AUTH wallet — holds the ML-KEM private key that decrypts
-    /// CipherHash responses addressed to us.
+    /// The wallet that signed the login (AUTH, or the ContinuID pointer's USER wallet) — holds
+    /// the ML-KEM private key that decrypts CipherHash responses addressed to us.
     wallet: Option<crate::wallet::Wallet>,
     /// Whether to encrypt communications
     encrypt: bool,

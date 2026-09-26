@@ -34,6 +34,25 @@ detail, the entry says so instead of guessing.
   `WithdrawBufferTokenParams`, and `AtomMeta::set_signing_wallet` is removed. Code that passes a
   signing wallet no longer compiles. `init_withdraw_buffer` already ignored the argument, and a
   molecule carrying the meta is rejected by validator 0.5.0 and later, so no working call is lost.
+- **BREAKING:** `KnishIOClient::query_continu_id` takes a second `token: Option<&str>` argument
+  naming the ContinuID chain to resolve; `None` keeps the previous query (token `USER`).
+
+### Fixed
+
+- **A returning user's login is now proven.** `request_profile_auth_token` queries the bundle's
+  ContinuID pointer (token `USER`) and, when the secret derives the USER wallet registered
+  there, signs the authorization from that wallet at the pointer position; the I-atom moves the
+  pointer to a fresh USER position (`previousPosition` = the pointer). Validator 0.5.0 and later
+  then issue a proven token, so the user keeps read and subscription access to permissioned and
+  private cells, where an AUTH-signed re-login was treated as a guest. The first login (no
+  pointer) is unchanged. A rejected pointer-signed login falls back once to the previous,
+  unproven AUTH-wallet login, so one login sends at most two authorization molecules. To allow
+  this, `CheckMolecule` accepts a U-atom whose token is `AUTH` or `USER` (any other token is still
+  `WrongTokenType`), and `request_profile_auth_token` now also sets the client's bundle.
+- **`AuthToken::restore` rebuilds the wallet the session was bound to.** It always rebuilt an
+  `AUTH` wallet, so a restored pointer-signed session derived a different key and ML-KEM pair
+  than the USER wallet it was issued to. `WalletSnapshot` gains `token: Option<String>`, written by
+  `get_snapshot`; a snapshot without it restores `AUTH` as before.
 
 ## [1.2.0] — 2026-09-20
 

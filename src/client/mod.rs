@@ -647,7 +647,7 @@ impl KnishIOClient {
     /// - Wallet creation fails
     pub async fn get_source_wallet(&mut self) -> Result<Wallet> {
         // Query ContinuID for latest wallet
-        let continu_id_result = self.query_continu_id(self.get_bundle()).await?;
+        let continu_id_result = self.query_continu_id(self.get_bundle(), None).await?;
 
         let mut source_wallet = if let Some(wallet) = continu_id_result {
             // ContinuID exists, use it as source
@@ -985,7 +985,7 @@ impl KnishIOClient {
     }
     
     /// Push the current auth token's transport material (JWT, the validator's
-    /// ML-KEM pubkey, and our AUTH wallet) down to the GraphQL client.
+    /// ML-KEM pubkey, and the wallet that signed the login) down to the GraphQL client.
     ///
     /// The transport reads its OWN copies: the JWT for `X-Auth-Token`, and the
     /// pubkey/wallet pair for the `CipherHash` encrypted channel. Without this the
@@ -1581,17 +1581,21 @@ impl KnishIOClient {
     ///
     /// # Parameters
     /// - `bundle_hash`: Bundle hash to query ContinuID for
+    /// - `token`: Token whose ContinuID chain to resolve; `None` keeps the query's default (USER)
     ///
     /// # Returns
     /// ContinuID information including position chain
-    pub async fn query_continu_id(&self, bundle_hash: Option<&str>) -> Result<Option<Wallet>> {
+    pub async fn query_continu_id(&self, bundle_hash: Option<&str>, token: Option<&str>) -> Result<Option<Wallet>> {
         use crate::query::continu_id::QueryContinuId;
         use crate::query::Query;
 
         let bundle = bundle_hash.or(self.bundle.as_deref())
             .ok_or(KnishIOError::MissingBundle)?;
 
-        let query = QueryContinuId::new(bundle);
+        let mut query = QueryContinuId::new(bundle);
+        if let Some(token) = token {
+            query = query.with_token(token);
+        }
 
         // Execute query through GraphQL client
         if let Some(ref client) = self.client {
@@ -3229,6 +3233,13 @@ impl KnishIOClient {
 
     /// Request profile auth token (matches JS requestProfileAuthToken)
     ///
+    /// A returning user's login is signed from the bundle's ContinuID pointer by the USER wallet
+    /// registered there, so validator 0.5.0+ issues a proven token and the user keeps read and
+    /// subscription access to permissioned and private cells. A first login (no pointer), or a
+    /// pointer this secret does not derive, is signed by a fresh AUTH wallet as before. A rejected
+    /// pointer-signed login falls back to the AUTH login once, so one call sends at most two
+    /// authorization molecules (testnet allows 3 auths/min/IP).
+    ///
     /// # Parameters
     /// - `secret`: User secret for authentication
     /// - `encrypt`: Whether to encrypt the auth token
@@ -3236,12 +3247,27 @@ impl KnishIOClient {
     /// # Returns
     /// Profile authentication token
     pub async fn request_profile_auth_token(&mut self, secret: &str, encrypt: Option<bool>) -> Result<AuthToken> {
-        use crate::mutation::request_authorization::MutationRequestAuthorization;
-        use crate::mutation::Mutation;
-        use crate::auth::AuthToken;
-
-        // Set secret in client
+        // Set secret and bundle in client
+        let bundle = crate::crypto::generate_bundle_hash(secret);
         self.secret = Some(secret.to_string());
+        self.bundle = Some(bundle.clone());
+
+        let pointer_attempted = match self.continu_id_signing_wallet(secret, &bundle).await? {
+            Some(pointer_wallet) => match self.propose_profile_authorization(secret, pointer_wallet, encrypt).await? {
+                Ok(auth_token) => {
+                    self.log("info", "KnishIOClient::request_profile_auth_token() - Auth token signed from the ContinuID pointer (proven login)");
+                    return Ok(auth_token);
+                }
+                Err(reason) => {
+                    self.log("warn", &format!(
+                        "KnishIOClient::request_profile_auth_token() - Pointer-signed authorization rejected ({}); falling back once to a fresh AUTH wallet",
+                        reason
+                    ));
+                    true
+                }
+            },
+            None => false,
+        };
 
         // Create AUTH wallet from secret
         let wallet = Wallet::new(
@@ -3255,6 +3281,71 @@ impl KnishIOClient {
             Some(self.mlkem_parameter_set),
         )?;
 
+        match self.propose_profile_authorization(secret, wallet, encrypt).await? {
+            Ok(auth_token) => {
+                self.log("info", if pointer_attempted {
+                    "KnishIOClient::request_profile_auth_token() - Auth token signed by a fresh AUTH wallet (fallback after a rejected pointer-signed login)"
+                } else {
+                    "KnishIOClient::request_profile_auth_token() - Auth token signed by a fresh AUTH wallet (no usable ContinuID pointer)"
+                });
+                Ok(auth_token)
+            }
+            Err(reason) => Err(KnishIOError::Custom(format!(
+                "KnishIOClient::request_profile_auth_token() - Authorization attempt rejected by ledger. Reason: {}",
+                reason
+            ))),
+        }
+    }
+
+    /// The USER wallet at the bundle's ContinuID pointer, derived from `secret` with the client's
+    /// ML-KEM parameter set. `None` when the bundle has no pointer (first login), the head is not
+    /// a USER wallet or has no position, or the head's address is not the one `secret` derives
+    /// at that position. Query and transport errors propagate.
+    async fn continu_id_signing_wallet(&self, secret: &str, bundle: &str) -> Result<Option<Wallet>> {
+        // Filter on USER: without it the validator falls back to the bundle's newest wallet of
+        // ANY token when the bundle has no ContinuID meta.
+        let Some(head) = self.query_continu_id(Some(bundle), Some("USER")).await? else {
+            return Ok(None);
+        };
+        let position = match head.position.as_deref() {
+            Some(position) if head.token == "USER" && !position.is_empty() => position,
+            _ => return Ok(None),
+        };
+
+        let wallet = Wallet::new(
+            Some(secret),
+            None,
+            Some("USER"),
+            None,
+            Some(position),
+            None,
+            None,
+            Some(self.mlkem_parameter_set),
+        )?;
+
+        if let Some(address) = head.address.as_deref().filter(|a| !a.is_empty()) {
+            if wallet.address.as_deref() != Some(address) {
+                self.log("warn", "KnishIOClient::request_profile_auth_token() - ContinuID head address is not derived by this secret; signing with a fresh AUTH wallet");
+                return Ok(None);
+            }
+        }
+
+        Ok(Some(wallet))
+    }
+
+    /// Sign and propose a profile authorization molecule from `wallet` (the ContinuID pointer's
+    /// USER wallet, or a fresh AUTH wallet). On acceptance the token is bound to `wallet` and
+    /// propagated to the transport; a rejection returns the ledger's reason as the inner `Err`.
+    async fn propose_profile_authorization(
+        &mut self,
+        secret: &str,
+        wallet: Wallet,
+        encrypt: Option<bool>,
+    ) -> Result<std::result::Result<AuthToken, String>> {
+        use crate::mutation::request_authorization::MutationRequestAuthorization;
+        use crate::mutation::Mutation;
+        use crate::auth::AuthToken;
+
         // Create molecule with secret and source wallet
         let mut molecule = Molecule::new();
         molecule.secret = Some(secret.to_string());
@@ -3264,7 +3355,8 @@ impl KnishIOClient {
         // molecule's ContinuID I-atom is built deterministically rather than via add_continuid_atom's
         // secret-fallback (which silently swallows Wallet::create errors with .ok()). The I-atom
         // registers the bundle's ContinuID relay head on-ledger so subsequent molecules advance the
-        // chain instead of falling to fresh genesis. Carries the AUTH source's characters for parity.
+        // chain instead of falling to fresh genesis; its previousPosition is the source's position
+        // (the consumed pointer on a pointer-signed login). Carries the source's characters for parity.
         let remainder = Wallet::create(Some(secret), None, "USER", None, wallet.characters.as_deref(), Some(self.mlkem_parameter_set))?;
         molecule.remainder_wallet = Some(remainder);
 
@@ -3279,7 +3371,7 @@ impl KnishIOClient {
                 serde_json::json!(encrypt.unwrap_or(false).to_string())
             );
 
-            // PQ-transport: convey the AUTH source wallet's ML-KEM public key as a
+            // PQ-transport: convey the source wallet's ML-KEM public key as a
             // SIGNED `walletPubkey` meta on the U-atom, so the validator can encrypt
             // CipherHash responses back to THIS wallet (the one holding the private
             // key that decrypts them). Signed → tamper-proof. Matches the JS reference
@@ -3336,19 +3428,16 @@ impl KnishIOClient {
                 // Store in self.auth_token
                 self.auth_token = Some(auth_token.clone());
 
-                // Propagate the JWT, the validator's ML-KEM pubkey and our AUTH wallet
-                // to the GraphQL client: subsequent requests need the X-Auth-Token
-                // header, and the CipherHash transport needs the key pair to encrypt
-                // requests and decrypt the replies addressed back to this wallet.
+                // Propagate the JWT, the validator's ML-KEM pubkey and the signing wallet
+                // (AUTH, or the pointer's USER wallet) to the GraphQL client: subsequent
+                // requests need the X-Auth-Token header, and the CipherHash transport needs
+                // the key pair to encrypt requests and decrypt the replies addressed back to
+                // this wallet.
                 self.propagate_auth_to_transport();
 
-                Ok(auth_token)
+                Ok(Ok(auth_token))
             } else {
-                let reason = response.reason().unwrap_or_else(|| "Unknown reason".to_string());
-                Err(KnishIOError::Custom(format!(
-                    "KnishIOClient::request_profile_auth_token() - Authorization attempt rejected by ledger. Reason: {}",
-                    reason
-                )))
+                Ok(Err(response.reason().unwrap_or_else(|| "Unknown reason".to_string())))
             }
         } else {
             Err(KnishIOError::NoClient)
@@ -3573,5 +3662,270 @@ mod tests {
         client.set_encrypt(false);
         let stats = client.client.as_ref().expect("transport").get_stats().await;
         assert!(!stats.encryption_enabled, "set_encrypt(false) must disable it again");
+    }
+
+    // ── Profile login: ContinuID-pointer signing ─────────────────────────────────────────────
+    //
+    // A loopback HTTP stub stands in for the validator: it records every GraphQL body, answers
+    // ContinuId with a fixed head, and answers each ProposeMolecule with the next verdict.
+
+    use crate::crypto::{generate_bundle_hash, generate_secret};
+    use crate::wallet::Wallet;
+    use serde_json::{json, Value};
+    use std::error::Error;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+
+    type TestResult = std::result::Result<(), Box<dyn Error>>;
+    type StubResult<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
+
+    const POINTER: &str = "7c3f9a21e4b8d05f6a1c2e3d4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a6978";
+
+    struct StubValidator {
+        url: String,
+        received: UnboundedReceiver<Value>,
+        requests: Vec<Value>,
+    }
+
+    impl StubValidator {
+        /// Every GraphQL body received so far, in order. The stub records a request before it
+        /// replies, so all of a finished call's requests are already queued.
+        fn requests(&mut self) -> &[Value] {
+            while let Ok(request) = self.received.try_recv() {
+                self.requests.push(request);
+            }
+            &self.requests
+        }
+
+        fn continu_id_queries(&mut self) -> Vec<Value> {
+            self.requests().iter().filter(|r| r["query"].as_str().unwrap_or("").contains("ContinuId")).cloned().collect()
+        }
+
+        /// The molecules proposed, in order.
+        fn proposals(&mut self) -> Vec<Value> {
+            self.requests()
+                .iter()
+                .filter(|r| r["query"].as_str().unwrap_or("").contains("ProposeMolecule"))
+                .map(|r| r["variables"]["molecule"].clone())
+                .collect()
+        }
+    }
+
+    async fn read_request_body(socket: &mut TcpStream) -> StubResult<Vec<u8>> {
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            if let Some(end) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&buffer[..end]).to_ascii_lowercase();
+                let length: usize = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0);
+                if buffer.len() >= end + 4 + length {
+                    return Ok(buffer[end + 4..end + 4 + length].to_vec());
+                }
+            }
+            let n = socket.read(&mut chunk).await?;
+            if n == 0 {
+                return Err("client closed the connection mid-request".into());
+            }
+            buffer.extend_from_slice(&chunk[..n]);
+        }
+    }
+
+    /// Answer one request. A failure here drops the connection, which fails the client call.
+    async fn answer(
+        mut socket: TcpStream,
+        continu_id: &Value,
+        verdicts: &mut std::vec::IntoIter<bool>,
+        recorder: &UnboundedSender<Value>,
+    ) -> StubResult<()> {
+        let request: Value = serde_json::from_slice(&read_request_body(&mut socket).await?)?;
+        let reply = if request["query"].as_str().unwrap_or("").contains("ContinuId") {
+            json!({ "data": { "ContinuId": continu_id } })
+        } else if verdicts.next().unwrap_or(false) {
+            json!({ "data": { "ProposeMolecule": {
+                "molecularHash": "accepted-hash",
+                "status": "accepted",
+                "reason": null,
+                "payload": "{\"token\":\"stub-jwt\",\"expiresAt\":4102444800,\"pubkey\":null}",
+            } } })
+        } else {
+            json!({ "data": { "ProposeMolecule": {
+                "molecularHash": "rejected-hash",
+                "status": "rejected",
+                "reason": "stub rejection",
+                "payload": null,
+            } } })
+        };
+        recorder.send(request)?;
+        let body = reply.to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        socket.write_all(response.as_bytes()).await?;
+        socket.shutdown().await?;
+        Ok(())
+    }
+
+    async fn stub_validator(continu_id: Value, verdicts: Vec<bool>) -> std::result::Result<StubValidator, Box<dyn Error>> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}/graphql", listener.local_addr()?);
+        let (recorder, received) = unbounded_channel();
+        tokio::spawn(async move {
+            let mut verdicts = verdicts.into_iter();
+            while let Ok((socket, _)) = listener.accept().await {
+                if answer(socket, &continu_id, &mut verdicts, &recorder).await.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(StubValidator { url, received, requests: Vec::new() })
+    }
+
+    fn client_for(stub: &StubValidator) -> KnishIOClient {
+        KnishIOClient::new(stub.url.as_str(), Some("public".to_string()), None, None, None, Some(false))
+    }
+
+    fn meta_value(atom: &Value, key: &str) -> Option<String> {
+        atom["meta"]
+            .as_array()?
+            .iter()
+            .find(|m| m["key"] == key)
+            .and_then(|m| m["value"].as_str())
+            .map(str::to_string)
+    }
+
+    /// The USER wallet the secret registers at `position`.
+    fn user_wallet_at(secret: &str, position: &str) -> crate::error::Result<Wallet> {
+        Wallet::new(Some(secret), None, Some("USER"), None, Some(position), None, None, None)
+    }
+
+    fn continu_id_head(secret: &str, token: &str, address: Option<String>) -> Value {
+        json!({
+            "address": address,
+            "bundleHash": generate_bundle_hash(secret),
+            "tokenSlug": token,
+            "position": POINTER,
+            "batchId": null,
+            "characters": "BASE64",
+            "pubkey": null,
+            "amount": "0",
+            "createdAt": "1700000000000",
+        })
+    }
+
+    fn assert_queried_user_continu_id(stub: &mut StubValidator, secret: &str) {
+        let queries = stub.continu_id_queries();
+        assert_eq!(queries.len(), 1, "login must query ContinuID exactly once");
+        assert_eq!(queries[0]["variables"]["token"], "USER", "the ContinuID query must filter on token USER");
+        assert_eq!(queries[0]["variables"]["bundle"], generate_bundle_hash(secret).as_str());
+    }
+
+    /// A returning user: the login is signed from the ContinuID pointer by the USER wallet
+    /// registered there, and its I-atom moves the pointer to a fresh USER position.
+    #[tokio::test]
+    async fn profile_login_signs_from_the_continuid_pointer() -> TestResult {
+        let secret = generate_secret("phase-b-pointer-login");
+        let signer = user_wallet_at(&secret, POINTER)?;
+        let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![true]).await?;
+        let mut client = client_for(&stub);
+
+        let token = client.request_profile_auth_token(&secret, Some(false)).await?;
+
+        assert_queried_user_continu_id(&mut stub, &secret);
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1, "an accepted pointer-signed login proposes exactly one molecule");
+        let atoms = proposals[0]["atoms"].as_array().ok_or("proposal has no atoms")?;
+        assert_eq!(atoms[0]["isotope"], "U");
+        assert_eq!(atoms[0]["token"], "USER");
+        assert_eq!(atoms[0]["position"], POINTER);
+        assert_eq!(atoms[0]["walletAddress"].as_str(), signer.address.as_deref());
+        assert_eq!(meta_value(&atoms[0], "walletPubkey"), signer.pubkey.clone());
+        assert_eq!(atoms[1]["isotope"], "I");
+        assert_eq!(atoms[1]["token"], "USER");
+        assert_eq!(meta_value(&atoms[1], "previousPosition").as_deref(), Some(POINTER));
+        assert_ne!(atoms[1]["position"], POINTER, "the I-atom must register a fresh USER position");
+
+        let bound = token.get_wallet().ok_or("token is not bound to a wallet")?;
+        assert_eq!(bound.token, "USER", "the token is bound to the pointer wallet");
+        assert_eq!(bound.address, signer.address);
+        Ok(())
+    }
+
+    /// No pointer (genesis), a non-USER head, or a head whose address the secret does not
+    /// derive at that position: today's fresh-AUTH login, one molecule.
+    #[tokio::test]
+    async fn profile_login_without_a_usable_pointer_signs_with_a_fresh_auth_wallet() -> TestResult {
+        let secret = generate_secret("phase-b-no-pointer-login");
+        let signer = user_wallet_at(&secret, POINTER)?;
+        let heads = [
+            ("null head", Value::Null),
+            ("non-USER head", continu_id_head(&secret, "AUTH", signer.address.clone())),
+            ("foreign address", continu_id_head(&secret, "USER", Some("f".repeat(64)))),
+        ];
+        for (case, head) in heads {
+            let mut stub = stub_validator(head, vec![true]).await?;
+            let mut client = client_for(&stub);
+
+            let token = client.request_profile_auth_token(&secret, Some(false)).await?;
+
+            assert_queried_user_continu_id(&mut stub, &secret);
+            let proposals = stub.proposals();
+            assert_eq!(proposals.len(), 1, "{case}: exactly one molecule");
+            assert_eq!(proposals[0]["atoms"][0]["isotope"], "U", "{case}");
+            assert_eq!(proposals[0]["atoms"][0]["token"], "AUTH", "{case}: signed by a fresh AUTH wallet");
+            assert_ne!(proposals[0]["atoms"][0]["position"], POINTER, "{case}");
+            assert_eq!(token.get_wallet().map(|w| w.token.as_str()), Some("AUTH"), "{case}");
+        }
+        Ok(())
+    }
+
+    /// A rejected pointer-signed login falls back to the AUTH login exactly once, so a login
+    /// sends at most two authorization molecules.
+    #[tokio::test]
+    async fn rejected_pointer_login_falls_back_once_to_a_fresh_auth_wallet() -> TestResult {
+        let secret = generate_secret("phase-b-fallback-login");
+        let signer = user_wallet_at(&secret, POINTER)?;
+        let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![false, true]).await?;
+        let mut client = client_for(&stub);
+
+        let token = client.request_profile_auth_token(&secret, Some(false)).await?;
+
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 2, "pointer attempt + one AUTH fallback");
+        assert_eq!(proposals[0]["atoms"][0]["token"], "USER");
+        assert_eq!(proposals[0]["atoms"][0]["position"], POINTER);
+        assert_eq!(proposals[1]["atoms"][0]["token"], "AUTH");
+        assert_ne!(proposals[1]["atoms"][0]["position"], POINTER);
+        assert_eq!(token.get_wallet().map(|w| w.token.as_str()), Some("AUTH"));
+        Ok(())
+    }
+
+    /// When the AUTH fallback is rejected too, the login fails with today's rejection error and
+    /// no third molecule is sent.
+    #[tokio::test]
+    async fn rejected_fallback_raises_the_authorization_rejection() -> TestResult {
+        let secret = generate_secret("phase-b-double-rejection");
+        let signer = user_wallet_at(&secret, POINTER)?;
+        let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![false, false]).await?;
+        let mut client = client_for(&stub);
+
+        let result = client.request_profile_auth_token(&secret, Some(false)).await;
+
+        assert!(
+            matches!(&result, Err(e) if e.to_string().contains("Authorization attempt rejected by ledger. Reason: stub rejection")),
+            "expected the ledger rejection, got {result:?}"
+        );
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 2, "no second pointer attempt, no retry");
+        assert_eq!(proposals[0]["atoms"][0]["token"], "USER");
+        assert_eq!(proposals[1]["atoms"][0]["token"], "AUTH");
+        assert!(client.get_auth_token().is_none());
+        Ok(())
     }
 }

@@ -173,10 +173,11 @@ impl<'a> CheckMolecule<'a> {
 
     /// Validate Authorization isotope atoms
     ///
-    /// Equivalent to CheckMolecule.isotopeU() in JavaScript
+    /// Equivalent to CheckMolecule.isotopeU() in JavaScript. A first login is signed by a fresh
+    /// AUTH wallet; a returning user's login is signed by the USER wallet at its ContinuID pointer.
     fn isotope_u(&self) -> Result<bool> {
         for atom in self.get_isotopes(&[Isotope::U]) {
-            if atom.token != "AUTH" {
+            if atom.token != "AUTH" && atom.token != "USER" {
                 return Err(KnishIOError::WrongTokenType);
             }
 
@@ -1191,6 +1192,21 @@ mod tests {
         let molecule = checkable(vec![user_atom(Isotope::P, "USER", None, None, vec![])]);
         let checker = CheckMolecule::new(&molecule).unwrap();
         assert!(matches!(checker.isotope_p().unwrap_err(), KnishIOError::MetaMissing));
+    }
+
+    /// A returning user's login is signed from the ContinuID pointer with its USER wallet, so a
+    /// U-atom may carry AUTH or USER; any other token is still refused.
+    #[test]
+    fn test_isotope_u_accepts_auth_and_user_tokens_only() -> Result<()> {
+        for token in ["AUTH", "USER"] {
+            let molecule = checkable(vec![user_atom(Isotope::U, token, None, None, vec![])]);
+            let checker = CheckMolecule::new(&molecule)?;
+            assert!(checker.isotope_u().is_ok(), "a {token} U-atom must pass");
+        }
+        let molecule = checkable(vec![user_atom(Isotope::U, "TEST", None, None, vec![])]);
+        let checker = CheckMolecule::new(&molecule)?;
+        assert!(matches!(checker.isotope_u(), Err(KnishIOError::WrongTokenType)));
+        Ok(())
     }
 
     /// The cross-isotope bypass must not become a blanket exemption: a plain V-only

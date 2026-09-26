@@ -30,6 +30,11 @@ pub struct WalletSnapshot {
     /// precisely the defect [`AuthToken::restore`] resolves.
     #[serde(default)]
     pub mlkem_parameter_set: Option<MlKemParameterSet>,
+    /// Token of the wallet the session is bound to: `AUTH` for a first login, `USER` for a login
+    /// signed from the ContinuID pointer. Absent in snapshots written before it was recorded,
+    /// which were all AUTH-bound.
+    #[serde(default)]
+    pub token: Option<String>,
 }
 
 /// Authentication data structure
@@ -110,6 +115,9 @@ impl AuthToken {
     ///    explicit field nor a recognisable key can only have come from a pre-bump build, and
     ///    every pre-bump build was 768-only.
     ///
+    /// The wallet is rebuilt with the snapshot's `wallet.token` (USER for a login signed from the
+    /// ContinuID pointer), or AUTH when the snapshot predates that field.
+    ///
     /// # Arguments
     ///
     /// * `snapshot` - Token snapshot data
@@ -133,7 +141,7 @@ impl AuthToken {
         let wallet = Wallet::new(
             Some(secret),
             None,
-            Some("AUTH"),
+            Some(snapshot.wallet.token.as_deref().unwrap_or("AUTH")),
             None,
             snapshot.wallet.position.as_deref(),
             None,
@@ -188,12 +196,14 @@ impl AuthToken {
                 position: wallet.position.clone(),
                 characters: wallet.characters.clone(),
                 mlkem_parameter_set: Some(wallet.mlkem_parameter_set),
+                token: Some(wallet.token.clone()),
             }
         } else {
             WalletSnapshot {
                 position: None,
                 characters: None,
                 mlkem_parameter_set: None,
+                token: None,
             }
         };
         
@@ -535,5 +545,49 @@ mod tests {
             1568,
             "restoring a pre-bump session as ML-KEM-1024 advertises a key the validator never recorded"
         );
+    }
+
+    /// A pointer-signed session is bound to the identity's USER wallet. Its snapshot must restore
+    /// that same wallet (token USER, same address and ML-KEM key), not an AUTH wallet at the
+    /// same position, whose different key could not decrypt the session's CipherHash replies.
+    #[test]
+    fn test_snapshot_round_trip_preserves_the_user_wallet_token() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let wallet = Wallet::create(
+            Some(RESTORE_SECRET),
+            None,
+            "USER",
+            Some(RESTORE_POSITION),
+            None,
+            None,
+        )?;
+        let address = wallet.address.clone();
+        let pubkey = wallet.pubkey.clone();
+        let auth_token = AuthToken::create("session-token".to_string(), None, Some(false), None, wallet);
+
+        let persisted = serde_json::to_string(&auth_token.get_snapshot())?;
+        let snapshot: AuthTokenSnapshot = serde_json::from_str(&persisted)?;
+        let restored = AuthToken::restore(snapshot, RESTORE_SECRET)?;
+        let restored_wallet = restored.get_wallet().ok_or("restored token has no wallet")?;
+
+        assert_eq!(restored_wallet.token, "USER");
+        assert_eq!(restored_wallet.address, address);
+        assert_eq!(restored_wallet.pubkey, pubkey);
+        Ok(())
+    }
+
+    /// A snapshot written before the wallet token was persisted restores the AUTH wallet it came from.
+    #[test]
+    fn test_restore_snapshot_without_wallet_token_restores_auth() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let legacy = format!(
+            r#"{{"token":"legacy-session","expires_at":null,"pubkey":null,"encrypt":false,"wallet":{{"position":"{RESTORE_POSITION}","characters":null,"mlkem_parameter_set":"MlKem1024"}}}}"#
+        );
+        let snapshot: AuthTokenSnapshot = serde_json::from_str(&legacy)?;
+        let restored = AuthToken::restore(snapshot, RESTORE_SECRET)?;
+        let expected = Wallet::create(Some(RESTORE_SECRET), None, "AUTH", Some(RESTORE_POSITION), None, None)?;
+        let restored_wallet = restored.get_wallet().ok_or("restored token has no wallet")?;
+
+        assert_eq!(restored_wallet.token, "AUTH");
+        assert_eq!(restored_wallet.address, expected.address);
+        Ok(())
     }
 }
