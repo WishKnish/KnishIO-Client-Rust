@@ -14,6 +14,68 @@ rather than written at release time; where the history does not substantiate a
 detail, the entry says so instead of guessing.
 
 
+## [1.3.1] — 2026-09-28
+
+### Fixed
+
+- **`replenish_token` builds the molecule validator 0.6.0 accepts.** It built two V atoms,
+  `V(+amount)` and `V(+(balance+amount))`, which the SDK's own `check()` rejected
+  (`TransferUnbalanced`), so no replenish was ever sent. It now builds one C atom signed by the
+  identity's USER wallet at its ContinuID pointer (as `create_token`), metaType `token`,
+  metaId = the slug, metas `action` = `add`, then the credited wallet's `address`, `position`,
+  `pubkey`, `batchId` (only when it has one) and, for a stackable or non-fungible token, the
+  new units as `tokenUnits`, followed by the ContinuID I atom. The credited wallet is the
+  identity's wallet for the token (`Balance`), or a new one. `Molecule::replenish_token` now
+  takes `(credited_wallet, amount, units: Vec<TokenUnit>)`. A non-positive amount is
+  `NegativeAmount`; a stackable or non-fungible replenish without units is
+  `StackableUnitAmount`. The validator accepts it only from the token's creator bundle, for
+  supply `infinite` or `replenishable`.
+- **`fuse_token` builds a conserved stackable fusion.** It sent `V(-M) F(+1) V(B-M)` with no
+  unit lists, signed by a wallet without a key. It now signs with the source wallet S at its
+  position and builds `V S(-B)`, `V burn(+(M-1))` to the all-zeros bundle, `F recipient(+1)`
+  carrying the new unit N (its `fusedTokenUnits` meta lists the full triples of the fused
+  units), and `V remainder(+(B-M))` with S's other units, with no ContinuID atom. When S has a
+  batch id, the burn and F atoms get fresh ones and the remainder keeps S's, so the molecule
+  passes `check()`. Fewer than two units, or an N id S already holds, is refused with the new
+  `KnishIOError::TransferBalanceReason` (`Token fusion requires at least two token units` /
+  `Token fusion unit id already exists in the source wallet`).
+- **`withdraw_buffer_token` withdraws from the buffer wallet to a fresh remainder.** It signed
+  from the USER wallet with no secret, and `init_withdraw_buffer` emitted no remainder atom
+  when the molecule had no remainder wallet. The source is now the identity's buffer wallet
+  (`Balance(token, type: "buffer")`, `TransferBalance` when absent or short), and the remainder
+  B atom always goes to a fresh position (`create_remainder`), emitted even at 0; a remainder
+  at the source's own position is refused (`TransferRemainder`). The recipient V atom gets a
+  fresh batch id when the source has one (was the source's). `query_source_wallet` now sends
+  its `wallet_type` and reports a missing wallet as `TransferBalance`.
+- **`deposit_buffer_token` signs its molecule.** It built the molecule without the secret, so
+  no atom was added and nothing could be signed. The buffer wallet now carries the source's
+  batch id at a fresh position (the batch id was passed as the position).
+- **`claim_shadow_wallet` without a `batch_id` claims the first shadow wallet.** It sent no
+  batch id, which the validator rejects (`Shadow wallet claim requires batch_id`). It now takes
+  the batch id of the first shadow wallet `query_wallets(token)` lists, skipping regular
+  wallets, and fails with `WalletShadow` when there is none, as the JS SDK does.
+- **Stackable atom metas follow the JS reference.** `AtomMeta::set_atom_wallet` emits only
+  `tokenUnits` then `tradeRates`, each only when non-empty, in that order; it also emitted the
+  wallet's `pubkey` and `characters` in hash-map order. Stackable transfers and burns carry
+  the same unit lists as before.
+- `Molecule::with_params` derives its default remainder with `create_remainder` (a fresh
+  position with the source's batch id); it passed the source's batch id as the position.
+- Balance and wallet queries keep each unit's metas when the ledger returns them as a JSON
+  string, so a fusion's `fusedTokenUnits` carry the source units' full triples.
+
+### Notes
+
+- Every high-level operation that builds its own molecule runs `check()` on the signed
+  molecule before sending it; `propose_molecule` still sends a caller-built molecule unchecked.
+  Pinned by `operation_whose_molecule_fails_the_check_sends_nothing` and
+  `raw_propose_sends_a_user_signed_m_only_molecule_unchanged`.
+- New vector tests in `tests/patent_vector_validation.rs` consume `token_replenish`,
+  `stackable_fusion_conservation` and `buffer_withdraw_fresh_remainder` from a frozen mirror in
+  `tests/fixtures/mod.rs`; the gated suite pins the mirror to the master vectors.
+- The self-test's buffer-withdraw cases no longer pass the source wallet as the remainder; the
+  builder derives the fresh remainder, as a withdraw now must.
+
+
 ## [1.3.0] — 2026-09-26
 
 ### Changed
@@ -399,7 +461,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.3.0...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.3.1...HEAD
+[1.3.1]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.3.1
 [1.3.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.3.0
 [1.2.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.2.0
 [1.1.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.1.0
