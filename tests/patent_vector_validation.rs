@@ -14,6 +14,261 @@
 #[ignore = "../shared-test-results absent: patent vector suite not compiled in a standalone checkout"]
 fn shared_fixtures_absent() {}
 
+#[allow(dead_code)] // this suite reads only PHASE_B_VECTORS_JSON of the shared fixture file
+#[path = "fixtures/mod.rs"]
+mod fixtures;
+
+/// Phase B vectors (contract 9.1 replenish, 9.2 stackable fusion, 9.6 buffer withdraw), read from
+/// the frozen fixture mirror so they also run in a standalone checkout; the gated suite below
+/// pins the mirror to the master. Every built molecule must also pass the SDK's own check.
+mod phase_b_vectors {
+    use super::fixtures::PHASE_B_VECTORS_JSON;
+    use knishio_client::{generate_bundle_hash, Atom, Isotope, KnishIOError, Molecule, TokenUnit, Wallet};
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+    const SECRET: &str = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+    const POSITION: &str = "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b";
+    const ZERO_BUNDLE: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    fn section(name: &str) -> TestResult<Vec<Value>> {
+        let vectors: Value = serde_json::from_str(PHASE_B_VECTORS_JSON)?;
+        Ok(vectors[name]["tests"].as_array().ok_or("tests array")?.clone())
+    }
+
+    fn meta<'a>(atom: &'a Atom, key: &str) -> Option<&'a str> {
+        atom.meta.iter().find(|m| m.key == key).map(|m| m.value.as_str())
+    }
+
+    /// The unit ids of an atom's `tokenUnits` meta; an absent meta is the empty list.
+    fn unit_ids(atom: &Atom) -> TestResult<Vec<String>> {
+        let units: Vec<Value> = match meta(atom, "tokenUnits") {
+            Some(json) => serde_json::from_str(json)?,
+            None => Vec::new(),
+        };
+        units.iter().map(|unit| Ok(unit[0].as_str().ok_or("unit id")?.to_string())).collect()
+    }
+
+    fn strings(value: &Value) -> TestResult<Vec<String>> {
+        value.as_array().ok_or("string array")?.iter().map(|v| Ok(v.as_str().ok_or("string")?.to_string())).collect()
+    }
+
+    fn isotopes(molecule: &Molecule) -> Vec<String> {
+        molecule.atoms.iter().map(|a| a.isotope.as_str().to_string()).collect()
+    }
+
+    fn value_sum(molecule: &Molecule) -> TestResult<i128> {
+        molecule.atoms.iter()
+            .filter(|a| matches!(a.isotope, Isotope::V | Isotope::B | Isotope::F))
+            .map(|a| Ok(a.value.as_deref().ok_or("value")?.parse::<i128>()?))
+            .sum()
+    }
+
+    fn units(ids: &[String]) -> Vec<TokenUnit> {
+        ids.iter().map(|id| TokenUnit::new(id.clone(), id.clone(), None)).collect()
+    }
+
+    fn user_source() -> TestResult<Wallet> {
+        Ok(Wallet::create(Some(SECRET), None, "USER", Some(POSITION), None, None)?)
+    }
+
+    #[test]
+    fn token_replenish_vectors() -> TestResult {
+        for test in section("token_replenish")? {
+            let name = test["name"].as_str().unwrap_or_default();
+            let token = test["token"].as_str().ok_or("token")?;
+            let new_units: Vec<TokenUnit> = test["units"].as_array().ok_or("units")?.iter()
+                .map(|triple| -> TestResult<TokenUnit> {
+                    Ok(TokenUnit::new(
+                        triple[0].as_str().ok_or("id")?.to_string(),
+                        triple[1].as_str().ok_or("name")?.to_string(),
+                        triple[2].as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+                    ))
+                })
+                .collect::<TestResult<_>>()?;
+
+            for batch_id in [None, Some("credited-batch")] {
+                let mut credited = Wallet::create(Some(SECRET), None, token, None, None, None)?;
+                credited.batch_id = batch_id.map(str::to_string);
+                let mut molecule = Molecule::with_params(
+                    Some(SECRET.to_string()), Some(generate_bundle_hash(SECRET)), Some(user_source()?), None, None, None,
+                );
+                molecule.replenish_token(&credited, test["amount"].as_f64().unwrap_or(0.0), new_units.clone())
+                    .map_err(|e| format!("[{name}] replenish_token: {e}"))?;
+
+                assert_eq!(isotopes(&molecule), strings(&test["expectedIsotopes"])?, "[{name}] isotopes");
+                let c = &molecule.atoms[0];
+                assert_eq!(c.token, "USER", "[{name}] the C atom is signed by the USER wallet");
+                assert_eq!(c.position, POSITION, "[{name}] signed at the source position");
+                assert_eq!(c.value.as_deref(), test["expectedCValue"].as_str(), "[{name}] C value");
+                assert_eq!(c.meta_type.as_deref(), test["expectedMetaType"].as_str(), "[{name}] metaType");
+                assert_eq!(c.meta_id.as_deref(), test["expectedMetaId"].as_str(), "[{name}] metaId");
+                assert_eq!(meta(c, "action"), test["expectedAction"].as_str(), "[{name}] action");
+                assert_eq!(c.batch_id, credited.batch_id, "[{name}] the atom carries the credited wallet's batch id");
+
+                let mut expected_keys = vec!["action", "address", "position", "pubkey"];
+                if batch_id.is_some() {
+                    expected_keys.push("batchId");
+                }
+                let expected_unit_ids = &test["expectedTokenUnitIds"];
+                if !expected_unit_ids.is_null() {
+                    expected_keys.push("tokenUnits");
+                }
+                let keys: Vec<&str> = c.meta.iter().map(|m| m.key.as_str()).collect();
+                assert_eq!(keys, expected_keys, "[{name}] C metas and their order");
+                assert_eq!(meta(c, "address"), credited.address.as_deref(), "[{name}] credited address");
+                assert_eq!(meta(c, "position"), credited.position.as_deref(), "[{name}] credited position");
+                assert_eq!(meta(c, "pubkey"), credited.pubkey.as_deref(), "[{name}] credited pubkey");
+                assert_eq!(meta(c, "batchId"), batch_id, "[{name}] batchId meta");
+                if expected_unit_ids.is_null() {
+                    assert!(unit_ids(c)?.is_empty(), "[{name}] a fungible replenish carries no tokenUnits");
+                } else {
+                    assert_eq!(unit_ids(c)?, strings(expected_unit_ids)?, "[{name}] tokenUnits ids");
+                    let compact = serde_json::to_string(&test["units"])?;
+                    assert_eq!(meta(c, "tokenUnits"), Some(compact.as_str()), "[{name}] compact triples, as JS JSON.stringify");
+                }
+                assert_eq!(molecule.atoms[1].token, "USER", "[{name}] the I atom continues the USER chain");
+
+                molecule.sign(None, false, true).map_err(|e| format!("[{name}] sign: {e}"))?;
+                molecule.check(None).map_err(|e| format!("[{name}] check: {e}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn stackable_fusion_vectors() -> TestResult {
+        for test in section("stackable_fusion_conservation")? {
+            let name = test["name"].as_str().unwrap_or_default();
+            let source_units = strings(&test["sourceUnits"])?;
+            let fuse = strings(&test["fuse"])?;
+            let new_unit_id = test["newUnitId"].as_str().ok_or("newUnitId")?;
+
+            for source_batch in [None, Some("source-batch")] {
+                let mut source = Wallet::create(Some(SECRET), None, "STK", Some(POSITION), None, None)?;
+                source.token_units = units(&source_units);
+                source.balance = source_units.len().to_string();
+                source.batch_id = source_batch.map(str::to_string);
+                let mut recipient = Wallet::create(Some(SECRET), None, "STK", None, None, None)?;
+                recipient.init_batch_id(Some(&source), false);
+                recipient.token_units = vec![TokenUnit::new(new_unit_id.to_string(), new_unit_id.to_string(), None)];
+
+                let mut molecule = Molecule::with_params(
+                    Some(SECRET.to_string()), Some(generate_bundle_hash(SECRET)), Some(source.clone()), None, None, None,
+                );
+                let result = molecule.fuse_token(fuse.clone(), &recipient);
+
+                if test["mustReject"].as_bool() == Some(true) {
+                    let expected = test["expectedErrorContains"].as_str().ok_or("expectedErrorContains")?;
+                    assert!(
+                        matches!(&result, Err(KnishIOError::TransferBalanceReason(m)) if m.contains(expected)),
+                        "[{name}] must be refused with {expected:?}, got {result:?}"
+                    );
+                    assert!(molecule.atoms.is_empty(), "[{name}] a refused fusion adds no atom");
+                    continue;
+                }
+                result.map_err(|e| format!("[{name}] fuse_token: {e}"))?;
+
+                assert_eq!(isotopes(&molecule), strings(&test["expectedIsotopes"])?, "[{name}] isotopes");
+                let [src, burn, fusion, remainder] = &molecule.atoms[..] else { return Err(format!("[{name}] four atoms").into()) };
+                let own_bundle = generate_bundle_hash(SECRET);
+
+                assert_eq!(src.value.as_deref(), test["expectedSourceValue"].as_str(), "[{name}] source value");
+                assert_eq!(src.position, POSITION, "[{name}] signed by S at its position");
+                assert_eq!(unit_ids(src)?, strings(&test["expectedSourceUnitIds"])?, "[{name}] source (SENT) units");
+
+                assert_eq!(burn.value.as_deref(), test["expectedBurnValue"].as_str(), "[{name}] burn value");
+                assert_eq!((burn.meta_type.as_deref(), burn.meta_id.as_deref()), (Some("walletBundle"), Some(ZERO_BUNDLE)), "[{name}] burn target");
+                assert_eq!(unit_ids(burn)?, strings(&test["expectedBurnUnitIds"])?, "[{name}] burned units");
+
+                assert_eq!(fusion.value.as_deref(), test["expectedFusionValue"].as_str(), "[{name}] F value");
+                assert_eq!((fusion.meta_type.as_deref(), fusion.meta_id.as_deref()), (Some("walletBundle"), Some(own_bundle.as_str())), "[{name}] F recipient");
+                let new_units: Vec<Value> = serde_json::from_str(meta(fusion, "tokenUnits").ok_or("F tokenUnits")?)?;
+                assert_eq!(new_units.len(), 1, "[{name}] F creates exactly one unit");
+                assert_eq!(new_units[0][0], new_unit_id, "[{name}] F unit id");
+                let fused_triples = new_units[0][2]["fusedTokenUnits"].as_array().ok_or("fusedTokenUnits")?;
+                let fused_ids = strings(&Value::from(fused_triples.iter().map(|t| t[0].clone()).collect::<Vec<_>>()))?;
+                assert_eq!(fused_ids, strings(&test["expectedFusedTokenUnitIds"])?, "[{name}] fusedTokenUnits ids");
+                for triple in fused_triples {
+                    assert_eq!(triple, &serde_json::json!([triple[0], triple[0], {}]), "[{name}] full source triples");
+                }
+
+                assert_eq!(remainder.value.as_deref(), test["expectedRemainderValue"].as_str(), "[{name}] remainder value");
+                assert_eq!((remainder.meta_type.as_deref(), remainder.meta_id.as_deref()), (Some("walletBundle"), Some(own_bundle.as_str())), "[{name}] remainder bundle");
+                assert_eq!(unit_ids(remainder)?, strings(&test["expectedRemainderUnitIds"])?, "[{name}] kept units");
+                assert_ne!(remainder.position, POSITION, "[{name}] the remainder is a fresh position");
+
+                assert_eq!(value_sum(&molecule)?.to_string(), test["expectedSum"].as_str().unwrap_or_default(), "[{name}] V+F sum");
+
+                // Batch ids: none anywhere without one on S; otherwise the remainder keeps S's,
+                // and the burn and F atoms carry fresh ones (every V atom needs one).
+                match source_batch {
+                    None => assert!(molecule.atoms.iter().all(|a| a.batch_id.is_none()), "[{name}] no batch ids"),
+                    Some(batch) => {
+                        assert_eq!(src.batch_id.as_deref(), Some(batch), "[{name}] source batch");
+                        assert_eq!(remainder.batch_id.as_deref(), Some(batch), "[{name}] remainder keeps S's batch");
+                        for (label, atom) in [("burn", burn), ("F", fusion)] {
+                            assert!(atom.batch_id.is_some() && atom.batch_id.as_deref() != Some(batch), "[{name}] {label} gets a fresh batch id");
+                        }
+                    }
+                }
+
+                molecule.sign(None, false, true).map_err(|e| format!("[{name}] sign: {e}"))?;
+                molecule.check(Some(&source)).map_err(|e| format!("[{name}] check (batch {source_batch:?}): {e}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn buffer_withdraw_fresh_remainder_vectors() -> TestResult {
+        let bundle = generate_bundle_hash(SECRET);
+        for test in section("buffer_withdraw_fresh_remainder")? {
+            let name = test["name"].as_str().unwrap_or_default();
+            let mut source = Wallet::create(Some(SECRET), None, "BUFTOK", Some(POSITION), None, None)?;
+            source.balance = test["sourceBalance"].as_i64().ok_or("sourceBalance")?.to_string();
+
+            // No remainder wallet set: the builder derives the fresh remainder itself.
+            let mut molecule = Molecule::new();
+            molecule.secret = Some(SECRET.to_string());
+            molecule.bundle = Some(bundle.clone());
+            molecule.source_wallet = Some(source.clone());
+            let recipients = HashMap::from([(bundle.clone(), test["amount"].as_f64().ok_or("amount")?)]);
+            molecule.init_withdraw_buffer(recipients).map_err(|e| format!("[{name}] init_withdraw_buffer: {e}"))?;
+
+            assert_eq!(isotopes(&molecule), strings(&test["expectedIsotopes"])?, "[{name}] isotopes");
+            let [src, recipient, remainder] = &molecule.atoms[..] else { return Err(format!("[{name}] three atoms").into()) };
+            assert_eq!(src.value.as_deref(), test["expectedSourceValue"].as_str(), "[{name}] source B value");
+            assert_eq!(src.position, POSITION, "[{name}] signed by the buffer wallet");
+            assert_eq!(recipient.value.as_deref(), test["expectedRecipientValue"].as_str(), "[{name}] recipient V value");
+            assert!(recipient.position.is_empty() && recipient.wallet_address.is_empty(), "[{name}] the recipient is addressless");
+            assert_eq!(recipient.meta_id.as_deref(), Some(bundle.as_str()), "[{name}] recipient bundle");
+            assert_eq!(remainder.value.as_deref(), test["expectedRemainderValue"].as_str(), "[{name}] remainder B value");
+            assert_eq!(remainder.meta_type.as_deref(), Some("walletBundle"), "[{name}] remainder metaType");
+            if test["expectedRemainderPositionDistinctFromSource"].as_bool() == Some(true) {
+                assert!(!remainder.position.is_empty() && remainder.position != POSITION, "[{name}] fresh remainder position");
+            }
+            assert_eq!(value_sum(&molecule)?.to_string(), test["expectedSum"].as_str().unwrap_or_default(), "[{name}] V+B sum");
+            assert!(molecule.atoms.iter().all(|a| a.isotope != Isotope::I), "[{name}] no I atom");
+
+            molecule.sign(None, false, true).map_err(|e| format!("[{name}] sign: {e}"))?;
+            molecule.check(Some(&source)).map_err(|e| format!("[{name}] check: {e}"))?;
+
+            // A remainder at the source's own position is refused before any atom is built.
+            let mut at_source = Molecule::new();
+            at_source.secret = Some(SECRET.to_string());
+            at_source.source_wallet = Some(source.clone());
+            at_source.remainder_wallet = Some(source.clone());
+            let refused = at_source.init_withdraw_buffer(HashMap::from([(bundle.clone(), 1.0)]));
+            assert!(matches!(refused, Err(KnishIOError::TransferRemainder)), "[{name}] remainder at S refused: {refused:?}");
+            assert!(at_source.atoms.is_empty(), "[{name}] nothing built");
+        }
+        Ok(())
+    }
+}
+
 #[cfg(has_shared_fixtures)]
 mod patent_vectors {
     use serde::Deserialize;
@@ -491,5 +746,19 @@ mod patent_vectors {
             assert_eq!(verified, test.expected_verified,
                 "Verification mismatch for '{}': expected {}", test.name, test.expected_verified);
         }
+    }
+
+    /// The frozen Phase B fixture mirror (tests/fixtures/mod.rs) must equal the master sections,
+    /// so the standalone Phase B vector tests exercise exactly the canonical vectors.
+    #[test]
+    fn phase_b_fixture_mirror_matches_master() -> Result<(), serde_json::Error> {
+        let master: serde_json::Value = serde_json::from_str(PATENT_VECTORS_JSON)?;
+        let mirror: serde_json::Value = serde_json::from_str(super::fixtures::PHASE_B_VECTORS_JSON)?;
+        let sections = ["token_replenish", "stackable_fusion_conservation", "buffer_withdraw_fresh_remainder"];
+        assert_eq!(mirror.as_object().map(|m| m.len()), Some(sections.len()), "the mirror holds exactly the Phase B sections");
+        for section in sections {
+            assert_eq!(mirror[section], master["vectors"][section], "fixture section {section} drifted from the master");
+        }
+        Ok(())
     }
 }

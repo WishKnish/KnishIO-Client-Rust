@@ -153,32 +153,24 @@ impl AtomMeta {
     ///
     /// * `wallet` - Wallet instance to extract metadata from
     pub fn set_atom_wallet(&mut self, wallet: &crate::wallet::Wallet) -> &mut Self {
-        let mut wallet_meta = HashMap::new();
-        
-        if let Some(ref pubkey) = wallet.pubkey {
-            wallet_meta.insert("pubkey".to_string(), pubkey.clone());
-        }
-        
-        if let Some(ref characters) = wallet.characters {
-            wallet_meta.insert("characters".to_string(), characters.clone());
-        }
+        // JS setAtomWallet: only `tokenUnits` then `tradeRates`, each only when non-empty, in
+        // that order (compact JSON). A Vec keeps the order deterministic; merge_map's HashMap
+        // would not. The wallet's pubkey/characters are not atom metas of a V/B/F atom.
+        let mut wallet_meta: Vec<MetaItem> = Vec::new();
 
-        // Add token units meta key
         if !wallet.token_units.is_empty() {
-            let units_data = wallet.get_token_units_data();
-            if let Ok(units_json) = serde_json::to_string(&units_data) {
-                wallet_meta.insert("tokenUnits".to_string(), units_json);
+            if let Ok(units_json) = serde_json::to_string(&wallet.get_token_units_data()) {
+                wallet_meta.push(MetaItem::new("tokenUnits", units_json));
             }
         }
 
-        // Add trade rates meta key
         if !wallet.trade_rates.is_empty() {
             if let Ok(rates_json) = serde_json::to_string(&wallet.trade_rates) {
-                wallet_meta.insert("tradeRates".to_string(), rates_json);
+                wallet_meta.push(MetaItem::new("tradeRates", rates_json));
             }
         }
 
-        self.merge_map(wallet_meta)
+        self.merge(wallet_meta)
     }
 
     /// Set full wallet metadata for new wallet creation

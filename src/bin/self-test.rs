@@ -122,8 +122,9 @@ async fn run_negative_buffer_case(secret: &str, token: &str, tv: &Value) -> Resu
         }
         "withdraw" => {
             let recipient_bundle = source_wallet.bundle.clone().unwrap_or_default();
+            // No remainder wallet: init_withdraw_buffer derives the fresh remainder (contract 9.6).
             let mut m = Molecule::with_params(
-                Some(secret.to_string()), None, Some(source_wallet.clone()), Some(source_wallet.clone()), None, None,
+                Some(secret.to_string()), None, Some(source_wallet.clone()), None, None, None,
             );
             let mut recipients = HashMap::new();
             recipients.insert(recipient_bundle, amount as f64);
@@ -1506,14 +1507,15 @@ impl SelfTestRunner {
             let balance = tv["sourceBalance"].as_i64().unwrap_or(0) as i128;
             let amount = tv["amount"].as_i64().unwrap_or(0);
 
-            // The buffer wallet: B-isotope source AND remainder (mirrors the C++ reference —
-            // a self-withdrawal where the leftover buffer balance routes back to the same wallet).
+            // The buffer wallet is the B-isotope source; the leftover buffer balance goes to a
+            // FRESH remainder position that init_withdraw_buffer derives (contract 9.6 — a
+            // remainder at the source's own, consumed position is refused).
             let mut source_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"), None)?;
             source_wallet.set_balance_i128(balance);
             let recipient_bundle = source_wallet.bundle.clone().unwrap_or_default();
 
             let mut molecule = Molecule::with_params(
-                Some(secret.clone()), None, Some(source_wallet.clone()), Some(source_wallet.clone()), None, None,
+                Some(secret.clone()), None, Some(source_wallet.clone()), None, None, None,
             );
             let mut recipients = HashMap::new();
             recipients.insert(recipient_bundle, amount as f64);

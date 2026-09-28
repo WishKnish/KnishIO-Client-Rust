@@ -1267,6 +1267,14 @@ impl KnishIOClient {
     /// # Returns
     /// Balance information for the specified wallet/token
     pub async fn query_balance(&self, token: &str, bundle_hash: Option<&str>) -> Result<Wallet> {
+        self.query_balance_wallet(token, bundle_hash, None).await?
+            .ok_or(KnishIOError::InvalidResponse)
+    }
+
+    /// `Balance(token, bundle, type)`: the wallet row, or `None` when the ledger has none.
+    /// `wallet_type` `Some("buffer")` selects buffer wallets (validator 0.6.1); `None` sends no
+    /// type (regular wallets).
+    async fn query_balance_wallet(&self, token: &str, bundle_hash: Option<&str>, wallet_type: Option<&str>) -> Result<Option<Wallet>> {
         use crate::query::balance::QueryBalance;
         use crate::query::Query;
 
@@ -1275,28 +1283,53 @@ impl KnishIOClient {
 
         if let Some(bundle) = bundle_hash {
             query = query.with_bundle_hash(bundle);
-        } else if let Some(ref bundle) = self.bundle {
+        } else if let Some(bundle) = &self.bundle {
             query = query.with_bundle_hash(bundle);
         }
-
-        // Execute query through GraphQL client
-        if let Some(ref client) = self.client {
-            let response = query.execute(client, None, None).await?;
-
-            // get_data() already navigates the data_key ("data.Balance") to the Balance wallet
-            // object, so response.data() IS that object (not a wrapper). Tolerate the legacy
-            // wrapper shape too (a nested "Balance" key) for safety.
-            let response_data = response.data();
-            let balance_data = response_data.get("Balance").unwrap_or(response_data);
-            if balance_data.is_object() {
-                let wallet = Wallet::from_response_data(balance_data.clone())?;
-                return Ok(wallet);
-            }
-
-            Err(KnishIOError::InvalidResponse)
-        } else {
-            Err(KnishIOError::NoClient)
+        if let Some(wallet_type) = wallet_type {
+            query = query.with_type(wallet_type);
         }
+
+        let client = self.client.as_ref().ok_or(KnishIOError::NoClient)?;
+        let response = query.execute(client, None, None).await?;
+
+        // get_data() already navigates the data_key ("data.Balance") to the Balance wallet
+        // object, so response.data() IS that object (not a wrapper). Tolerate the legacy
+        // wrapper shape too (a nested "Balance" key) for safety.
+        let response_data = response.data();
+        let balance_data = response_data.get("Balance").unwrap_or(response_data);
+        if balance_data.is_object() {
+            Ok(Some(Wallet::from_response_data(balance_data.clone())?))
+        } else if balance_data.is_null() {
+            Ok(None)
+        } else {
+            Err(KnishIOError::InvalidResponse)
+        }
+    }
+
+    /// Re-derive OUR wallet at a queried wallet's on-ledger position, so it can sign and carries
+    /// its pubkey. The queried wallet has no secret/key (from_response_data sets secret=None);
+    /// the same secret + token + position reproduces the registered key/address (JS
+    /// getSourceWallet: sourceWallet.key = generateKey(secret, token, position)). Balance,
+    /// token units and batch id carry over.
+    fn own_wallet_at(&self, queried: &Wallet) -> Result<Wallet> {
+        let secret = self.secret.as_deref().ok_or(KnishIOError::Unauthenticated)?;
+        let mut wallet = Wallet::new(
+            Some(secret),
+            queried.bundle.as_deref(),
+            Some(&queried.token),
+            None, // derive address from the key (must reproduce the registered address)
+            queried.position.as_deref(),
+            None,
+            queried.characters.as_deref(),
+            Some(self.mlkem_parameter_set),
+        )?;
+        wallet.balance = queried.balance.clone();
+        // Without the queried stackable token units the molecule emits no tokenUnits meta and a
+        // stackable operation silently degrades to fungible.
+        wallet.token_units = queried.token_units.clone();
+        wallet.batch_id = queried.batch_id.clone();
+        Ok(wallet)
     }
 
     /// Query wallets by bundle or token
@@ -1526,18 +1559,17 @@ impl KnishIOClient {
     /// # Parameters
     /// - `token`: Token slug to query
     /// - `amount`: Required amount
-    /// - `wallet_type`: Optional wallet type (defaults to "regular")
+    /// - `wallet_type`: Optional `Balance` type, e.g. `Some("buffer")`; `None` = regular wallets
     ///
     /// # Returns
-    /// Wallet with sufficient balance
+    /// Wallet with sufficient balance, re-derived from our secret so it can sign
     ///
     /// # Errors
-    /// Returns `TransferBalance` error if insufficient balance or shadow wallet
+    /// `TransferBalance` if there is no such wallet or its balance is insufficient;
+    /// `WalletCredential` for a shadow wallet
     pub async fn query_source_wallet(&self, token: &str, amount: f64, wallet_type: Option<&str>) -> Result<Wallet> {
-        let _wallet_type = wallet_type.unwrap_or("regular");
-
-        // Query balance for this token
-        let queried = self.query_balance(token, None).await?;
+        let queried = self.query_balance_wallet(token, None, wallet_type).await?
+            .ok_or(KnishIOError::TransferBalance)?;
 
         // Check if we have enough tokens (i128 for precision-safe comparison)
         if queried.balance_as_i128() < (amount as i128) {
@@ -1549,32 +1581,8 @@ impl KnishIOClient {
             return Err(KnishIOError::WalletCredential);
         }
 
-        // The queried wallet has no secret/key (from_response_data sets secret=None), so it can't
-        // sign — re-derive OUR signing wallet at the on-ledger position from our secret (matches JS
-        // getSourceWallet: sourceWallet.key = generateKey(secret, token, position)). Same secret +
-        // token + position reproduces the registered key/address, so the OTS verifies; without this
-        // the molecule signs with no key -> "Signature malformed".
-        let secret = self.secret.clone().ok_or(KnishIOError::Unauthenticated)?;
-        let mut source_wallet = Wallet::new(
-            Some(&secret),
-            queried.bundle.as_deref(),
-            Some(token),
-            None, // derive address from the key (must reproduce the registered address)
-            queried.position.as_deref(),
-            None,
-            queried.characters.as_deref(),
-            Some(self.mlkem_parameter_set),
-        )?;
-        source_wallet.balance = queried.balance.clone();
-        // Preserve the queried stackable token units on the signing wallet. Wallet::new above
-        // re-derives only the key/address, so without this the source carries NO token_units and a
-        // stackable transfer silently degrades to fungible (the molecule emits no tokenUnits meta →
-        // the validator's per-unit routing no-ops → units never move). The source's batch id
-        // likewise carries over.
-        source_wallet.token_units = queried.token_units.clone();
-        source_wallet.batch_id = queried.batch_id.clone();
-
-        Ok(source_wallet)
+        // Without our key the molecule signs with no key -> "Signature malformed".
+        self.own_wallet_at(&queried)
     }
 
     /// Query ContinuID information
@@ -2421,26 +2429,23 @@ impl KnishIOClient {
         mutation.execute(client, None, None).await
     }
 
-    /// Replenish token supply
+    /// Replenish the supply of an existing token (contract 9.1)
+    ///
+    /// Matches JS replenishToken({ token, amount, units, sourceWallet }). Builds a C atom
+    /// (`action` = `add`) signed by the identity's USER wallet at its ContinuID pointer, exactly
+    /// like `create_token`, plus the ContinuID I atom. The validator accepts it only from the
+    /// token's creator bundle, for supply `infinite` or `replenishable`.
     ///
     /// # Parameters
     /// - `token`: Token slug to replenish
-    /// - `amount`: Amount to replenish
+    /// - `amount`: Amount to replenish (fungible; omit or equal the unit count with `units`)
+    /// - `units`: New unit ids of a stackable / non-fungible token (each becomes `[id, id, {}]`)
+    /// - `source_wallet`: The token wallet to credit; when `None`, the identity's wallet from
+    ///   `Balance(token)`, or a new wallet when it has none
     ///
-    /// # Returns
-    /// Replenish response
-    /// Replenish token supply
-    ///
-    /// Matches JS replenishToken({ token, amount, units, sourceWallet }) at lines 1887-1923
-    ///
-    /// # Parameters
-    /// - `token`: Token slug to replenish
-    /// - `amount`: Amount to replenish (optional if units provided)
-    /// - `units`: Token units (optional)
-    /// - `source_wallet`: Source wallet (optional, will be queried if not provided)
-    ///
-    /// # Returns
-    /// Replenish response
+    /// # Errors
+    /// `NegativeAmount` for a non-positive amount; `StackableUnitAmount` for a stackable /
+    /// non-fungible token without units, or an amount that differs from the unit count
     pub async fn replenish_token(
         &mut self,
         token: &str,
@@ -2450,44 +2455,53 @@ impl KnishIOClient {
     ) -> Result<Box<dyn Response>> {
         use crate::mutation::propose_molecule::MutationProposeMolecule;
         use crate::mutation::Mutation;
+        use crate::token_unit::TokenUnit;
 
-        // Ensure we have authentication
         self.ensure_authentication(None).await?;
 
-        // If no source wallet, query balance (matches JS lines 1893-1898)
-        let source_wallet = if let Some(wallet) = source_wallet {
-            wallet
-        } else {
-            // Query balance returns a Wallet directly
-            self.query_balance(token, None).await?
-        };
-
-        // Check if wallet is valid (matches JS lines 1896-1898)
-        if source_wallet.address.is_none() {
-            return Err(KnishIOError::WalletCredential);
+        if units.is_empty() {
+            if amount.unwrap_or(0.0) <= 0.0 {
+                return Err(KnishIOError::NegativeAmount);
+            }
+            let token_data = self.query_token(token).await?;
+            let token_data = token_data.as_array().and_then(|list| list.first()).unwrap_or(&token_data);
+            let fungibility = token_data["fungibility"].as_str().unwrap_or("").to_ascii_lowercase();
+            if matches!(fungibility.as_str(), "stackable" | "nonfungible" | "non-fungible") {
+                return Err(KnishIOError::StackableUnitAmount);
+            }
         }
 
-        // Remainder wallet (matches JS line 1901)
-        let secret = self.secret.as_ref()
-            .ok_or(KnishIOError::MissingSecret)?;
-        let remainder_wallet = source_wallet.create_remainder(secret)?;
+        let secret = self.secret.clone().ok_or(KnishIOError::MissingSecret)?;
 
-        // Create a molecule (matches JS lines 1904-1907)
+        // The credited wallet: the identity's existing token wallet (re-derived so its pubkey is
+        // known), or a new one.
+        let credited_wallet = match source_wallet {
+            Some(wallet) => wallet,
+            None => match self.query_balance_wallet(token, None, None).await? {
+                Some(queried) if queried.address.is_some() && queried.position.is_some() => self.own_wallet_at(&queried)?,
+                _ => Wallet::create(Some(&secret), None, token, None, None, Some(self.mlkem_parameter_set))?,
+            },
+        };
+
+        // The USER source wallet (ContinuID chain head) + remainder, as create_token.
+        let source_wallet = self.get_source_wallet().await?;
+        let remainder_wallet = source_wallet.create_remainder(&secret)?;
+
         let mut molecule = Molecule::new();
-        molecule.source_wallet = Some(source_wallet.clone());
-        molecule.remainder_wallet = Some(remainder_wallet.clone());
+        molecule.secret = Some(secret);
+        molecule.bundle = self.bundle.clone();
+        molecule.source_wallet = Some(source_wallet);
+        molecule.remainder_wallet = Some(remainder_wallet);
 
-        // Replenish token (matches JS lines 1908-1911)
-        molecule.replenish_token(amount.unwrap_or(0.0), Some(units))?;
+        let new_units: Vec<TokenUnit> = units.into_iter().map(|id| TokenUnit::new(id.clone(), id, None)).collect();
+        molecule.replenish_token(&credited_wallet, amount.unwrap_or(0.0), new_units)?;
 
-        // Sign molecule (matches JS lines 1912-1914)
         let bundle = self.bundle.clone();
         molecule.sign(bundle, false, false)?;
 
-        // Check molecule (matches JS line 1915)
+        // Pre-submit check (contract 9.7): a molecule our own check refuses is never sent.
         molecule.check(None)?;
 
-        // Create & execute a mutation (matches JS lines 1918-1922)
         let mutation = MutationProposeMolecule::from_molecule(molecule);
 
         let client = self.client.as_ref()
@@ -2496,126 +2510,66 @@ impl KnishIOClient {
         mutation.execute(client, None, None).await
     }
 
-    /// Fuse fungible token units
+    /// Fuse units of a stackable token into one new unit (contract 9.2)
+    ///
+    /// Matches JS fuseToken({ bundleHash, tokenSlug, newTokenUnit, fusedTokenUnitIds, sourceWallet }).
+    /// Builds `[V S(-B), V burn(+(M-1)), F recipient(+1, [N]), V remainder(+(B-M))]`, signed by
+    /// the source wallet S at its own position (no ContinuID atom), see `Molecule::fuse_token`.
     ///
     /// # Parameters
-    /// - `token`: Token slug
-    /// - `token_units`: List of token unit IDs to fuse
+    /// - `bundle_hash`: Recipient bundle hash (the own bundle credits a new wallet of ours)
+    /// - `token_slug`: Stackable token slug
+    /// - `new_token_unit`: The new unit N (its `fusedTokenUnits` meta is set here)
+    /// - `fused_token_unit_ids`: The M >= 2 unit ids of S to fuse, in caller order
+    /// - `source_wallet`: Source wallet S (queried via `Balance(token)` if not provided)
     ///
-    /// # Returns
-    /// Fuse response
-    /// Fuse fungible token units
-    ///
-    /// Matches JS fuseToken({ bundleHash, tokenSlug, newTokenUnit, fusedTokenUnitIds, sourceWallet }) at lines 1934-2003
-    ///
-    /// # Parameters
-    /// - `bundle_hash`: Recipient bundle hash
-    /// - `token_slug`: Token slug
-    /// - `new_token_unit`: New fused token unit
-    /// - `fused_token_unit_ids`: List of token unit IDs to fuse
-    /// - `source_wallet`: Source wallet (optional, will be queried if not provided)
-    ///
-    /// # Returns
-    /// Fuse response
+    /// # Errors
+    /// `TransferBalanceReason` for fewer than two units or an N id S already holds;
+    /// `TransferBalance` for a fused id S does not hold or a missing source wallet
     pub async fn fuse_token(
         &mut self,
         bundle_hash: &str,
         token_slug: &str,
-        mut new_token_unit: crate::token_unit::TokenUnit,
+        new_token_unit: crate::token_unit::TokenUnit,
         fused_token_unit_ids: Vec<String>,
         source_wallet: Option<Wallet>
     ) -> Result<Box<dyn Response>> {
         use crate::mutation::propose_molecule::MutationProposeMolecule;
         use crate::mutation::Mutation;
 
-        // Ensure we have authentication
         self.ensure_authentication(None).await?;
 
-        // Get source wallet (matches JS lines 1941-1943)
-        let mut source_wallet = if let Some(wallet) = source_wallet {
-            wallet
-        } else {
-            self.query_balance(token_slug, None).await?
+        let source_wallet = match source_wallet {
+            Some(wallet) => wallet,
+            None => self.query_source_wallet(token_slug, fused_token_unit_ids.len() as f64, None).await?,
         };
+        let secret = self.secret.clone().ok_or(KnishIOError::MissingSecret)?;
 
-        // 3-Layer Validation (matches JS lines 1946-1954)
-
-        // Layer 1: Source wallet exists (matches JS lines 1946-1948)
-        if source_wallet.address.is_none() {
-            return Err(KnishIOError::TransferBalance);
-        }
-
-        // Layer 2: Source wallet has token units (matches JS lines 1949-1951)
-        if source_wallet.token_units.is_empty() {
-            return Err(KnishIOError::TransferBalance);
-        }
-
-        // Layer 3: Fused token unit list not empty (matches JS lines 1952-1954)
-        if fused_token_unit_ids.is_empty() {
-            return Err(KnishIOError::TransferBalance);
-        }
-
-        // Validate all fused IDs exist in source (matches JS lines 1957-1965)
-        let source_token_unit_ids: Vec<String> = source_wallet.token_units
-            .iter()
-            .map(|unit| unit.id.clone())
-            .collect();
-
-        for fused_id in &fused_token_unit_ids {
-            if !source_token_unit_ids.contains(fused_id) {
-                return Err(KnishIOError::TransferBalance);
-            }
-        }
-
-        // Create recipient wallet (matches JS lines 1968-1971)
-        let mut recipient_wallet = Wallet::create(
-            None,
-            Some(bundle_hash),
-            token_slug,
-            None,
-            None,
-            Some(self.mlkem_parameter_set),
-        )?;
-
-        // Set batch ID (matches JS line 1974)
+        // The recipient wallet for R: a new wallet of ours for the own bundle, otherwise the
+        // bundle-only recipient wallet transfer_token builds; a fresh batch id when S has one.
+        let mut recipient_wallet = if self.bundle.as_deref() == Some(bundle_hash) {
+            Wallet::create(Some(&secret), None, token_slug, None, None, Some(self.mlkem_parameter_set))?
+        } else {
+            Wallet::create(None, Some(bundle_hash), token_slug, None, None, Some(self.mlkem_parameter_set))?
+        };
         recipient_wallet.init_batch_id(Some(&source_wallet), false);
-
-        // Create remainder wallet (matches JS line 1977)
-        let secret = self.secret.as_ref()
-            .ok_or(KnishIOError::MissingSecret)?;
-        let mut remainder_wallet = source_wallet.create_remainder(secret)?;
-
-        // Split token units (fused) - CRITICAL: Only to remainder, not recipient! (matches JS line 1980)
-        source_wallet.split_units(&fused_token_unit_ids, &mut remainder_wallet, None);
-
-        // Set recipient new fused token unit (matches JS lines 1983-1984)
-        // CRITICAL: After split_units, source_wallet.token_units contains ONLY the fused units
-        new_token_unit.metas.insert(
-            "fusedTokenUnits".to_string(),
-            serde_json::to_value(source_wallet.get_token_units_data())?
-        );
         recipient_wallet.token_units = vec![new_token_unit];
 
-        // Create a molecule (matches JS lines 1987-1990)
+        let remainder_wallet = source_wallet.create_remainder(&secret)?;
+
         let mut molecule = Molecule::new();
+        molecule.secret = Some(secret);
+        molecule.bundle = self.bundle.clone();
         molecule.source_wallet = Some(source_wallet.clone());
         molecule.remainder_wallet = Some(remainder_wallet);
+        molecule.fuse_token(fused_token_unit_ids, &recipient_wallet)?;
 
-        // Fuse token (matches JS line 1991)
-        // Extract IDs from token units (after split_units, source_wallet contains only fused units)
-        let fused_ids: Vec<String> = source_wallet.token_units.iter()
-            .map(|unit| unit.id.clone())
-            .collect();
-        molecule.fuse_token(fused_ids, &recipient_wallet)?;
-
-        // Sign molecule (matches JS lines 1992-1994)
         let bundle = self.bundle.clone();
         molecule.sign(bundle, false, false)?;
 
-        // Check molecule (matches JS line 1995)
-        molecule.check(None)?;
+        // Pre-submit check (contract 9.7). S is the sender, so the V remainder rule applies.
+        molecule.check(Some(&source_wallet))?;
 
-        // Create & execute a mutation (matches JS lines 1998-2002)
         let mutation = MutationProposeMolecule::from_molecule(molecule);
 
         let client = self.client.as_ref()
@@ -2658,8 +2612,12 @@ impl KnishIOClient {
             self.query_source_wallet(token, amount, None).await?
         };
 
-        // Create molecule with source wallet
+        // The molecule needs our secret (buffer wallet + signing) and the source's remainder.
+        let secret = self.secret.clone().ok_or(KnishIOError::MissingSecret)?;
         let mut molecule = Molecule::new();
+        molecule.remainder_wallet = Some(source_wallet.create_remainder(&secret)?);
+        molecule.secret = Some(secret);
+        molecule.bundle = self.bundle.clone();
         molecule.source_wallet = Some(source_wallet);
 
         // Create mutation (matches TS line 1851)
@@ -2678,14 +2636,19 @@ impl KnishIOClient {
         mutation.execute(client, None, None).await
     }
 
-    /// Withdraw tokens from buffer
+    /// Withdraw tokens from the identity's buffer wallet (contract 9.6)
     ///
-    /// Matches TS withdrawBufferToken({ tokenSlug, amount, sourceWallet })
+    /// Matches TS withdrawBufferToken({ tokenSlug, amount, sourceWallet }). Builds
+    /// `[B S(-S.balance), V own bundle(+amount), B remainder(+(S.balance - amount))]`, signed by
+    /// the buffer wallet S; the remainder is a fresh position (`S.create_remainder`).
     ///
     /// # Parameters
     /// - `token`: Token slug
-    /// - `amount`: Amount to withdraw
-    /// - `source_wallet`: Optional source wallet (will use default if not provided)
+    /// - `amount`: Amount to withdraw to the own bundle
+    /// - `source_wallet`: The buffer wallet S (queried via `Balance(token, type: "buffer")` if not provided)
+    ///
+    /// # Errors
+    /// `TransferBalance` when there is no buffer wallet or its balance is below `amount`
     ///
     /// # Returns
     /// Withdrawal response
@@ -2703,15 +2666,19 @@ impl KnishIOClient {
 
         self.log("info", &format!("KnishIOClient::withdraw_buffer_token() - Withdrawing {} of {} from buffer...", amount, token));
 
-        // Get source wallet if not provided (matches TS lines 1891-1893)
-        let source_wallet = if let Some(wallet) = source_wallet {
-            wallet
-        } else {
-            self.get_source_wallet().await?
+        let source_wallet = match source_wallet {
+            Some(wallet) => wallet,
+            None => self.query_source_wallet(token, amount, Some("buffer")).await?,
         };
+        if source_wallet.balance_as_i128() < amount as i128 {
+            return Err(KnishIOError::TransferBalance);
+        }
 
-        // Create molecule with source wallet
+        let secret = self.secret.clone().ok_or(KnishIOError::MissingSecret)?;
         let mut molecule = Molecule::new();
+        molecule.remainder_wallet = Some(source_wallet.create_remainder(&secret)?);
+        molecule.secret = Some(secret);
+        molecule.bundle = self.bundle.clone();
         molecule.source_wallet = Some(source_wallet);
 
         // Create mutation (matches TS line 1895)
@@ -2739,7 +2706,8 @@ impl KnishIOClient {
     ///
     /// # Parameters
     /// - `token`: Token slug of shadow wallet
-    /// - `batch_id`: Optional batch ID for the claim
+    /// - `batch_id`: Batch ID of the shadow wallet; when `None`, the batch id of the first shadow
+    ///   wallet `query_wallets(token)` lists (`WalletShadow` when there is none)
     /// - `molecule`: Optional molecule to use (if not provided, will create one)
     ///
     /// # Returns
@@ -2755,6 +2723,12 @@ impl KnishIOClient {
 
         self.log("info", &format!("KnishIOClient::claim_shadow_wallet() - Claiming shadow wallet for token: {}...", token));
 
+        // No batch id given: claim the first shadow wallet of the token (JS claimShadowWallet).
+        let batch_id = match batch_id {
+            Some(batch_id) => batch_id.to_string(),
+            None => first_shadow_batch_id(&self.query_wallets(None, Some(token)).await?)?,
+        };
+
         // Create or use provided molecule (matches JS line 541: const _molecule = molecule || await this.createMolecule({}))
         let mol = match molecule {
             Some(m) => m,
@@ -2767,7 +2741,7 @@ impl KnishIOClient {
         // Fill molecule with token and batchId (matches JS lines 1582-1585: query.fillMolecule({ token, batchId }))
         let params = ClaimShadowWalletParams {
             token: token.to_string(),
-            batch_id: batch_id.map(|s| s.to_string()),
+            batch_id: Some(batch_id.clone()),
         };
 
         // Create a wallet for fill_molecule (shadow wallet claims use a temporary wallet).
@@ -2777,7 +2751,7 @@ impl KnishIOClient {
         let secret = self.secret.as_deref().ok_or(KnishIOError::MissingSecret)?;
         let bundle = self.bundle.as_deref();
         let mut wallet = Wallet::create(Some(secret), bundle, token, None, None, Some(self.mlkem_parameter_set))?;
-        wallet.batch_id = batch_id.map(|s| s.to_string());
+        wallet.batch_id = Some(batch_id);
 
         mutation.fill_molecule(params, &wallet)?;
 
@@ -3619,6 +3593,16 @@ impl Clone for KnishIOClient {
     }
 }
 
+/// The batch id of the first shadow wallet in `wallets` (JS claimShadowWallet: `queryWallets`
+/// filtered to `isShadow()`); regular wallets listed before it are skipped.
+fn first_shadow_batch_id(wallets: &[Wallet]) -> Result<String> {
+    wallets
+        .iter()
+        .find(|wallet| wallet.is_shadow())
+        .and_then(|wallet| wallet.batch_id.clone())
+        .ok_or(KnishIOError::WalletShadow)
+}
+
 // Implement Debug for KnishIOClient (required for some operations)
 impl std::fmt::Debug for KnishIOClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3739,12 +3723,16 @@ mod tests {
     async fn answer(
         mut socket: TcpStream,
         continu_id: &Value,
+        wallets: &Value,
         verdicts: &mut std::vec::IntoIter<bool>,
         recorder: &UnboundedSender<Value>,
     ) -> StubResult<()> {
         let request: Value = serde_json::from_slice(&read_request_body(&mut socket).await?)?;
-        let reply = if request["query"].as_str().unwrap_or("").contains("ContinuId") {
+        let query = request["query"].as_str().unwrap_or("");
+        let reply = if query.contains("ContinuId") {
             json!({ "data": { "ContinuId": continu_id } })
+        } else if query.contains("Wallet(") {
+            json!({ "data": { "Wallet": wallets } })
         } else if verdicts.next().unwrap_or(false) {
             json!({ "data": { "ProposeMolecule": {
                 "molecularHash": "accepted-hash",
@@ -3773,13 +3761,18 @@ mod tests {
     }
 
     async fn stub_validator(continu_id: Value, verdicts: Vec<bool>) -> std::result::Result<StubValidator, Box<dyn Error>> {
+        stub_validator_with_wallets(continu_id, json!([]), verdicts).await
+    }
+
+    /// As `stub_validator`, and it answers every `Wallet(…)` list query with `wallets`.
+    async fn stub_validator_with_wallets(continu_id: Value, wallets: Value, verdicts: Vec<bool>) -> std::result::Result<StubValidator, Box<dyn Error>> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let url = format!("http://{}/graphql", listener.local_addr()?);
         let (recorder, received) = unbounded_channel();
         tokio::spawn(async move {
             let mut verdicts = verdicts.into_iter();
             while let Ok((socket, _)) = listener.accept().await {
-                if answer(socket, &continu_id, &mut verdicts, &recorder).await.is_err() {
+                if answer(socket, &continu_id, &wallets, &mut verdicts, &recorder).await.is_err() {
                     return;
                 }
             }
@@ -3926,6 +3919,145 @@ mod tests {
         assert_eq!(proposals[0]["atoms"][0]["token"], "USER");
         assert_eq!(proposals[1]["atoms"][0]["token"], "AUTH");
         assert!(client.get_auth_token().is_none());
+        Ok(())
+    }
+
+    // ── Pre-submit check (contract 9.7) and claim batch-id resolution ────────────────────────
+
+    use crate::error::KnishIOError;
+    use crate::molecule::{Molecule, DROP_CONTINUID_ATOM};
+    use crate::types::MetaItem;
+
+    /// A molecule signed by the USER wallet at POINTER, with a fresh USER remainder.
+    fn user_molecule(secret: &str) -> crate::error::Result<Molecule> {
+        let source = user_wallet_at(secret, POINTER)?;
+        let mut molecule = Molecule::new();
+        molecule.remainder_wallet = Some(source.create_remainder(secret)?);
+        molecule.secret = Some(secret.to_string());
+        molecule.bundle = Some(generate_bundle_hash(secret));
+        molecule.source_wallet = Some(source);
+        Ok(molecule)
+    }
+
+    /// While alive, the builders add no ContinuID atom (a stubbed broken builder).
+    struct BrokenContinuIdBuilder;
+
+    impl BrokenContinuIdBuilder {
+        fn install() -> Self {
+            DROP_CONTINUID_ATOM.with(|drop| drop.set(true));
+            BrokenContinuIdBuilder
+        }
+    }
+
+    impl Drop for BrokenContinuIdBuilder {
+        fn drop(&mut self) {
+            DROP_CONTINUID_ATOM.with(|drop| drop.set(false));
+        }
+    }
+
+    /// A high-level operation whose built molecule fails the SDK's own check (a USER-signed claim
+    /// without its I atom) is refused with AtomsMissing, and no request reaches the ledger.
+    #[tokio::test]
+    async fn operation_whose_molecule_fails_the_check_sends_nothing() -> TestResult {
+        let secret = generate_secret("phase-b-presubmit-refused");
+        let mut stub = stub_validator(Value::Null, vec![true]).await?;
+        let mut client = client_for(&stub);
+        client.set_secret(secret.as_str());
+        let molecule = user_molecule(&secret)?;
+
+        let result = {
+            let _broken = BrokenContinuIdBuilder::install();
+            client.claim_shadow_wallet("PBTOK", Some("batch-1"), Some(molecule)).await
+        };
+
+        assert!(
+            matches!(&result, Err(KnishIOError::AtomsMissing)),
+            "expected AtomsMissing, got {:?}",
+            result.as_ref().err()
+        );
+        assert!(stub.requests().is_empty(), "a refused molecule must not be sent: {:?}", stub.requests());
+        Ok(())
+    }
+
+    /// The raw propose path is not checked: a USER-signed M-only molecule (which the SDK's check
+    /// refuses) is sent exactly as built, so negative tests can reach the validator.
+    #[tokio::test]
+    async fn raw_propose_sends_a_user_signed_m_only_molecule_unchanged() -> TestResult {
+        let secret = generate_secret("phase-b-presubmit-raw");
+        let mut stub = stub_validator(Value::Null, vec![true]).await?;
+        let mut client = client_for(&stub);
+        let mut molecule = user_molecule(&secret)?;
+        {
+            let _broken = BrokenContinuIdBuilder::install();
+            molecule.init_meta(vec![MetaItem::new("appRole", "admin")], "walletBundle", &generate_bundle_hash(&secret), None)?;
+        }
+        molecule.sign(None, false, true)?;
+        assert!(matches!(molecule.check(None), Err(KnishIOError::AtomsMissing)), "precondition: the SDK's check refuses it");
+        let expected = molecule.to_json(crate::types::MoleculeJsonOptions::default())?;
+
+        client.propose_molecule(molecule).await?;
+
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1, "the raw path sends the molecule");
+        assert_eq!(proposals[0], expected, "the raw path sends it unchanged");
+        assert_eq!(proposals[0]["atoms"].as_array().map(Vec::len), Some(1), "M only, no I atom");
+        Ok(())
+    }
+
+    fn listed_wallet(secret: &str, address: Option<&str>, position: Option<&str>, batch_id: &str) -> Value {
+        json!({
+            "address": address,
+            "bundleHash": generate_bundle_hash(secret),
+            "tokenSlug": "PBTOK",
+            "batchId": batch_id,
+            "position": position,
+            "amount": "10",
+            "characters": "BASE64",
+            "pubkey": null,
+            "createdAt": "1700000000000",
+            "tokenUnits": [],
+        })
+    }
+
+    /// claim_shadow_wallet without a batch id claims the first SHADOW wallet of the token, skipping
+    /// a regular wallet listed before it; with no shadow wallet it fails with WalletShadow and
+    /// proposes nothing.
+    #[tokio::test]
+    async fn claim_without_batch_id_claims_the_first_shadow_wallet() -> TestResult {
+        let secret = generate_secret("phase-b-claim-resolve");
+        let signer = user_wallet_at(&secret, POINTER)?;
+        let regular = listed_wallet(&secret, Some(&"a".repeat(64)), Some(&"b".repeat(64)), "regular-batch");
+        let shadow = listed_wallet(&secret, None, None, "shadow-batch");
+
+        let mut stub = stub_validator_with_wallets(
+            continu_id_head(&secret, "USER", signer.address.clone()),
+            json!([regular.clone(), shadow]),
+            vec![true],
+        ).await?;
+        let mut client = client_for(&stub);
+        client.set_secret(secret.as_str());
+
+        client.claim_shadow_wallet("PBTOK", None, None).await?;
+
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1, "one claim molecule");
+        let claim = &proposals[0]["atoms"][0];
+        assert_eq!(claim["isotope"], "C");
+        assert_eq!(claim["batchId"], "shadow-batch", "the shadow wallet's batch id, not the regular one's");
+        assert_eq!(meta_value(claim, "walletBatchId").as_deref(), Some("shadow-batch"));
+
+        let mut stub = stub_validator_with_wallets(
+            continu_id_head(&secret, "USER", signer.address.clone()),
+            json!([regular]),
+            vec![true],
+        ).await?;
+        let mut client = client_for(&stub);
+        client.set_secret(secret.as_str());
+
+        let result = client.claim_shadow_wallet("PBTOK", None, None).await;
+
+        assert!(matches!(&result, Err(KnishIOError::WalletShadow)), "got {:?}", result.as_ref().err());
+        assert!(stub.proposals().is_empty(), "no claim is proposed without a shadow wallet");
         Ok(())
     }
 }

@@ -119,6 +119,10 @@ pub enum KnishIOError {
     /// Transfer balance error
     #[error("Transfer balance error")]
     TransferBalance,
+
+    /// Transfer balance error carrying the reason (the JS `TransferBalanceException(message)`)
+    #[error("{0}")]
+    TransferBalanceReason(String),
     
     /// Transfer is malformed or invalid
     #[error("Transfer malformed")]
@@ -310,6 +314,7 @@ impl KnishIOError {
             self,
             KnishIOError::BalanceInsufficient
                 | KnishIOError::TransferBalance
+                | KnishIOError::TransferBalanceReason(_)
                 | KnishIOError::TransferRemainder
                 | KnishIOError::TransferToSelf
                 | KnishIOError::TransferUnbalanced

@@ -312,9 +312,12 @@ impl Wallet {
                                 return None;
                             }
                             let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            let meta = obj.get("metas")
-                                .and_then(|v| v.as_object())
-                                .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                            // `metas` is a JSON-encoded String scalar on the wire; accept an object too.
+                            let meta = match obj.get("metas") {
+                                Some(serde_json::Value::String(encoded)) => serde_json::from_str::<serde_json::Value>(encoded).ok(),
+                                other => other.cloned(),
+                            }
+                            .and_then(|v| v.as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()));
                             Some(TokenUnit::new(id, name, meta))
                         } else if let Some(unit_array) = unit_data.as_array() {
                             if unit_array.len() < 2 {
