@@ -19,9 +19,9 @@ pub const XSDK_REENROLLED_PRIMARY_PASSPHRASE: &str = "xsdk-reenrolled-primary-pa
 
 /// Frozen copy of the Phase B vector sections of the master
 /// `sdks/shared-test-results/canonical-patent-vectors.json` (`token_replenish`,
-/// `stackable_fusion_conservation`, `buffer_withdraw_fresh_remainder`), so the Phase B vector tests
-/// in `tests/patent_vector_validation.rs` run in a standalone checkout. Its gated suite asserts that
-/// this copy equals the master sections — do not edit by hand.
+/// `stackable_fusion_conservation`, `buffer_withdraw_fresh_remainder`, `create_token_units`), so
+/// the Phase B vector tests in `tests/patent_vector_validation.rs` run in a standalone checkout.
+/// Its gated suite asserts that this copy equals the master sections — do not edit by hand.
 #[allow(dead_code)] // read only by tests/patent_vector_validation.rs; the other suites share this file
 pub const PHASE_B_VECTORS_JSON: &str = r#"{
   "token_replenish": {
@@ -248,6 +248,43 @@ pub const PHASE_B_VECTORS_JSON: &str = r#"{
         "expectedRemainderValue": "0",
         "expectedSum": "0",
         "expectedRemainderPositionDistinctFromSource": true
+      }
+    ]
+  },
+  "create_token_units": {
+    "description": "createToken with units sends the C atom meta tokenUnits as compact [id, name, metas] triples. A bare id string is sent as [id, id, {}]; a triple or unit object keeps its own name and metas ({} when absent). Value = unit count; amount must be null or 0.",
+    "tests": [
+      {
+        "name": "ids_to_triples",
+        "token": "CRTSTK",
+        "units": [
+          "U1",
+          "U2",
+          "U3"
+        ],
+        "expectedCValue": "3",
+        "expectedMetaType": "token",
+        "expectedMetaId": "CRTSTK",
+        "expectedTokenUnits": "[[\"U1\",\"U1\",{}],[\"U2\",\"U2\",{}],[\"U3\",\"U3\",{}]]",
+        "expectedTokenUnitIds": [
+          "U1",
+          "U2",
+          "U3"
+        ]
+      },
+      {
+        "name": "single_id",
+        "token": "CRTONE",
+        "units": [
+          "solo"
+        ],
+        "expectedCValue": "1",
+        "expectedMetaType": "token",
+        "expectedMetaId": "CRTONE",
+        "expectedTokenUnits": "[[\"solo\",\"solo\",{}]]",
+        "expectedTokenUnitIds": [
+          "solo"
+        ]
       }
     ]
   }

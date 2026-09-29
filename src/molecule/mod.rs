@@ -23,14 +23,20 @@ pub use builder::{TypeSafeMoleculeBuilder, ValueAtomParams, MetaAtomParams, Iden
 /// The all-zeros bundle a burn credits (validator `v_isotope::ZERO_BUNDLE`, JS `burnToken`).
 const ZERO_BUNDLE: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
+/// A `tokenUnits` meta value: the compact triples `[[id, name, metas], …]` (JS `TokenUnit.toData`
+/// under `JSON.stringify`), the form every unit operation sends.
+pub(crate) fn token_units_json(units: &[TokenUnit]) -> Result<String> {
+    let triples: Vec<Vec<serde_json::Value>> = units.iter().map(TokenUnit::to_data).collect();
+    Ok(serde_json::to_string(&triples)?)
+}
+
 /// A V/B/F atom's `tokenUnits` meta: the compact triples `[[id, name, metas], …]` (JS
 /// `setAtomWallet` / `JSON.stringify`), or no meta at all for an empty unit list.
 fn token_units_meta(units: &[TokenUnit]) -> Result<Option<Vec<MetaItem>>> {
     if units.is_empty() {
         return Ok(None);
     }
-    let triples: Vec<Vec<serde_json::Value>> = units.iter().map(TokenUnit::to_data).collect();
-    Ok(Some(vec![MetaItem::new("tokenUnits", serde_json::to_string(&triples)?)]))
+    Ok(Some(vec![MetaItem::new("tokenUnits", token_units_json(units)?)]))
 }
 
 #[cfg(test)]

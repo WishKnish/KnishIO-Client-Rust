@@ -18,14 +18,18 @@ fn shared_fixtures_absent() {}
 #[path = "fixtures/mod.rs"]
 mod fixtures;
 
-/// Phase B vectors (contract 9.1 replenish, 9.2 stackable fusion, 9.6 buffer withdraw), read from
-/// the frozen fixture mirror so they also run in a standalone checkout; the gated suite below
-/// pins the mirror to the master. Every built molecule must also pass the SDK's own check.
+/// Phase B vectors (contract 9.1 replenish, 9.2 stackable fusion, 9.6 buffer withdraw, create_token
+/// units), read from the frozen fixture mirror so they also run in a standalone checkout; the gated
+/// suite below pins the mirror to the master. Every built molecule must also pass the SDK's own check.
 mod phase_b_vectors {
     use super::fixtures::PHASE_B_VECTORS_JSON;
-    use knishio_client::{generate_bundle_hash, Atom, Isotope, KnishIOError, Molecule, TokenUnit, Wallet};
-    use serde_json::Value;
+    use knishio_client::types::MoleculeFromJsonOptions;
+    use knishio_client::{generate_bundle_hash, generate_secret, Atom, Isotope, KnishIOClient, KnishIOError, Molecule, TokenUnit, Wallet};
+    use serde_json::{json, Value};
     use std::collections::HashMap;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -264,6 +268,107 @@ mod phase_b_vectors {
             let refused = at_source.init_withdraw_buffer(HashMap::from([(bundle.clone(), 1.0)]));
             assert!(matches!(refused, Err(KnishIOError::TransferRemainder)), "[{name}] remainder at S refused: {refused:?}");
             assert!(at_source.atoms.is_empty(), "[{name}] nothing built");
+        }
+        Ok(())
+    }
+
+    type StubResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+    async fn read_json_body(socket: &mut TcpStream) -> StubResult<Value> {
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            if let Some(end) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&buffer[..end]).to_ascii_lowercase();
+                let length: usize = head.lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0);
+                if buffer.len() >= end + 4 + length {
+                    return Ok(serde_json::from_slice(&buffer[end + 4..end + 4 + length])?);
+                }
+            }
+            let n = socket.read(&mut chunk).await?;
+            if n == 0 {
+                return Err("client closed the connection mid-request".into());
+            }
+            buffer.extend_from_slice(&chunk[..n]);
+        }
+    }
+
+    async fn answer(mut socket: TcpStream, recorder: &tokio::sync::mpsc::UnboundedSender<Value>) -> StubResult<()> {
+        let request = read_json_body(&mut socket).await?;
+        let reply = if request["query"].as_str().unwrap_or_default().contains("ContinuId") {
+            json!({ "data": { "ContinuId": null } })
+        } else {
+            json!({ "data": { "ProposeMolecule": {
+                "molecularHash": "accepted-hash",
+                "status": "accepted",
+                "reason": null,
+                "payload": "{\"token\":\"stub-jwt\",\"expiresAt\":4102444800,\"pubkey\":null}",
+            } } })
+        };
+        recorder.send(request)?;
+        let body = reply.to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        socket.write_all(response.as_bytes()).await?;
+        socket.shutdown().await?;
+        Ok(())
+    }
+
+    /// A loopback stand-in for the validator, so the public `create_token` runs with no network:
+    /// it records every GraphQL body, answers ContinuId with no head (a fresh USER source) and
+    /// accepts every proposed molecule, the login included.
+    async fn loopback_validator() -> TestResult<(String, UnboundedReceiver<Value>)> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}/graphql", listener.local_addr()?);
+        let (recorder, received) = unbounded_channel();
+        tokio::spawn(async move {
+            while let Ok((socket, _)) = listener.accept().await {
+                if answer(socket, &recorder).await.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok((url, received))
+    }
+
+    /// The public `create_token` with bare unit ids sends the C atom meta `tokenUnits` as the
+    /// compact `[id, id, {}]` triples every other unit operation uses, byte for byte.
+    #[tokio::test]
+    async fn create_token_units_vectors() -> TestResult {
+        let secret = generate_secret("create-token-units-vector");
+        for test in section("create_token_units")? {
+            let name = test["name"].as_str().unwrap_or_default();
+            let (url, mut received) = loopback_validator().await?;
+            let mut client = KnishIOClient::new(url.as_str(), Some("public".to_string()), None, None, None, Some(false));
+            client.set_secret(secret.as_str());
+            let meta = HashMap::from([("fungibility".to_string(), Value::from("stackable"))]);
+            client.create_token(test["token"].as_str().ok_or("token")?, None, Some(meta), None, strings(&test["units"])?).await
+                .map_err(|e| format!("[{name}] create_token: {e}"))?;
+
+            let mut proposals = Vec::new();
+            while let Ok(request) = received.try_recv() {
+                if request["query"].as_str().unwrap_or_default().contains("ProposeMolecule") {
+                    proposals.push(request["variables"]["molecule"].clone());
+                }
+            }
+            let sent = proposals.last().ok_or("no molecule proposed")?;
+            let c = &sent["atoms"][0];
+            let wire_meta = |key: &str| c["meta"].as_array()?.iter().find(|m| m["key"] == key)?["value"].as_str();
+            assert_eq!(c["isotope"], "C", "[{name}] the token creation C atom comes first");
+            assert_eq!(wire_meta("tokenUnits"), test["expectedTokenUnits"].as_str(), "[{name}] tokenUnits, byte-exact");
+            assert_eq!(c["value"].as_str(), test["expectedCValue"].as_str(), "[{name}] C value = unit count");
+            assert_eq!(c["metaType"].as_str(), test["expectedMetaType"].as_str(), "[{name}] metaType");
+            assert_eq!(c["metaId"].as_str(), test["expectedMetaId"].as_str(), "[{name}] metaId");
+
+            let molecule = Molecule::from_json(sent, MoleculeFromJsonOptions::default())?;
+            assert_eq!(molecule.atoms[0].isotope, Isotope::C, "[{name}] reconstructed C atom");
+            assert_eq!(unit_ids(&molecule.atoms[0])?, strings(&test["expectedTokenUnitIds"])?, "[{name}] tokenUnits ids");
+            molecule.check(None).map_err(|e| format!("[{name}] check: {e}"))?;
         }
         Ok(())
     }
@@ -754,7 +859,7 @@ mod patent_vectors {
     fn phase_b_fixture_mirror_matches_master() -> Result<(), serde_json::Error> {
         let master: serde_json::Value = serde_json::from_str(PATENT_VECTORS_JSON)?;
         let mirror: serde_json::Value = serde_json::from_str(super::fixtures::PHASE_B_VECTORS_JSON)?;
-        let sections = ["token_replenish", "stackable_fusion_conservation", "buffer_withdraw_fresh_remainder"];
+        let sections = ["token_replenish", "stackable_fusion_conservation", "buffer_withdraw_fresh_remainder", "create_token_units"];
         assert_eq!(mirror.as_object().map(|m| m.len()), Some(sections.len()), "the mirror holds exactly the Phase B sections");
         for section in sections {
             assert_eq!(mirror[section], master["vectors"][section], "fixture section {section} drifted from the master");

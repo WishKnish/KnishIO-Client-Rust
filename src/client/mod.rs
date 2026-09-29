@@ -1906,6 +1906,7 @@ impl KnishIOClient {
         use crate::mutation::create_token::{MutationCreateToken, CreateTokenParams};
         use crate::mutation::Mutation;
         use crate::crypto::generate_batch_id;
+        use crate::token_unit::TokenUnit;
 
         // Ensure we have authentication
         self.ensure_authentication(None).await?;
@@ -1948,11 +1949,13 @@ impl KnishIOClient {
             // Calculating amount based on Unit IDs (matches JS lines 1180-1183)
             amount = Some(units.len() as f64);
 
-            // Update meta
+            // Update meta. tokenUnits carries each id as the [id, id, {}] triple every other unit
+            // operation sends (a bare id reaches the validator with no name or metas).
+            let token_units: Vec<TokenUnit> = units.iter().map(|id| TokenUnit::new(id.clone(), id.clone(), None)).collect();
             let mut meta_map = meta.unwrap_or_default();
             meta_map.insert("splittable".to_string(), Value::from(1));
             meta_map.insert("decimals".to_string(), Value::from(0));
-            meta_map.insert("tokenUnits".to_string(), Value::String(serde_json::to_string(&units)?));
+            meta_map.insert("tokenUnits".to_string(), Value::String(crate::molecule::token_units_json(&token_units)?));
             meta = Some(meta_map);
         }
 
