@@ -109,7 +109,7 @@ num_cpus = "1.16"               # For system information in benchmarks
 num-bigint = "0.5"
 num-traits = "0.2"
 # Hardware secret storage optional dependencies
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"], optional = true }
+keyring = { version = "4", features = ["apple-native", "windows-native", "sync-secret-service"], optional = true }
 tss-esapi = { version = "7", optional = true }
 
 # Optional SIMD acceleration - enabled per target architecture
