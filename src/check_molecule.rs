@@ -661,24 +661,36 @@ impl<'a> CheckMolecule<'a> {
             }
         }
 
-        // Subdivide Kk into 16 segments of 256 bytes (128 characters) each
-        let ots_chunks = Self::chunk_substr(&ots, 128);
+        // WOTS+ verification hashes chunk i (8 + normalized_hash[i]) times, the opposite of
+        // signing's (8 - normalizedHash[i]); kcore advances all 16 chains in one call, and on
+        // None the SDK loop below runs unchanged.
+        let kcore_fragments = crate::kcore::chains_hex_signed(
+            &ots,
+            normalized_hash.iter().take(ots.len() / 128).map(|&n| 8 + i32::from(n)),
+        );
+        let key_fragments = if let Some(fragments) = kcore_fragments {
+            fragments
+        } else {
+            // Subdivide Kk into 16 segments of 256 bytes (128 characters) each
+            let ots_chunks = Self::chunk_substr(&ots, 128);
 
-        let mut key_fragments = String::new();
+            let mut key_fragments = String::new();
 
-        for (index, chunk) in ots_chunks.iter().enumerate() {
-            let mut working_chunk = chunk.clone();
+            for (index, chunk) in ots_chunks.iter().enumerate() {
+                let mut working_chunk = chunk.clone();
 
-            // WOTS+ verification: condition should be 8 + normalized_hash[index]
-            // This is opposite of signing which uses (8 - normalizedHash[index])
-            // normalized_hash[index] is -8 to 8, so condition is 0 to 16
-            let condition = (8 + normalized_hash[index] as i32) as usize;
-            for _ in 0..condition {
-                working_chunk = shake256(&working_chunk, 512);
+                // WOTS+ verification: condition should be 8 + normalized_hash[index]
+                // This is opposite of signing which uses (8 - normalizedHash[index])
+                // normalized_hash[index] is -8 to 8, so condition is 0 to 16
+                let condition = (8 + normalized_hash[index] as i32) as usize;
+                for _ in 0..condition {
+                    working_chunk = shake256(&working_chunk, 512);
+                }
+
+                key_fragments.push_str(&working_chunk);
             }
-
-            key_fragments.push_str(&working_chunk);
-        }
+            key_fragments
+        };
 
         // The reconstructed key_fragments is now the original signing key
         // JavaScript doesn't use generate_address here - it uses a simpler process:

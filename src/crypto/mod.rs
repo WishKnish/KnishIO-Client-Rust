@@ -414,7 +414,16 @@ pub fn generate_address(key: &str) -> Result<String> {
     if key.len() != 2048 {
         return Err(KnishIOError::custom("Key must be 2048 characters"));
     }
-    
+
+    if let Some(address) = crate::kcore::wots_address(key) {
+        return Ok(address);
+    }
+    Ok(wots_address_sdk(key))
+}
+
+/// The SDK's own WOTS+ address loop for a 2048-character key (the path `generate_address` takes
+/// when kcore is not compiled in or refuses the key).
+pub(crate) fn wots_address_sdk(key: &str) -> String {
     // Subdivide private key into 16 fragments of 128 characters each
     let key_fragments = chunk_string(key, 128);
     
@@ -441,9 +450,7 @@ pub fn generate_address(key: &str) -> Result<String> {
     let digest = hex::encode(digest_output);
     
     // Producing wallet address - final SHAKE256 with 256-bit output
-    let final_address = shake256(&digest, 256);
-    
-    Ok(final_address)
+    shake256(&digest, 256)
 }
 
 /// Generate a random position string
@@ -902,10 +909,14 @@ pub fn generate_ots_fragment(key_chunk: &str, normalized_value: i8) -> Result<St
         return Err(KnishIOError::SignatureMalformed);
     }
     
-    let mut working_chunk = key_chunk.to_string();
-
     // Hash (8 - normalizedHash[index]) times for signing
     let iterations = 8 - normalized_value;
+
+    if let Some(fragment) = crate::kcore::chains_hex_signed(key_chunk, [i32::from(iterations)]) {
+        return Ok(fragment);
+    }
+
+    let mut working_chunk = key_chunk.to_string();
 
     for _ in 0..iterations {
         working_chunk = shake256(&working_chunk, 512); // 512 bits = 128 hex chars
@@ -932,10 +943,14 @@ pub fn verify_ots_fragment(ots_fragment: &str, normalized_value: i8) -> Result<S
         return Err(KnishIOError::SignatureMalformed);
     }
     
-    let mut working_chunk = ots_fragment.to_string();
-
     // Hash (8 + normalizedHash[index]) times for verification
     let iterations = 8 + normalized_value;
+
+    if let Some(fragment) = crate::kcore::chains_hex_signed(ots_fragment, [i32::from(iterations)]) {
+        return Ok(fragment);
+    }
+
+    let mut working_chunk = ots_fragment.to_string();
 
     for _ in 0..iterations {
         working_chunk = shake256(&working_chunk, 512); // 512 bits = 128 hex chars

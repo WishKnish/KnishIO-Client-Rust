@@ -53,6 +53,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 // Core modules
 pub mod atom;
 pub mod crypto;
+pub mod kcore;
 pub mod error;
 pub mod molecule;
 pub mod types;

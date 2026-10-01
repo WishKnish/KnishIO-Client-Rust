@@ -426,31 +426,40 @@ impl Molecule {
         if let Some(ref secret) = self.secret {
             let key = Wallet::generate_key(secret, &signing_atom.token, &signing_atom.position);
             
-            // Subdivide key into 16 segments of 128 characters each
-            let key_chunks = chunk_string(&key, 128);
-            
             // Convert molecular hash to numeric notation and normalize
             let normalized_hash = self.normalized_hash()?;
-            
-            // Build one-time signature
-            let mut signature_fragments = String::new();
-            
-            for (index, chunk) in key_chunks.iter().enumerate() {
-                if index >= normalized_hash.len() {
-                    break;
+
+            // Build one-time signature: kcore advances every chain in one call (8 - n times each);
+            // on None the SDK loop below runs unchanged.
+            let kcore_signature = crate::kcore::chains_hex_signed(
+                &key,
+                normalized_hash.iter().take(key.len() / 128).map(|&n| 8 - i32::from(n)),
+            );
+            let mut signature_fragments = if let Some(signature) = kcore_signature {
+                signature
+            } else {
+                // Subdivide key into 16 segments of 128 characters each
+                let key_chunks = chunk_string(&key, 128);
+                let mut signature_fragments = String::new();
+
+                for (index, chunk) in key_chunks.iter().enumerate() {
+                    if index >= normalized_hash.len() {
+                        break;
+                    }
+
+                    let mut working_chunk = chunk.clone();
+                    // Calculate iterations: 8 - value where value is -8 to 8
+                    // This gives us 0 to 16 iterations
+                    let iterations = (8 - normalized_hash[index] as i32) as usize;
+
+                    for _ in 0..iterations {
+                        working_chunk = shake256(&working_chunk, 512);
+                    }
+
+                    signature_fragments.push_str(&working_chunk);
                 }
-                
-                let mut working_chunk = chunk.clone();
-                // Calculate iterations: 8 - value where value is -8 to 8
-                // This gives us 0 to 16 iterations
-                let iterations = (8 - normalized_hash[index] as i32) as usize;
-                
-                for _ in 0..iterations {
-                    working_chunk = shake256(&working_chunk, 512);
-                }
-                
-                signature_fragments.push_str(&working_chunk);
-            }
+                signature_fragments
+            };
             
             // Compress signature if requested (hex to base64)
             if compressed {

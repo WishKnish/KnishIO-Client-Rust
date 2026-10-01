@@ -14,6 +14,22 @@ rather than written at release time; where the history does not substantiate a
 detail, the entry says so instead of guessing.
 
 
+## [Unreleased]
+
+### Added
+
+- **Optional `kcore` feature: WOTS+ through KnishIO-Crypto-Core 0.1.0.** A new path crate,
+  `knishio-kcore` (`kcore/`), links the static `libkcore.a` from the extracted package named by
+  `KNISHIO_KCORE_DIR` (required at build time; the build stops if it is unset or has no
+  `lib/libkcore.a`). With the feature on, `Molecule::sign`, `CheckMolecule::ots`,
+  `crypto::generate_address`, `generate_ots_fragment` and `verify_ots_fragment` advance their
+  WOTS+ chains (and derive the address) in kcore. Any input kcore cannot take exactly as the SDK
+  loop would (not lowercase hex, wrong length, a count outside 0..=64) runs the existing loop
+  unchanged. `knishio_client::kcore::available()` reports whether kcore is linked and answers
+  ABI version 1. ML-KEM stays on libcrux. The default build is unchanged and still forbids
+  `unsafe`; all FFI lives in `knishio-kcore`.
+
+
 ## [1.3.2] — 2026-09-29
 
 ### Fixed
