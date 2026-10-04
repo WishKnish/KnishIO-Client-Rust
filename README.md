@@ -33,6 +33,21 @@ use knishio_client::crypto::shake256;
 use knishio_client::types::{MetaItem, Isotope};
 ```
 
+## kcore feature
+
+The optional `kcore` feature runs the WOTS+ chains (signing, verification, OTS fragments) and the WOTS+ address through KnishIO-Crypto-Core, linked statically from its release package. Outputs are identical with and without it; ML-KEM stays on libcrux.
+
+```toml
+[dependencies]
+knishio-client = { version = "1.4", features = ["kcore"] }
+```
+
+The build needs `KNISHIO_KCORE_DIR` pointing at an extracted KnishIO-Crypto-Core 0.1.0 package (the directory holding `lib/libkcore.a`, from the [0.1.0 release](https://github.com/WishKnish/KnishIO-Crypto-Core/releases/tag/0.1.0)); without it the build stops rather than silently falling back. Supported targets are those whose package ships `lib/libkcore.a`: Linux x86_64 and aarch64 (gnu and musl) and macOS (universal). wasm32 and Windows are not supported. `knishio_client::kcore::available()` reports whether kcore is linked.
+
+### Thread safety
+
+`Wallet`, `Molecule`, `Atom` and `KnishIOClient` are `Send + Sync`, and kcore is reentrant (no threads, no mutable globals). Every call runs on the caller's thread, so parallelize at the caller: threads or Rayon over independent molecules.
+
 ## Basic Usage
 
 The purpose of the Knish.IO SDK is to expose various ledger functions to new or existing applications.

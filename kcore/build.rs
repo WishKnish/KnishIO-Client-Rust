@@ -9,6 +9,11 @@ const MISSING: &str =
     "KNISHIO_KCORE_DIR must point at an extracted KnishIO-Crypto-Core 0.1.0 package (lib/libkcore.a)";
 
 fn main() {
+    // docs.rs builds documentation only and has no kcore package; skip linking there.
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
+    if std::env::var_os("DOCS_RS").is_some() {
+        return;
+    }
     println!("cargo:rerun-if-env-changed=KNISHIO_KCORE_DIR");
 
     let dir = match std::env::var_os("KNISHIO_KCORE_DIR") {

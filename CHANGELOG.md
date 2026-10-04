@@ -16,6 +16,9 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+
+## [1.4.0] — 2026-10-04
+
 ### Added
 
 - **Optional `kcore` feature: WOTS+ through KnishIO-Crypto-Core 0.1.0.** A new path crate,
@@ -28,6 +31,13 @@ detail, the entry says so instead of guessing.
   unchanged. `knishio_client::kcore::available()` reports whether kcore is linked and answers
   ABI version 1. ML-KEM stays on libcrux. The default build is unchanged and still forbids
   `unsafe`; all FFI lives in `knishio-kcore`.
+- **`knishio-kcore` 0.1.0 is published to crates.io alongside this release** (the `kcore`
+  feature resolves it from there). Its build script skips linking when `DOCS_RS` is set, so
+  docs.rs can build its documentation without a kcore package.
+- CI: a `test (feature kcore)` job fetches the sha256-pinned linux-x64-gnu kcore 0.1.0 package and
+  runs `cargo test` and `cargo clippy --all-targets` with `--features kcore --locked`.
+- README: "kcore feature" section (build requirement, supported targets) and "Thread safety"
+  (public types are `Send + Sync`; kcore is reentrant; parallelize at the caller).
 
 
 ## [1.3.2] — 2026-09-29
@@ -485,7 +495,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.3.2...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.4.0...HEAD
+[1.4.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.4.0
 [1.3.2]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.3.2
 [1.3.1]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.3.1
 [1.3.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.3.0
