@@ -270,10 +270,8 @@ impl<'a> CheckMolecule<'a> {
                 }
             }
 
-            for key in &["token"] {
-                if !meta.contains_key(*key) || meta.get(*key).unwrap_or(&String::new()).is_empty() {
-                    return Err(KnishIOError::MetaMissing);
-                }
+            if !meta.contains_key("token") || meta.get("token").unwrap_or(&String::new()).is_empty() {
+                return Err(KnishIOError::MetaMissing);
             }
 
             if atom.token != "USER" {

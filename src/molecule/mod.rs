@@ -574,7 +574,7 @@ impl Molecule {
                         token: remainder_wallet.token.clone(),
                         batch_id: remainder_wallet.batch_id.clone(),
                     });
-                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(&units_meta);
+                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(units_meta);
 
                 (bal, Some(source_info), remainder_info, source_units_meta, remainder_units_meta)
             } else {
@@ -681,7 +681,7 @@ impl Molecule {
                         token: remainder_wallet.token.clone(),
                         batch_id: remainder_wallet.batch_id.clone(),
                     });
-                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(&units_meta);
+                let remainder_units_meta = self.remainder_wallet.as_ref().and_then(units_meta);
 
                 (bal, Some(source_info), remainder_info, source_units_meta, remainder_units_meta)
             } else {
