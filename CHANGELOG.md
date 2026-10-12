@@ -16,6 +16,9 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+
+## [1.5.0] — 2026-10-12
+
 ### Added
 
 - **Opt-in OTS v2 signatures.** New API, all additive:
@@ -37,7 +40,6 @@ detail, the entry says so instead of guessing.
 - `CheckMolecule::ots`, `generate_ots_signature` and `verify_ots_signature` require the declared
   molecular hash to be exactly 64 characters of `0-9a-g` (`crypto::is_signable_hash`) and
   otherwise return `SignatureMalformed` / `false`.
-
 
 
 ## [1.4.0] — 2026-10-04
@@ -518,7 +520,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.4.0...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.5.0...HEAD
+[1.5.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.5.0
 [1.4.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.4.0
 [1.3.2]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.3.2
 [1.3.1]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.3.1
