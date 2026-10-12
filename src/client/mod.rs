@@ -750,7 +750,7 @@ impl KnishIOClient {
             wallet
         } else {
             // Create new remainder wallet
-            Wallet::new(
+            Wallet::new_with_ots_version(
                 Some(&secret),
                 bundle.as_deref(),
                 Some("USER"),  // Always USER token for remainder
@@ -759,6 +759,7 @@ impl KnishIOClient {
                 source_wallet.batch_id.as_deref(),
                 source_wallet.characters.as_deref(),
                 Some(self.mlkem_parameter_set),
+                source_wallet.ots_version,
             )?
         };
 
@@ -4061,6 +4062,22 @@ mod tests {
 
         assert!(matches!(&result, Err(KnishIOError::WalletShadow)), "got {:?}", result.as_ref().err());
         assert!(stub.proposals().is_empty(), "no claim is proposed without a shadow wallet");
+        Ok(())
+    }
+
+    /// The default remainder of `create_molecule` keeps the source wallet's OTS version.
+    #[tokio::test]
+    async fn create_molecule_remainder_keeps_the_source_wallet_ots_version() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-v2-remainder");
+        let mut stub = stub_validator(Value::Null, vec![]).await?;
+        let mut client = client_for(&stub);
+        let source = Wallet::new_with_ots_version(Some(&secret), None, Some("USER"), None, Some(POINTER), None, None, None, OtsVersion::V2)?;
+        let molecule = client.create_molecule(Some(secret.clone()), None, Some(source), None).await?;
+        let remainder = molecule.remainder_wallet.as_ref().ok_or("remainder wallet")?;
+        assert_eq!(remainder.ots_version, OtsVersion::V2);
+        assert_eq!(client.remainder_wallet.as_ref().ok_or("client remainder")?.ots_version, OtsVersion::V2);
+        assert!(stub.requests().is_empty(), "an explicit source wallet must not query the ledger");
         Ok(())
     }
 }

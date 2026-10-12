@@ -16,6 +16,11 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Changed
+
+- `KnishIOClient::create_molecule()` creates its default remainder wallet at the source
+  wallet's OTS version.
+
 
 ## [1.5.0] — 2026-10-12
 
