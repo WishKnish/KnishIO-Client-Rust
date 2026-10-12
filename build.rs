@@ -16,6 +16,7 @@ fn main() {
     // Single-colon form: cargo: instructions remain supported across all modern cargo versions.
     // The crate's MSRV is 1.89 (raised for the RustCrypto 2026 line).
     println!("cargo:rustc-check-cfg=cfg(has_shared_fixtures)");
+    println!("cargo:rustc-check-cfg=cfg(has_ots_v2_vectors)");
 
     // build.rs runs with the crate root as CWD; the monorepo fixtures are at
     // ../shared-test-results/ (crate root -> sdks/ -> shared-test-results/).
@@ -26,7 +27,13 @@ fn main() {
         // single-colon form: supported across all cargo versions
         println!("cargo:rustc-cfg=has_shared_fixtures");
     }
+    // `tests/ots_v2_vectors.rs` reads the OTS v2 master. Its own cfg, so a checkout without that
+    // file never turns the v1 parity suites above into their ignored stubs.
+    if dir.join("ots-v2-vectors.json").exists() {
+        println!("cargo:rustc-cfg=has_ots_v2_vectors");
+    }
 
     println!("cargo:rerun-if-changed=../shared-test-results/canonical-patent-vectors.json");
     println!("cargo:rerun-if-changed=../shared-test-results/cross-platform-test-vectors.json");
+    println!("cargo:rerun-if-changed=../shared-test-results/ots-v2-vectors.json");
 }

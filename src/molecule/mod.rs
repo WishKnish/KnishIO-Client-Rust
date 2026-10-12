@@ -9,7 +9,7 @@ pub mod builder;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::atom::{Atom, AtomCreateParams, WalletInfo};
-use crate::wallet::Wallet;
+use crate::wallet::{OtsVersion, Wallet};
 use crate::crypto::{shake256, generate_bundle_hash};
 use crate::types::{Isotope, MetaItem};
 use crate::meta::AtomMeta;
@@ -141,7 +141,13 @@ impl Molecule {
             continuid_position: None,
         }
     }
-    
+
+    /// OTS version this molecule signs with: its source wallet's (docs/OTS_V2_SPECIFICATION.md),
+    /// or V1 without a source wallet. Wallets the molecule creates for its signer inherit it.
+    pub fn signing_ots_version(&self) -> OtsVersion {
+        self.source_wallet.as_ref().map_or(OtsVersion::V1, |w| w.ots_version)
+    }
+
     /// Generate timestamp for molecule creation
     /// Use environment variable for deterministic testing
     fn generate_timestamp() -> String {
@@ -329,13 +335,14 @@ impl Molecule {
         // ContinuID I-atoms MUST always use "USER" token.
         if self.remainder_wallet.as_ref().map_or(true, |w| w.token != "USER") {
             if let Some(ref secret) = self.secret {
-                let user_wallet = Wallet::create(
+                let user_wallet = Wallet::create_with_ots_version(
                     Some(secret),
                     self.bundle.as_deref(),
                     "USER",
                     None,
                     None,
                     self.source_wallet.as_ref().map(|w| w.mlkem_parameter_set),
+                    self.signing_ots_version(),
                 ).ok();
                 if user_wallet.is_some() {
                     self.remainder_wallet = user_wallet;
@@ -424,7 +431,7 @@ impl Molecule {
         
         // Generate the private signing key for this molecule
         if let Some(ref secret) = self.secret {
-            let key = Wallet::generate_key(secret, &signing_atom.token, &signing_atom.position);
+            let key = self.signing_ots_version().derive_key(secret, &signing_atom.token, &signing_atom.position);
             
             // Convert molecular hash to numeric notation and normalize
             let normalized_hash = self.normalized_hash()?;
@@ -438,7 +445,7 @@ impl Molecule {
             let mut signature_fragments = if let Some(signature) = kcore_signature {
                 signature
             } else {
-                // Subdivide key into 16 segments of 128 characters each
+                // Subdivide key into segments of 128 characters: 16 (OTS v1) or 64 (OTS v2)
                 let key_chunks = chunk_string(&key, 128);
                 let mut signature_fragments = String::new();
 
@@ -1163,13 +1170,14 @@ impl Molecule {
         if let Some(ref secret) = self.secret {
             if let Some(ref source_wallet) = self.source_wallet {
                 // Create policy wallet for USER token
-                let policy_wallet = Wallet::create(
+                let policy_wallet = Wallet::create_with_ots_version(
                     Some(secret),
                     source_wallet.bundle.as_deref(),
                     "USER",
                     None,
                     None,
                     Some(source_wallet.mlkem_parameter_set),
+                    source_wallet.ots_version,
                 )?;
                 
                 let final_meta = meta;
@@ -1222,13 +1230,14 @@ impl Molecule {
             if let Some(ref secret) = self.secret {
                 // JS: new Wallet({ secret, bundle, token, batchId }) — a fresh position carrying
                 // the source's batch id (the batch id used to be passed as the position).
-                let mut buffer_wallet = Wallet::create(
+                let mut buffer_wallet = Wallet::create_with_ots_version(
                     Some(secret),
                     self.bundle.as_deref(),
                     &source_token,
                     None,
                     None,
                     self.source_wallet.as_ref().map(|w| w.mlkem_parameter_set),
+                    self.signing_ots_version(),
                 )?;
                 buffer_wallet.batch_id = source_batch_id.clone();
 

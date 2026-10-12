@@ -317,29 +317,23 @@ pub fn generate_batch_id() -> String {
     generate_random_hash()
 }
 
-/// Generate a cryptographic key for wallet operations
-///
-/// This function generates keys used for signing and encryption.
-/// Must produce identical output to JavaScript's Wallet.generateKey().
-///
-/// # Arguments
-///
-/// * `secret` - The wallet secret
-/// * `token` - The token slug
-/// * `position` - The wallet position
-///
-/// # Returns
-///
-/// A 2048-character hexadecimal key string
-pub fn generate_key(secret: &str, token: &str, position: &str) -> String {
+/// Domain tag absorbed by OTS v2 key derivation (docs/OTS_V2_SPECIFICATION.md §2.3).
+pub const OTS_V2_DOMAIN_TAG: &str = "KnishIO-OTS-v2";
+
+/// Whether `hash` is a declared molecular hash an OTS can sign or verify: exactly 64 characters
+/// of the lowercase base-17 alphabet `0-9a-g` (docs/OTS_V2_SPECIFICATION.md §5, step 0). Every
+/// chain reads one normalized symbol, so a shorter or foreign-character hash must be refused
+/// before any chain work.
+pub fn is_signable_hash(hash: &str) -> bool {
+    hash.len() == 64 && hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'g'))
+}
+
+/// Stage 0 of OTS key derivation, shared by v1 and v2: the lowercase hex (no leading zeros) of
+/// `int(secret_hex) + int(position_hex)`, where a non-hex secret or position is first replaced by
+/// its SHAKE256 hash (1024 and 256 bits).
+fn indexed_key_hex(secret: &str, position: &str) -> String {
     use num_bigint::BigUint;
     use num_traits::Num;
-
-    // Algorithm (matches Kotlin/JS):
-    // 1. Normalize secret/position to valid hex (hash if not already hex)
-    // 2. Convert to BigInt, add together
-    // 3. Hash with SHAKE256 (with token appended)
-    // 4. Hash again with SHAKE256
 
     // Normalize secret: if not valid hex, hash it to produce deterministic hex
     // (Matches Kotlin: Shake256.hash(secret, 128) = 128 bytes = 256 hex chars)
@@ -360,24 +354,59 @@ pub fn generate_key(secret: &str, token: &str, position: &str) -> String {
         .expect("internal invariant violated: hex normalization produced non-hex output");
     let big_int_position = BigUint::from_str_radix(&position_hex, 16)
         .expect("internal invariant violated: hex normalization produced non-hex output");
-    
-    // Add them together (BigInt addition)
-    let indexed_key = big_int_secret + big_int_position;
-    
-    // Convert back to hex string (without 0x prefix)
-    let indexed_key_hex = format!("{:x}", indexed_key);
-    
+
+    // Add them together (BigInt addition) and convert back to hex (without 0x prefix)
+    format!("{:x}", big_int_secret + big_int_position)
+}
+
+/// Generate an OTS v1 private key for wallet operations
+///
+/// This function generates keys used for signing and encryption.
+/// Must produce identical output to JavaScript's Wallet.generateKey().
+///
+/// # Arguments
+///
+/// * `secret` - The wallet secret
+/// * `token` - The token slug
+/// * `position` - The wallet position
+///
+/// # Returns
+///
+/// A 2048-character hexadecimal key string (16 chunks of 128)
+pub fn generate_key(secret: &str, token: &str, position: &str) -> String {
+    // Algorithm (matches Kotlin/JS):
+    // 1. Normalize secret/position to valid hex (hash if not already hex)
+    // 2. Convert to BigInt, add together
+    // 3. Hash with SHAKE256 (with token appended)
+    // 4. Hash again with SHAKE256
+
     // First stage: hash the indexed key (and optionally append token)
-    let mut intermediate_input = indexed_key_hex;
+    let mut intermediate_input = indexed_key_hex(secret, position);
     if !token.is_empty() {
         intermediate_input.push_str(token);
     }
-    
+
     // Generate intermediate hash (8192 bits = 2048 hex chars)
     let intermediate_hash = shake256(&intermediate_input, 8192);
-    
+
     // Second stage: hash the intermediate hash to get final key
     shake256(&intermediate_hash, 8192)  // 8192 bits = 2048 hex chars
+}
+
+/// Generate an OTS v2 private key (docs/OTS_V2_SPECIFICATION.md §2.3)
+///
+/// Stage 0 is shared with [`generate_key`]; stage 1 absorbs
+/// `"KnishIO-OTS-v2|" + indexed_key_hex + "|" + token`, so the v2 key never extends the v1 key
+/// for the same secret, token and position. Must match JavaScript's
+/// `Wallet.generateKey({ otsVersion: 2 })`.
+///
+/// # Returns
+///
+/// An 8192-character hexadecimal key string (64 chunks of 128)
+pub fn generate_key_v2(secret: &str, token: &str, position: &str) -> String {
+    let stage1 = format!("{OTS_V2_DOMAIN_TAG}|{}|{token}", indexed_key_hex(secret, position));
+    let intermediate_hash = shake256(&stage1, 8192); // 2048 hex chars
+    shake256(&intermediate_hash, 32768) // 32768 bits = 8192 hex chars
 }
 
 /// Helper function to chunk a string into fragments of specified size
@@ -400,25 +429,40 @@ fn chunk_string(s: &str, chunk_size: usize) -> Vec<String> {
 
 /// Generate a wallet address from a key
 ///
-/// Creates a hexadecimal wallet address from a cryptographic key.
-/// Must match JavaScript's Wallet.generateAddress() exactly.
+/// Creates a hexadecimal wallet address from an OTS v1 (2048-character) or OTS v2
+/// (8192-character) private key. Must match JavaScript's Wallet.generateAddress() exactly.
 ///
 /// # Arguments
 ///
-/// * `key` - The cryptographic key (2048 characters)
+/// * `key` - The cryptographic key (2048 or 8192 characters)
 ///
 /// # Returns
 ///
 /// A hexadecimal wallet address (64 characters)
 pub fn generate_address(key: &str) -> Result<String> {
-    if key.len() != 2048 {
-        return Err(KnishIOError::custom("Key must be 2048 characters"));
+    match key.len() {
+        2048 => {
+            if let Some(address) = crate::kcore::wots_address(key) {
+                return Ok(address);
+            }
+            Ok(wots_address_sdk(key))
+        }
+        8192 => Ok(wots_address_v2_sdk(key)),
+        _ => Err(KnishIOError::custom("Key must be 2048 (OTS v1) or 8192 (OTS v2) characters")),
     }
+}
 
-    if let Some(address) = crate::kcore::wots_address(key) {
-        return Ok(address);
-    }
-    Ok(wots_address_sdk(key))
+/// WOTS+ address of an 8192-character OTS v2 key: the 64 chain endpoints come from kcore's chain
+/// primitive when it is available, else from the same per-fragment loop as v1; digest and address
+/// are the v1 ones (docs/OTS_V2_SPECIFICATION.md §3).
+pub(crate) fn wots_address_v2_sdk(key: &str) -> String {
+    let endpoints = crate::kcore::chains_hex(key, &[16; 64]).unwrap_or_else(|| {
+        chunk_string(key, 128)
+            .into_iter()
+            .map(|fragment| (0..16).fold(fragment, |working, _| shake256(&working, 512)))
+            .collect()
+    });
+    shake256(&shake256(&endpoints, 8192), 256)
 }
 
 /// The SDK's own WOTS+ address loop for a 2048-character key (the path `generate_address` takes
@@ -965,27 +1009,27 @@ pub fn verify_ots_fragment(ots_fragment: &str, normalized_value: i8) -> Result<S
 ///
 /// # Arguments
 ///
-/// * `private_key` - 2048-character private key (hex string)
-/// * `molecular_hash` - Base17 molecular hash (64 characters) 
+/// * `private_key` - 2048-character (OTS v1) or 8192-character (OTS v2) private key (hex string)
+/// * `molecular_hash` - Base17 molecular hash (64 characters)
 ///
 /// # Returns
 ///
-/// Result containing vector of 16 OTS fragments, each 128 hex characters
+/// Result containing one OTS fragment of 128 hex characters per key chunk: 16 for v1, 64 for v2
 pub fn generate_ots_signature(private_key: &str, molecular_hash: &str) -> Result<Vec<String>> {
-    if private_key.len() != 2048 {
+    if private_key.len() != 2048 && private_key.len() != 8192 {
         return Err(KnishIOError::SignatureMalformed);
     }
 
-    if molecular_hash.len() != 64 {
+    if !is_signable_hash(molecular_hash) {
         return Err(KnishIOError::SignatureMalformed);
     }
 
     // Step 1: Normalize the molecular hash
     let normalized_hash = normalize_hash(molecular_hash);
 
-    // Step 2: Split private key into 16 chunks of 128 characters each
+    // Step 2: Split private key into chunks of 128 characters each (16 for v1, 64 for v2)
     let mut key_chunks = Vec::new();
-    for i in 0..16 {
+    for i in 0..private_key.len() / 128 {
         let start = i * 128;
         let chunk = &private_key[start..start + 128];
         key_chunks.push(chunk.to_string());
@@ -1011,7 +1055,7 @@ pub fn generate_ots_signature(private_key: &str, molecular_hash: &str) -> Result
 ///
 /// # Arguments
 ///
-/// * `ots_signature` - Vector of 16 OTS fragments (each 128 hex chars)
+/// * `ots_signature` - OTS fragments of 128 hex chars each: 16 (OTS v1) or 64 (OTS v2)
 /// * `molecular_hash` - Base17 molecular hash (64 characters)
 /// * `expected_address` - Expected wallet address for verification
 ///
@@ -1023,11 +1067,11 @@ pub fn verify_ots_signature(
     molecular_hash: &str, 
     expected_address: &str
 ) -> bool {
-    if ots_signature.len() != 16 {
+    if ots_signature.len() != 16 && ots_signature.len() != 64 {
         return false;
     }
     
-    if molecular_hash.len() != 64 {
+    if !is_signable_hash(molecular_hash) {
         return false;
     }
     

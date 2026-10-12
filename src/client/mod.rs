@@ -674,7 +674,7 @@ impl KnishIOClient {
             let secret = self.secret.as_ref()
                 .ok_or(KnishIOError::MissingSecret)?;
 
-            source_wallet.key = Some(Wallet::generate_key(
+            source_wallet.key = Some(source_wallet.ots_version.derive_key(
                 secret,
                 &source_wallet.token,
                 position

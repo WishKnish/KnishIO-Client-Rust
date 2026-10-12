@@ -16,6 +16,29 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Added
+
+- **Opt-in OTS v2 signatures.** New API, all additive:
+  - `OtsVersion { V1, V2 }` (re-exported at the crate root);
+  - `crypto::generate_key_v2` and `crypto::OTS_V2_DOMAIN_TAG`;
+  - `Wallet::new_with_ots_version`, `Wallet::create_with_ots_version` and the field
+    `Wallet::ots_version`, serialized only when V2 and then as the number `2` (the JS SDK's
+    `wallet.otsVersion`);
+  - `Molecule::signing_ots_version`: a molecule signs with its source wallet's version, and the
+    remainder, ContinuID, policy and buffer wallets it creates inherit it.
+
+  `generate_address` and `generate_ots_signature` take a 2048- or 8192-character key, and
+  `verify_ots_signature` 16 or 64 fragments. v1 stays the default and is unchanged.
+
+### Changed
+
+- `CheckMolecule::ots` verifies both OTS v1 and v2 signatures; a signature of any other size is
+  `SignatureMalformed`.
+- `CheckMolecule::ots`, `generate_ots_signature` and `verify_ots_signature` require the declared
+  molecular hash to be exactly 64 characters of `0-9a-g` (`crypto::is_signable_hash`) and
+  otherwise return `SignatureMalformed` / `false`.
+
+
 
 ## [1.4.0] — 2026-10-04
 

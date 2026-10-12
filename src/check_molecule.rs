@@ -637,6 +637,12 @@ impl<'a> CheckMolecule<'a> {
     ///
     /// Equivalent to CheckMolecule.ots() in JavaScript
     pub fn ots(&self) -> Result<bool> {
+        // The declared hash must be exactly 64 base-17 characters before any chain work
+        // (docs/OTS_V2_SPECIFICATION.md §5, step 0).
+        if !self.molecule.molecular_hash.as_deref().is_some_and(crate::crypto::is_signable_hash) {
+            return Err(KnishIOError::SignatureMalformed);
+        }
+
         // Convert Hm to numeric notation via EnumerateMolecule(Hm)
         let normalized_hash = self.molecule.normalized_hash()?;
 
@@ -648,19 +654,20 @@ impl<'a> CheckMolecule<'a> {
             }
         }
 
-        // Wrong size? Maybe it's compressed
-        if ots.len() != 2048 {
+        // OTS v1 is 2048 hex characters (16 chains), OTS v2 8192 (64 chains); anything else is
+        // the compressed (base64) form, and the decoded length decides the version
+        if ots.len() != 2048 && ots.len() != 8192 {
             // Attempting decompression
             ots = Self::base64_to_hex(&ots)?;
 
-            // Still wrong? That's a failure
-            if ots.len() != 2048 {
+            // Still neither size? That's a failure
+            if ots.len() != 2048 && ots.len() != 8192 {
                 return Err(KnishIOError::SignatureMalformed);
             }
         }
 
         // WOTS+ verification hashes chunk i (8 + normalized_hash[i]) times, the opposite of
-        // signing's (8 - normalizedHash[i]); kcore advances all 16 chains in one call, and on
+        // signing's (8 - normalizedHash[i]); kcore advances every chain in one call, and on
         // None the SDK loop below runs unchanged.
         let kcore_fragments = crate::kcore::chains_hex_signed(
             &ots,
@@ -669,7 +676,7 @@ impl<'a> CheckMolecule<'a> {
         let key_fragments = if let Some(fragments) = kcore_fragments {
             fragments
         } else {
-            // Subdivide Kk into 16 segments of 256 bytes (128 characters) each
+            // Subdivide the signature into segments of 128 characters: 16 (v1) or 64 (v2)
             let ots_chunks = Self::chunk_substr(&ots, 128);
 
             let mut key_fragments = String::new();
@@ -690,15 +697,15 @@ impl<'a> CheckMolecule<'a> {
             key_fragments
         };
 
-        // The reconstructed key_fragments is now the original signing key
-        // JavaScript doesn't use generate_address here - it uses a simpler process:
+        // The recovered chain endpoints are the signer's public key fragments; digest and address
+        // follow generate_address (docs/OTS_V2_SPECIFICATION.md §3):
         // 1. Create digest from key_fragments (8192 bits)
         // 2. Create address from digest (256 bits)
-        
-        // Absorb the hashed Kk into the sponge to receive the digest Dk
+
+        // Absorb the recovered public fragments into the sponge to receive the digest Dk
         let digest = shake256(&key_fragments, 8192);
-        
-        // Squeeze the sponge to retrieve a 128 byte (64 character) string that should match the sender's wallet address
+
+        // Squeeze 256 bits (64 hex characters) that should match the sender's wallet address
         let address = shake256(&digest, 256);
 
         // The recovered address must be the address the signing atom claims. No atom meta may

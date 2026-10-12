@@ -3,7 +3,7 @@
 //! This module provides the Wallet struct and associated methods for wallet
 //! management, ensuring exact compatibility with the JavaScript implementation.
 
-use crate::crypto::{generate_address, generate_bundle_hash, generate_key};
+use crate::crypto::{generate_address, generate_bundle_hash, generate_key, generate_key_v2};
 use crate::error::{KnishIOError, Result};
 use crate::types::TokenUnit;
 use base64::Engine as _;
@@ -40,6 +40,57 @@ impl MlKemParameterSet {
         match self {
             Self::MlKem1024 => 1568,
             Self::MlKem768 => 1088,
+        }
+    }
+}
+
+/// One-time signature version (docs/OTS_V2_SPECIFICATION.md)
+///
+/// V1 keys are 2048 hex characters (16 chains); V2 keys are 8192 (64 chains), derived under the
+/// `KnishIO-OTS-v2` domain tag. Verifiers accept both. Serialized as the number `1` or `2`, the same
+/// value the JS SDK's `wallet.otsVersion` carries.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(into = "u8", try_from = "u8")]
+pub enum OtsVersion {
+    /// 16 chains (default)
+    #[default]
+    V1,
+    /// 64 chains
+    V2,
+}
+
+impl OtsVersion {
+    /// Whether this is OTS v1 (the default, omitted when a wallet is serialized)
+    pub fn is_v1(&self) -> bool {
+        *self == Self::V1
+    }
+
+    /// Derive this version's private key for `secret`, `token` and `position`
+    pub fn derive_key(self, secret: &str, token: &str, position: &str) -> String {
+        match self {
+            Self::V1 => generate_key(secret, token, position),
+            Self::V2 => generate_key_v2(secret, token, position),
+        }
+    }
+}
+
+impl From<OtsVersion> for u8 {
+    fn from(version: OtsVersion) -> Self {
+        match version {
+            OtsVersion::V1 => 1,
+            OtsVersion::V2 => 2,
+        }
+    }
+}
+
+impl TryFrom<u8> for OtsVersion {
+    type Error = String;
+
+    fn try_from(version: u8) -> std::result::Result<Self, Self::Error> {
+        match version {
+            1 => Ok(Self::V1),
+            2 => Ok(Self::V2),
+            other => Err(format!("unsupported OTS version {other}; expected 1 or 2")),
         }
     }
 }
@@ -98,6 +149,9 @@ pub struct Wallet {
     /// ML-KEM parameter set (default: ML-KEM-1024)
     #[serde(default)]
     pub mlkem_parameter_set: MlKemParameterSet,
+    /// OTS version of this wallet's key (default: V1; omitted from serialization when V1)
+    #[serde(default, skip_serializing_if = "OtsVersion::is_v1")]
+    pub ots_version: OtsVersion,
 }
 
 /// Debug impl that redacts sensitive cryptographic material (private key, ML-KEM private key)
@@ -117,6 +171,7 @@ impl std::fmt::Debug for Wallet {
             .field("token_units", &self.token_units)
             .field("trade_rates", &self.trade_rates)
             .field("molecules", &self.molecules)
+            .field("ots_version", &self.ots_version)
             .finish()
     }
 }
@@ -134,6 +189,8 @@ impl Wallet {
     /// * `batch_id` - Batch ID for transactions (optional)
     /// * `characters` - Character encoding (optional)
     /// * `mlkem_parameter_set` - ML-KEM parameter set (optional; defaults to ML-KEM-1024)
+    ///
+    /// The wallet's key is OTS v1; use [`Wallet::new_with_ots_version`] for OTS v2.
     pub fn new(
         secret: Option<&str>,
         bundle: Option<&str>,
@@ -143,6 +200,32 @@ impl Wallet {
         batch_id: Option<&str>,
         characters: Option<&str>,
         mlkem_parameter_set: Option<MlKemParameterSet>,
+    ) -> Result<Self> {
+        Self::new_with_ots_version(
+            secret,
+            bundle,
+            token,
+            address,
+            position,
+            batch_id,
+            characters,
+            mlkem_parameter_set,
+            OtsVersion::V1,
+        )
+    }
+
+    /// [`Wallet::new`] with an explicit OTS version for the wallet's key and address
+    /// (docs/OTS_V2_SPECIFICATION.md)
+    pub fn new_with_ots_version(
+        secret: Option<&str>,
+        bundle: Option<&str>,
+        token: Option<&str>,
+        address: Option<&str>,
+        position: Option<&str>,
+        batch_id: Option<&str>,
+        characters: Option<&str>,
+        mlkem_parameter_set: Option<MlKemParameterSet>,
+        ots_version: OtsVersion,
     ) -> Result<Self> {
         let token = token.unwrap_or("USER").to_string();
         
@@ -161,6 +244,7 @@ impl Wallet {
             trade_rates: HashMap::new(),
             molecules: HashMap::new(),
             mlkem_parameter_set: mlkem_parameter_set.unwrap_or_default(),
+            ots_version,
         };
 
         if let Some(secret) = secret {
@@ -176,7 +260,7 @@ impl Wallet {
 
             // Key & address initialization
             if let Some(position) = &wallet.position {
-                wallet.key = Some(generate_key(secret, &token, position));
+                wallet.key = Some(ots_version.derive_key(secret, &token, position));
                 
                 if wallet.address.is_none() {
                     if let Some(key) = &wallet.key {
@@ -207,6 +291,8 @@ impl Wallet {
     /// * `position` - Position string (optional, generated if not provided)
     /// * `characters` - Character encoding (optional)
     /// * `mlkem_parameter_set` - ML-KEM parameter set (optional; defaults to ML-KEM-1024)
+    ///
+    /// The wallet's key is OTS v1; use [`Wallet::create_with_ots_version`] for OTS v2.
     pub fn create(
         secret: Option<&str>,
         bundle: Option<&str>,
@@ -214,6 +300,20 @@ impl Wallet {
         position: Option<&str>,
         characters: Option<&str>,
         mlkem_parameter_set: Option<MlKemParameterSet>,
+    ) -> Result<Self> {
+        Self::create_with_ots_version(secret, bundle, token, position, characters, mlkem_parameter_set, OtsVersion::V1)
+    }
+
+    /// [`Wallet::create`] with an explicit OTS version for the wallet's key and address
+    /// (docs/OTS_V2_SPECIFICATION.md)
+    pub fn create_with_ots_version(
+        secret: Option<&str>,
+        bundle: Option<&str>,
+        token: &str,
+        position: Option<&str>,
+        characters: Option<&str>,
+        mlkem_parameter_set: Option<MlKemParameterSet>,
+        ots_version: OtsVersion,
     ) -> Result<Self> {
         // Validate credentials
         if secret.is_none() && bundle.is_none() {
@@ -234,7 +334,7 @@ impl Wallet {
             }
         }
 
-        Self::new(
+        Self::new_with_ots_version(
             secret,
             final_bundle.as_deref(),
             Some(token),
@@ -243,6 +343,7 @@ impl Wallet {
             None,  // batch_id
             characters,
             mlkem_parameter_set,
+            ots_version,
         )
     }
 
@@ -598,13 +699,14 @@ impl Wallet {
     ///
     /// A new remainder wallet
     pub fn create_remainder(&self, secret: &str) -> Result<Wallet> {
-        let mut remainder_wallet = Self::create(
+        let mut remainder_wallet = Self::create_with_ots_version(
             Some(secret),
             None,
             &self.token,
             None,
             self.characters.as_deref(),
             Some(self.mlkem_parameter_set),
+            self.ots_version,
         )?;
         remainder_wallet.init_batch_id(Some(self), true);
         Ok(remainder_wallet)
@@ -1140,6 +1242,7 @@ impl Default for Wallet {
             trade_rates: HashMap::new(),
             molecules: HashMap::new(),
             mlkem_parameter_set: MlKemParameterSet::default(),
+            ots_version: OtsVersion::default(),
         }
     }
 }
@@ -1164,6 +1267,27 @@ mod tests {
         assert!(wallet.position.is_some());
         assert!(wallet.address.is_some());
         assert!(wallet.key.is_some());
+    }
+
+    /// The wallet JSON carries `otsVersion` as the JS SDK does: the number 2 for V2, absent for V1.
+    #[test]
+    fn ots_version_serializes_as_js_number() {
+        let v2 = Wallet::new_with_ots_version(
+            Some("0123456789abcdef"), None, Some("USER"), None, Some("abcdef"), None, None, None, OtsVersion::V2,
+        ).expect("v2 wallet");
+        let v2_json = serde_json::to_value(&v2).expect("serialize v2");
+        assert_eq!(v2_json["otsVersion"], serde_json::json!(2));
+        let round_trip: Wallet = serde_json::from_value(v2_json).expect("deserialize v2");
+        assert_eq!(round_trip.ots_version, OtsVersion::V2);
+
+        let v1 = Wallet::create(Some("0123456789abcdef"), None, "USER", Some("abcdef"), None, None).expect("v1 wallet");
+        let v1_json = serde_json::to_value(&v1).expect("serialize v1");
+        assert!(v1_json.get("otsVersion").is_none(), "V1 is omitted: {v1_json}");
+        let defaulted: Wallet = serde_json::from_value(v1_json).expect("deserialize v1");
+        assert_eq!(defaulted.ots_version, OtsVersion::V1);
+
+        let err = serde_json::from_str::<OtsVersion>("3").expect_err("3 is not a version");
+        assert!(err.to_string().contains("unsupported OTS version 3; expected 1 or 2"), "{err}");
     }
 
     #[test]
