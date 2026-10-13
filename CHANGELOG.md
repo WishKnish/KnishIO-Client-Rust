@@ -37,6 +37,8 @@ detail, the entry says so instead of guessing.
 
 ### Changed
 
+- With the `kcore` feature, OTS v2 addresses are computed by KnishIO-Crypto-Core 0.2.0
+  (`kcore_wots_address_v2`). The feature now requires a 0.2.x package; `knishio-kcore` 0.2.0.
 - `KnishIOClient::create_molecule()` creates its default remainder wallet at the higher of the
   source wallet's and the client's OTS version.
 - A client set to `OtsVersion::V2` creates the ContinuID head, token remainders and deposit

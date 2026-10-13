@@ -60,7 +60,7 @@ jobs:
       - name: cargo test
         run: cargo test
 
-  # The kcore feature links the static KnishIO-Crypto-Core archive from the pinned 0.1.0 release
+  # The kcore feature links the static KnishIO-Crypto-Core archive from the pinned 0.2.0 release
   # package; the vector suites then run through kcore's WOTS+ chains and address.
   test-kcore:
     name: test (feature kcore)
@@ -75,13 +75,13 @@ jobs:
         with:
           components: clippy
 
-      - name: Fetch kcore 0.1.0 (linux-x64-gnu, sha256-pinned)
+      - name: Fetch kcore 0.2.0 (linux-x64-gnu, sha256-pinned)
         run: |
           set -euo pipefail
-          PKG=knishio-crypto-core-0.1.0-linux-x64-gnu.tar.gz
+          PKG=knishio-crypto-core-0.2.0-linux-x64-gnu.tar.gz
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/$PKG" \
-            "https://github.com/WishKnish/KnishIO-Crypto-Core/releases/download/0.1.0/$PKG"
-          echo "57a3187c136cccbd64ed7dc7561745f9edba2697f42f9f5b47c4f66f1d0823b0  $RUNNER_TEMP/$PKG" | sha256sum -c -
+            "https://github.com/WishKnish/KnishIO-Crypto-Core/releases/download/0.2.0/$PKG"
+          echo "137a7adb73df0a1fe84656cf02d8e6513a6dec0a548ed9adc7c220dac71e4b05  $RUNNER_TEMP/$PKG" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/kcore"
           tar -xzf "$RUNNER_TEMP/$PKG" -C "$RUNNER_TEMP/kcore" --strip-components=1
           test -f "$RUNNER_TEMP/kcore/lib/libkcore.a"

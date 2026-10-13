@@ -447,14 +447,20 @@ pub fn generate_address(key: &str) -> Result<String> {
             }
             Ok(wots_address_sdk(key))
         }
-        8192 => Ok(wots_address_v2_sdk(key)),
+        8192 => {
+            if let Some(address) = crate::kcore::wots_address_v2(key) {
+                return Ok(address);
+            }
+            Ok(wots_address_v2_sdk(key))
+        }
         _ => Err(KnishIOError::custom("Key must be 2048 (OTS v1) or 8192 (OTS v2) characters")),
     }
 }
 
-/// WOTS+ address of an 8192-character OTS v2 key: the 64 chain endpoints come from kcore's chain
-/// primitive when it is available, else from the same per-fragment loop as v1; digest and address
-/// are the v1 ones (docs/OTS_V2_SPECIFICATION.md §3).
+/// The SDK's own WOTS+ address of an 8192-character OTS v2 key (the path `generate_address` takes
+/// when kcore is not compiled in or refuses the key): the 64 chain endpoints come from kcore's
+/// chain primitive when it is available, else from the same per-fragment loop as v1; digest and
+/// address are the v1 ones (docs/OTS_V2_SPECIFICATION.md §3).
 pub(crate) fn wots_address_v2_sdk(key: &str) -> String {
     let endpoints = crate::kcore::chains_hex(key, &[16; 64]).unwrap_or_else(|| {
         chunk_string(key, 128)

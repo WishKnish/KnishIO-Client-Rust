@@ -1,10 +1,10 @@
 [package]
 name = "knishio-kcore"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.89"
 authors = ["Eugene Teplitsky <eugene@wishknish.com>"]
-description = "Static FFI binding of KnishIO-Crypto-Core 0.1.0 (WOTS+ chains and address) for the Knish.IO Rust SDK."
+description = "Static FFI binding of KnishIO-Crypto-Core 0.2.0 (WOTS+ chains and address) for the Knish.IO Rust SDK."
 license = "GPL-3.0-or-later"
 repository = "https://github.com/WishKnish/KnishIO-Client-Rust"
 links = "kcore"

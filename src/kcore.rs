@@ -15,6 +15,9 @@ const MAX_COUNT: usize = 64;
 /// Characters in a WOTS+ private key.
 #[cfg(feature = "kcore")]
 const KEY_HEX: usize = 2048;
+/// Characters in an OTS v2 (64-chain) WOTS+ private key.
+#[cfg(feature = "kcore")]
+const KEY_HEX_V2: usize = 8192;
 
 /// The linked kcore's ABI check, run once.
 #[cfg(feature = "kcore")]
@@ -109,10 +112,28 @@ pub(crate) fn wots_address(_key_hex: &str) -> Option<String> {
     None
 }
 
+/// WOTS+ address of an 8192-character lowercase-hex OTS v2 private key, or `None` (use the SDK
+/// loop).
+#[cfg(feature = "kcore")]
+pub(crate) fn wots_address_v2(key_hex: &str) -> Option<String> {
+    if !available() || key_hex.len() != KEY_HEX_V2 || !is_lower_hex(key_hex.as_bytes()) {
+        return None;
+    }
+    let address = knishio_kcore::wots_address_v2(key_hex.as_bytes())?;
+    String::from_utf8(address.to_vec()).ok()
+}
+
+/// Without the `kcore` feature: always `None`.
+#[cfg(not(feature = "kcore"))]
+#[inline]
+pub(crate) fn wots_address_v2(_key_hex: &str) -> Option<String> {
+    None
+}
+
 #[cfg(all(test, feature = "kcore"))]
 mod tests {
     use super::*;
-    use crate::crypto::{shake256, wots_address_sdk};
+    use crate::crypto::{shake256, wots_address_sdk, wots_address_v2_sdk};
 
     /// Deterministic lowercase hex of `bits / 4` characters.
     fn hex_of(label: &str, bits: usize) -> String {
@@ -192,5 +213,22 @@ mod tests {
         let key = hex_of("kcore-key-refuse", 8192);
         assert_eq!(wots_address(&key[..2047]), None, "2047 characters");
         assert_eq!(wots_address(&key.to_uppercase()), None, "uppercase hex");
+    }
+
+    #[test]
+    fn wots_address_v2_matches_the_sdk_loop() {
+        for case in 0..20 {
+            let key = hex_of(&format!("kcore-key-v2-{case}"), 32768);
+            assert_eq!(wots_address_v2(&key), Some(wots_address_v2_sdk(&key)), "case {case}");
+        }
+    }
+
+    #[test]
+    fn wots_address_v2_refuses_inputs_the_sdk_loop_must_handle() {
+        let key = hex_of("kcore-key-v2-refuse", 32768);
+        assert_eq!(wots_address_v2(&key[..8191]), None, "8191 characters");
+        assert_eq!(wots_address_v2(&key.to_uppercase()), None, "uppercase hex");
+        assert_eq!(wots_address_v2(&key[..2048]), None, "a 2048-character key");
+        assert_eq!(wots_address(&key), None, "an 8192-character key to the v1 entry point");
     }
 }
