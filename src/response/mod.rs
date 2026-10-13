@@ -1604,17 +1604,27 @@ impl ResponseWalletList {
                 None,
             ).ok()?
         } else {
-            // With position: equivalent to JS new Wallet({secret, token, position, batchId, characters})
-            let mut w = Wallet::create(
-                secret,
+            // With position: equivalent to JS new Wallet({secret, token, position, batchId, characters}).
+            // With a secret and a ledger address, the wallet is keyed at the OTS version its address
+            // was derived at; it stays keyless when neither version derives that address.
+            let address = data.get("address").and_then(|v| v.as_str());
+            let ots_version = match (secret, position, address) {
+                (Some(secret), Some(position), Some(address)) => {
+                    crate::wallet::OtsVersion::detect(secret, token_slug, position, address, crate::wallet::OtsVersion::V1)
+                }
+                _ => Some(crate::wallet::OtsVersion::V1),
+            };
+            let mut w = Wallet::create_with_ots_version(
+                secret.filter(|_| ots_version.is_some()),
                 Some(bundle_hash),
                 token_slug,
                 position,
                 characters,
                 None,
+                ots_version.unwrap_or_default(),
             ).ok()?;
             // Overwrite address from response (server is authoritative)
-            if let Some(addr) = data.get("address").and_then(|v| v.as_str()) {
+            if let Some(addr) = address {
                 w.address = Some(addr.to_string());
             }
             w

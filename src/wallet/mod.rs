@@ -81,6 +81,11 @@ impl OtsVersion {
         }
     }
 
+    /// The higher of this version and `floor`: V2 when either is V2
+    pub fn at_least(self, floor: OtsVersion) -> OtsVersion {
+        if self == Self::V2 || floor == Self::V2 { Self::V2 } else { Self::V1 }
+    }
+
     /// The OTS version under which `secret` derives `address` for `token` at `position`
     ///
     /// Tries `preferred` first, then the other version; the address comparison ignores case.
@@ -727,7 +732,7 @@ impl Wallet {
             .collect();
     }
 
-    /// Create a remainder wallet from the source wallet
+    /// Create a remainder wallet from the source wallet, at this wallet's OTS version
     ///
     /// # Arguments
     ///
@@ -737,6 +742,12 @@ impl Wallet {
     ///
     /// A new remainder wallet
     pub fn create_remainder(&self, secret: &str) -> Result<Wallet> {
+        self.create_remainder_with_min_ots_version(secret, OtsVersion::V1)
+    }
+
+    /// Create a remainder wallet from the source wallet. Its OTS version is the higher of this
+    /// wallet's and `min_ots_version`.
+    pub fn create_remainder_with_min_ots_version(&self, secret: &str, min_ots_version: OtsVersion) -> Result<Wallet> {
         let mut remainder_wallet = Self::create_with_ots_version(
             Some(secret),
             None,
@@ -744,7 +755,7 @@ impl Wallet {
             None,
             self.characters.as_deref(),
             Some(self.mlkem_parameter_set),
-            self.ots_version,
+            self.ots_version.at_least(min_ots_version),
         )?;
         remainder_wallet.init_batch_id(Some(self), true);
         Ok(remainder_wallet)

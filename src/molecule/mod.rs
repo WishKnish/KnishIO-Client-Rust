@@ -118,6 +118,11 @@ pub struct Molecule {
     /// USER ContinuID head position for the I-atom's previousPosition metadata.
     #[serde(skip)]
     pub continuid_position: Option<String>,
+
+    /// Lowest OTS version for the wallets this molecule creates for its signer (remainder,
+    /// ContinuID, buffer); see `successor_ots_version`. Not serialized.
+    #[serde(skip)]
+    pub min_ots_version: OtsVersion,
 }
 
 impl Molecule {
@@ -139,13 +144,20 @@ impl Molecule {
             remainder_wallet: None,
             parent_hashes: Vec::new(),
             continuid_position: None,
+            min_ots_version: OtsVersion::V1,
         }
     }
 
     /// OTS version this molecule signs with: its source wallet's (docs/OTS_V2_SPECIFICATION.md),
-    /// or V1 without a source wallet. Wallets the molecule creates for its signer inherit it.
+    /// or V1 without a source wallet.
     pub fn signing_ots_version(&self) -> OtsVersion {
         self.source_wallet.as_ref().map_or(OtsVersion::V1, |w| w.ots_version)
+    }
+
+    /// OTS version of the wallets this molecule creates for its signer (remainder, ContinuID,
+    /// buffer): the higher of the signing version and `min_ots_version`.
+    pub fn successor_ots_version(&self) -> OtsVersion {
+        self.signing_ots_version().at_least(self.min_ots_version)
     }
 
     /// Generate timestamp for molecule creation
@@ -175,19 +187,25 @@ impl Molecule {
         cell_slug: Option<String>,
         version: Option<String>,
     ) -> Self {
+        Self::with_params_and_min_ots_version(
+            secret, bundle, source_wallet, remainder_wallet, cell_slug, version, OtsVersion::V1,
+        )
+    }
+
+    /// `with_params`, with the lowest OTS version for the wallets the molecule creates for its
+    /// signer (`min_ots_version`; see `successor_ots_version`)
+    pub fn with_params_and_min_ots_version(
+        secret: Option<String>,
+        bundle: Option<String>,
+        source_wallet: Option<Wallet>,
+        remainder_wallet: Option<Wallet>,
+        cell_slug: Option<String>,
+        version: Option<String>,
+        min_ots_version: OtsVersion,
+    ) -> Self {
         let timestamp = Self::generate_timestamp();
-        
-        // Create remainder wallet if source wallet provided but no remainder wallet
-        // (JS createRemainder: a fresh position of the source token carrying its batch id).
-        let final_remainder_wallet = if remainder_wallet.is_some() {
-            remainder_wallet
-        } else if let (Some(source), Some(secret_str)) = (&source_wallet, &secret) {
-            source.create_remainder(secret_str).ok()
-        } else {
-            None
-        };
-        
-        Molecule {
+
+        let mut molecule = Molecule {
             molecular_hash: None,
             bundle,
             created_at: timestamp,
@@ -198,10 +216,22 @@ impl Molecule {
             atoms: Vec::new(),
             secret,
             source_wallet,
-            remainder_wallet: final_remainder_wallet,
+            remainder_wallet,
             parent_hashes: Vec::new(),
             continuid_position: None,
+            min_ots_version,
+        };
+
+        // Create remainder wallet if source wallet provided but no remainder wallet
+        // (JS createRemainder: a fresh position of the source token carrying its batch id).
+        if molecule.remainder_wallet.is_none() {
+            if let (Some(source), Some(secret_str)) = (&molecule.source_wallet, &molecule.secret) {
+                molecule.remainder_wallet = source
+                    .create_remainder_with_min_ots_version(secret_str, molecule.min_ots_version)
+                    .ok();
+            }
         }
+        molecule
     }
     
     /// Convert JSON string to Molecule object (matches JS Molecule.jsonToObject)
@@ -342,7 +372,7 @@ impl Molecule {
                     None,
                     None,
                     self.source_wallet.as_ref().map(|w| w.mlkem_parameter_set),
-                    self.signing_ots_version(),
+                    self.successor_ots_version(),
                 ).ok();
                 if user_wallet.is_some() {
                     self.remainder_wallet = user_wallet;
@@ -1237,7 +1267,7 @@ impl Molecule {
                     None,
                     None,
                     self.source_wallet.as_ref().map(|w| w.mlkem_parameter_set),
-                    self.signing_ots_version(),
+                    self.successor_ots_version(),
                 )?;
                 buffer_wallet.batch_id = source_batch_id.clone();
 
@@ -1315,7 +1345,7 @@ impl Molecule {
     /// `walletBundle`, S's `tokenUnits` when it has any); one addressless V = +amount per recipient
     /// (metaId = the recipient bundle, a fresh batch id when S has one); B remainder =
     /// +(S.balance - total) at a FRESH position (the molecule's remainder wallet, or
-    /// `S.create_remainder(secret)` when none is set), emitted even when its value is 0. A
+    /// `S.create_remainder_with_min_ots_version(secret, min_ots_version)` when none is set), emitted even when its value is 0. A
     /// remainder at S's own position would be credited behind S's consumed one-time key, so it is
     /// refused. No I atom.
     ///
@@ -1333,7 +1363,10 @@ impl Molecule {
 
         let remainder = match &self.remainder_wallet {
             Some(remainder) => remainder.clone(),
-            None => source.create_remainder(self.secret.as_deref().ok_or(KnishIOError::MissingSecret)?)?,
+            None => source.create_remainder_with_min_ots_version(
+                self.secret.as_deref().ok_or(KnishIOError::MissingSecret)?,
+                self.min_ots_version,
+            )?,
         };
         if remainder.position.is_none() || remainder.position == source.position {
             return Err(KnishIOError::TransferRemainder);

@@ -233,6 +233,14 @@ impl KnishIOClient {
         self.ots_version = ots_version;
     }
 
+    /// A new molecule whose signer wallets (remainder, ContinuID, buffer) are never below this
+    /// client's OTS version
+    fn new_molecule(&self) -> Molecule {
+        let mut molecule = Molecule::new();
+        molecule.min_ots_version = self.ots_version;
+        molecule
+    }
+
     /// Bind a ledger-returned wallet of this client's identity to the OTS version that derives
     /// its address from the client secret, preferring the client version.
     ///
@@ -792,7 +800,8 @@ impl KnishIOClient {
         let remainder = if let Some(wallet) = remainder_wallet {
             wallet
         } else {
-            // Create new remainder wallet
+            // Create new remainder wallet: never below the client's OTS version, so a client set
+            // to v2 moves the identity's ContinuID head to v2
             Wallet::new_with_ots_version(
                 Some(&secret),
                 bundle.as_deref(),
@@ -802,7 +811,7 @@ impl KnishIOClient {
                 source_wallet.batch_id.as_deref(),
                 source_wallet.characters.as_deref(),
                 Some(self.mlkem_parameter_set),
-                source_wallet.ots_version,
+                source_wallet.ots_version.at_least(self.ots_version),
             )?
         };
 
@@ -810,7 +819,7 @@ impl KnishIOClient {
         self.remainder_wallet = Some(remainder.clone());
 
         // Create and configure molecule
-        let mut molecule = Molecule::new();
+        let mut molecule = self.new_molecule();
         molecule.secret = Some(secret);
         molecule.source_wallet = Some(source_wallet);
         molecule.remainder_wallet = Some(remainder);
@@ -904,7 +913,7 @@ impl KnishIOClient {
             )?;
 
             // Create molecule with secret and source wallet
-            let mut molecule = Molecule::new();
+            let mut molecule = self.new_molecule();
             molecule.secret = Some(secret.clone());
             molecule.source_wallet = Some(auth_wallet.clone());
 
@@ -1910,7 +1919,7 @@ impl KnishIOClient {
         )?;
 
         // Create mutation (matches JS lines 1021-1023)
-        let mut mutation = MutationCreateWallet::from_molecule(Molecule::new());
+        let mut mutation = MutationCreateWallet::from_molecule(self.new_molecule());
 
         // Fill molecule with wallet (matches JS line 1025)
         mutation.fill_molecule(&new_wallet)?;
@@ -2035,9 +2044,9 @@ impl KnishIOClient {
         // without a source the molecule has zero atoms -> AtomsMissing (mirrors transfer_token).
         let source_wallet = self.get_source_wallet().await?;
         let secret = self.secret.clone().ok_or(KnishIOError::MissingSecret)?;
-        let remainder_wallet = source_wallet.create_remainder(&secret)?;
+        let remainder_wallet = source_wallet.create_remainder_with_min_ots_version(&secret, self.ots_version)?;
 
-        let mut molecule = Molecule::new();
+        let mut molecule = self.new_molecule();
         molecule.secret = Some(secret);             // sign() derives the OTS key from molecule.secret
         molecule.source_wallet = Some(source_wallet);
         molecule.remainder_wallet = Some(remainder_wallet);
@@ -2139,7 +2148,7 @@ impl KnishIOClient {
         // Create a remainder from the source wallet (matches JS line 1688)
         let secret = self.secret.as_ref()
             .ok_or(KnishIOError::MissingSecret)?;
-        let mut remainder_wallet = source_wallet.create_remainder(secret)?;
+        let mut remainder_wallet = source_wallet.create_remainder_with_min_ots_version(secret, self.ots_version)?;
 
         // Token units splitting (matches JS lines 1691-1695)
         if !units.is_empty() {
@@ -2147,7 +2156,7 @@ impl KnishIOClient {
         }
 
         // Build the molecule itself (matches JS lines 1699-1702)
-        let mut molecule = Molecule::new();
+        let mut molecule = self.new_molecule();
         // sign() derives the OTS key from molecule.secret (generate_key(secret, token, position));
         // without it the signing block is skipped -> unsigned molecule -> "Signature malformed".
         molecule.secret = Some(secret.clone());
@@ -2242,7 +2251,7 @@ impl KnishIOClient {
         // Create a remainder from the source wallet
         let secret = self.secret.as_ref()
             .ok_or(KnishIOError::MissingSecret)?;
-        let mut remainder_wallet = source_wallet.create_remainder(secret)?;
+        let mut remainder_wallet = source_wallet.create_remainder_with_min_ots_version(secret, self.ots_version)?;
 
         // Token units splitting (N-way): source keeps the union, each recipient its subset,
         // remainder the kept units
@@ -2250,7 +2259,7 @@ impl KnishIOClient {
         source_wallet.split_units_multi(&unit_lists, &mut recipient_wallets, &mut remainder_wallet);
 
         // Build the molecule itself
-        let mut molecule = Molecule::new();
+        let mut molecule = self.new_molecule();
         molecule.secret = Some(secret.clone());
         molecule.source_wallet = Some(source_wallet.clone());
         molecule.remainder_wallet = Some(remainder_wallet.clone());
@@ -2375,7 +2384,7 @@ impl KnishIOClient {
         };
 
         // Create mutation (matches JS lines 1544-1546)
-        let mut mutation = MutationRequestTokens::from_molecule(Molecule::new());
+        let mut mutation = MutationRequestTokens::from_molecule(self.new_molecule());
 
         // Fill molecule (matches JS lines 1548-1555)
         mutation.fill_molecule(RequestTokensParams {
@@ -2437,7 +2446,7 @@ impl KnishIOClient {
         // Remainder wallet (matches JS line 1839)
         let secret = self.secret.as_ref()
             .ok_or(KnishIOError::MissingSecret)?;
-        let mut remainder_wallet = source_wallet.create_remainder(secret)?;
+        let mut remainder_wallet = source_wallet.create_remainder_with_min_ots_version(secret, self.ots_version)?;
 
         // Calculate amount & set meta key (matches JS lines 1842-1857)
         if !units.is_empty() {
@@ -2454,8 +2463,8 @@ impl KnishIOClient {
         }
 
         // Create a molecule (matches JS lines 1860-1863)
-        let mut molecule = Molecule::new();
-        // Set the molecule secret so sign() can derive the OTS key — Molecule::new() leaves it
+        let mut molecule = self.new_molecule();
+        // Set the molecule secret so sign() can derive the OTS key — a new molecule leaves it
         // None; without this, sign() hits the no-secret branch and returns SignatureMalformed.
         // (transfer_token sets this too; burn_tokens' path was previously unexercised.)
         molecule.secret = Some(secret.clone());
@@ -2539,9 +2548,9 @@ impl KnishIOClient {
 
         // The USER source wallet (ContinuID chain head) + remainder, as create_token.
         let source_wallet = self.get_source_wallet().await?;
-        let remainder_wallet = source_wallet.create_remainder(&secret)?;
+        let remainder_wallet = source_wallet.create_remainder_with_min_ots_version(&secret, self.ots_version)?;
 
-        let mut molecule = Molecule::new();
+        let mut molecule = self.new_molecule();
         molecule.secret = Some(secret);
         molecule.bundle = self.bundle.clone();
         molecule.source_wallet = Some(source_wallet);
@@ -2609,9 +2618,9 @@ impl KnishIOClient {
         recipient_wallet.init_batch_id(Some(&source_wallet), false);
         recipient_wallet.token_units = vec![new_token_unit];
 
-        let remainder_wallet = source_wallet.create_remainder(&secret)?;
+        let remainder_wallet = source_wallet.create_remainder_with_min_ots_version(&secret, self.ots_version)?;
 
-        let mut molecule = Molecule::new();
+        let mut molecule = self.new_molecule();
         molecule.secret = Some(secret);
         molecule.bundle = self.bundle.clone();
         molecule.source_wallet = Some(source_wallet.clone());
@@ -2668,8 +2677,8 @@ impl KnishIOClient {
 
         // The molecule needs our secret (buffer wallet + signing) and the source's remainder.
         let secret = self.secret.clone().ok_or(KnishIOError::MissingSecret)?;
-        let mut molecule = Molecule::new();
-        molecule.remainder_wallet = Some(source_wallet.create_remainder(&secret)?);
+        let mut molecule = self.new_molecule();
+        molecule.remainder_wallet = Some(source_wallet.create_remainder_with_min_ots_version(&secret, self.ots_version)?);
         molecule.secret = Some(secret);
         molecule.bundle = self.bundle.clone();
         molecule.source_wallet = Some(source_wallet);
@@ -2729,8 +2738,8 @@ impl KnishIOClient {
         }
 
         let secret = self.secret.clone().ok_or(KnishIOError::MissingSecret)?;
-        let mut molecule = Molecule::new();
-        molecule.remainder_wallet = Some(source_wallet.create_remainder(&secret)?);
+        let mut molecule = self.new_molecule();
+        molecule.remainder_wallet = Some(source_wallet.create_remainder_with_min_ots_version(&secret, self.ots_version)?);
         molecule.secret = Some(secret);
         molecule.bundle = self.bundle.clone();
         molecule.source_wallet = Some(source_wallet);
@@ -2880,7 +2889,7 @@ impl KnishIOClient {
         let secret = self.secret.as_ref()
             .ok_or(KnishIOError::MissingSecret)?;
 
-        let mut molecule = Molecule::new();
+        let mut molecule = self.new_molecule();
         molecule.secret = Some(secret.clone());
 
         // Create mutation (matches JS lines 1228-1235)
@@ -2927,15 +2936,9 @@ impl KnishIOClient {
         use crate::mutation::create_meta::{MutationCreateMeta, CreateMetaParams};
         use crate::mutation::Mutation;
 
-        // Create molecule with secret and source wallet (matches JS lines 1267-1271)
-        let secret = self.secret.as_ref()
-            .ok_or(KnishIOError::MissingSecret)?;
-
-        let mut molecule = Molecule::new();
-        molecule.secret = Some(secret.clone());
-
-        // For now, we'll skip the complex source_wallet logic and just set the secret
-        // The mutation's fill_molecule will handle the rest
+        // Create the molecule from the identity's ContinuID head (matches JS createMeta's
+        // createMolecule({ secret }))
+        let molecule = self.create_molecule(None, None, None, None).await?;
 
         // Create mutation (matches JS lines 1265-1272)
         let mut mutation = MutationCreateMeta::from_molecule(molecule);
@@ -2971,7 +2974,7 @@ impl KnishIOClient {
         use crate::mutation::Mutation;
 
         // Create mutation (matches JS lines 1302-1304)
-        let mut mutation = MutationCreateIdentifier::from_molecule(Molecule::new());
+        let mut mutation = MutationCreateIdentifier::from_molecule(self.new_molecule());
 
         // Fill molecule with identifier data (matches JS lines 1306-1310)
         mutation.fill_molecule(CreateIdentifierParams {
@@ -3121,7 +3124,7 @@ impl KnishIOClient {
         let secret = self.secret.as_ref()
             .ok_or(KnishIOError::MissingSecret)?;
 
-        let mut molecule = Molecule::new();
+        let mut molecule = self.new_molecule();
         molecule.secret = Some(secret.clone());
 
         // Get source wallet for the molecule (amount=0.0 since we're just creating a policy atom)
@@ -3384,7 +3387,7 @@ impl KnishIOClient {
         use crate::auth::AuthToken;
 
         // Create molecule with secret and source wallet
-        let mut molecule = Molecule::new();
+        let mut molecule = self.new_molecule();
         molecule.secret = Some(secret.to_string());
         molecule.source_wallet = Some(wallet.clone());
 
@@ -3393,8 +3396,9 @@ impl KnishIOClient {
         // secret-fallback (which silently swallows Wallet::create errors with .ok()). The I-atom
         // registers the bundle's ContinuID relay head on-ledger so subsequent molecules advance the
         // chain instead of falling to fresh genesis; its previousPosition is the source's position
-        // (the consumed pointer on a pointer-signed login). Carries the source's characters for parity.
-        let remainder = Wallet::create_with_ots_version(Some(secret), None, "USER", None, wallet.characters.as_deref(), Some(self.mlkem_parameter_set), wallet.ots_version)?;
+        // (the consumed pointer on a pointer-signed login), never below the client's OTS version.
+        // Carries the source's characters for parity.
+        let remainder = Wallet::create_with_ots_version(Some(secret), None, "USER", None, wallet.characters.as_deref(), Some(self.mlkem_parameter_set), wallet.ots_version.at_least(self.ots_version))?;
         molecule.remainder_wallet = Some(remainder);
 
         // Create mutation
@@ -3685,6 +3689,7 @@ impl std::fmt::Debug for KnishIOClient {
 #[cfg(test)]
 mod tests {
     use super::KnishIOClient;
+    use std::collections::HashMap;
 
     /// `set_encrypt` must reach the GraphQL transport, not just the client's own flag:
     /// `GraphQLClient::send` decides encryption from ITS copy, so a client-only assignment
@@ -3907,6 +3912,8 @@ mod tests {
         assert_eq!(atoms[1]["token"], "USER");
         assert_eq!(meta_value(&atoms[1], "previousPosition").as_deref(), Some(POINTER));
         assert_ne!(atoms[1]["position"], POINTER, "the I-atom must register a fresh USER position");
+        let head_position = atoms[1]["position"].as_str().ok_or("I-atom position")?;
+        assert_eq!(atoms[1]["walletAddress"].as_str(), user_wallet_at(&secret, head_position)?.address.as_deref());
 
         let bound = token.get_wallet().ok_or("token is not bound to a wallet")?;
         assert_eq!(bound.token, "USER", "the token is bound to the pointer wallet");
@@ -4271,6 +4278,194 @@ mod tests {
         assert_eq!(atoms[0]["walletAddress"].as_str(), signer.address.as_deref());
         let remainder_position = atoms[1]["position"].as_str().ok_or("remainder position")?;
         assert_eq!(atoms[1]["walletAddress"].as_str(), wallet_at(&secret, "USER", remainder_position, OtsVersion::V2)?.address.as_deref());
+        Ok(())
+    }
+
+    /// The proposed atom with `isotope`, never found by index.
+    fn atom_with_isotope<'a>(atoms: &'a [Value], isotope: &str) -> std::result::Result<&'a Value, Box<dyn Error>> {
+        Ok(atoms.iter().find(|atom| atom["isotope"] == isotope).ok_or(format!("no {isotope} atom"))?)
+    }
+
+    /// Asserts the signer atom is `signer_address` and the I-atom registers a USER head derived at
+    /// `head_version` at its own position.
+    fn assert_signer_and_head(atoms: &[Value], secret: &str, signer_address: Option<&str>, head_version: crate::wallet::OtsVersion) -> TestResult {
+        assert_eq!(atoms[0]["walletAddress"].as_str(), signer_address, "the signer atom stays on the ledger head");
+        let head = atom_with_isotope(atoms, "I")?;
+        let position = head["position"].as_str().ok_or("I-atom position")?;
+        assert_ne!(position, POINTER);
+        assert_eq!(head["walletAddress"].as_str(), wallet_at(secret, "USER", position, head_version)?.address.as_deref());
+        Ok(())
+    }
+
+    /// A v2 client signing in from a v1 ContinuID pointer registers a v2 head.
+    #[tokio::test]
+    async fn a_v2_client_signing_in_from_a_v1_pointer_registers_a_v2_head() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-migration-login");
+        let signer = wallet_at(&secret, "USER", POINTER, OtsVersion::V1)?;
+        let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![true]).await?;
+        let mut client = v2_client(&stub);
+
+        let token = client.request_profile_auth_token(&secret, Some(false)).await?;
+
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1);
+        let atoms = proposals[0]["atoms"].as_array().ok_or("proposal has no atoms")?;
+        assert_signer_and_head(atoms, &secret, signer.address.as_deref(), OtsVersion::V2)?;
+        assert_eq!(token.get_wallet().ok_or("token is not bound to a wallet")?.ots_version, OtsVersion::V1);
+        Ok(())
+    }
+
+    /// A v2 client signing from a v1 ContinuID head registers a v2 head.
+    #[tokio::test]
+    async fn a_v2_client_signing_from_a_v1_head_registers_a_v2_head() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-migration-meta");
+        let signer = wallet_at(&secret, "USER", POINTER, OtsVersion::V1)?;
+        let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![true]).await?;
+        let mut client = v2_client(&stub);
+        client.set_secret(secret.as_str());
+
+        client.create_meta("ots", "migrate", HashMap::from([("k".to_string(), json!("v"))]), None).await?;
+
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1);
+        let atoms = proposals[0]["atoms"].as_array().ok_or("proposal has no atoms")?;
+        assert_eq!(atoms[0]["isotope"], "M");
+        assert_signer_and_head(atoms, &secret, signer.address.as_deref(), OtsVersion::V2)
+    }
+
+    /// A v1 client signing from a v2 ContinuID head keeps a v2 head.
+    #[tokio::test]
+    async fn a_v1_client_signing_from_a_v2_head_keeps_a_v2_head() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-migration-keep");
+        let signer = wallet_at(&secret, "USER", POINTER, OtsVersion::V2)?;
+        let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![true]).await?;
+        let mut client = client_for(&stub);
+        client.set_secret(secret.as_str());
+
+        client.create_meta("ots", "keep", HashMap::from([("k".to_string(), json!("v"))]), None).await?;
+
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1);
+        let atoms = proposals[0]["atoms"].as_array().ok_or("proposal has no atoms")?;
+        assert_signer_and_head(atoms, &secret, signer.address.as_deref(), OtsVersion::V2)
+    }
+
+    /// `create_remainder_with_min_ots_version` takes the higher of the wallet's OTS version and
+    /// the floor; `create_remainder` keeps the wallet's.
+    #[test]
+    fn create_remainder_takes_the_higher_ots_version() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-migration-remainder");
+        let v1 = wallet_at(&secret, "TKN", POINTER, OtsVersion::V1)?;
+        let v2 = wallet_at(&secret, "TKN", POINTER, OtsVersion::V2)?;
+        assert_eq!(v1.create_remainder(&secret)?.ots_version, OtsVersion::V1);
+        assert_eq!(v1.create_remainder_with_min_ots_version(&secret, OtsVersion::V2)?.ots_version, OtsVersion::V2);
+        assert_eq!(v2.create_remainder_with_min_ots_version(&secret, OtsVersion::V1)?.ots_version, OtsVersion::V2);
+        assert_eq!(v2.create_remainder(&secret)?.ots_version, OtsVersion::V2);
+        assert_eq!(OtsVersion::V1.at_least(OtsVersion::V1), OtsVersion::V1);
+        assert_eq!(OtsVersion::V1.at_least(OtsVersion::V2), OtsVersion::V2);
+        assert_eq!(OtsVersion::V2.at_least(OtsVersion::V1), OtsVersion::V2);
+        Ok(())
+    }
+
+    /// A molecule creates its signer wallets at the higher of the signing version and
+    /// `min_ots_version`.
+    #[test]
+    fn a_molecule_creates_signer_wallets_at_the_successor_ots_version() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-migration-molecule");
+        let mut source = wallet_at(&secret, "TKN", POINTER, OtsVersion::V1)?;
+        source.balance = "10".to_string();
+        let mut molecule = Molecule::with_params_and_min_ots_version(
+            Some(secret.clone()), None, Some(source.clone()), None, None, None, OtsVersion::V2,
+        );
+        assert_eq!(molecule.signing_ots_version(), OtsVersion::V1);
+        assert_eq!(molecule.successor_ots_version(), OtsVersion::V2);
+        assert_eq!(molecule.remainder_wallet.as_ref().ok_or("remainder wallet")?.ots_version, OtsVersion::V2);
+
+        molecule.init_deposit_buffer(4.0, HashMap::new())?;
+        let buffer = molecule.atoms.iter().find(|atom| atom.isotope == crate::types::Isotope::B).ok_or("no buffer atom")?;
+        assert_eq!(Some(buffer.wallet_address.as_str()), wallet_at(&secret, "TKN", &buffer.position, OtsVersion::V2)?.address.as_deref());
+
+        molecule.add_continuid_atom()?;
+        let remainder = molecule.remainder_wallet.as_ref().ok_or("remainder wallet")?;
+        assert_eq!(remainder.token, "USER");
+        assert_eq!(remainder.ots_version, OtsVersion::V2);
+
+        let default = Molecule::with_params(Some(secret.clone()), None, Some(source), None, None, None);
+        assert_eq!(default.successor_ots_version(), OtsVersion::V1);
+        assert_eq!(default.remainder_wallet.as_ref().ok_or("remainder wallet")?.ots_version, OtsVersion::V1);
+        Ok(())
+    }
+
+    /// A v2 client transferring from a v1 token wallet creates a v2 remainder.
+    #[tokio::test]
+    async fn a_v2_client_transferring_from_a_v1_token_wallet_creates_a_v2_remainder() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-migration-transfer");
+        let signer = wallet_at(&secret, "USER", POINTER, OtsVersion::V1)?;
+        let token_position = "d".repeat(64);
+        let mut token_wallet = wallet_at(&secret, "TKN", &token_position, OtsVersion::V1)?;
+        token_wallet.balance = "100".to_string();
+        let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![true, true]).await?;
+        let mut client = v2_client(&stub);
+        client.request_profile_auth_token(&secret, Some(false)).await?;
+
+        let recipient = generate_bundle_hash(&generate_secret("ots-migration-recipient"));
+        client.transfer_token(&recipient, "TKN", Some(10.0), vec![], None, Some(token_wallet.clone())).await?;
+
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 2, "login + transfer");
+        let atoms = proposals[1]["atoms"].as_array().ok_or("proposal has no atoms")?;
+        assert_eq!(atoms[0]["walletAddress"].as_str(), token_wallet.address.as_deref());
+        let remainder = atoms
+            .iter()
+            .skip(1)
+            .find(|atom| atom["isotope"] == "V" && atom["token"] == "TKN" && atom["position"].as_str().is_some_and(|p| !p.is_empty()))
+            .ok_or("no remainder atom")?;
+        let position = remainder["position"].as_str().ok_or("remainder position")?;
+        assert_ne!(position, token_position);
+        assert_eq!(remainder["walletAddress"].as_str(), wallet_at(&secret, "TKN", position, OtsVersion::V2)?.address.as_deref());
+        Ok(())
+    }
+
+    /// A ledger wallet rebuilt with the secret is keyed at the version its address was derived
+    /// at, and is keyless when neither version derives it.
+    #[test]
+    fn a_ledger_wallet_rebuilt_with_the_secret_takes_the_detected_ots_version() -> TestResult {
+        use crate::response::ResponseWalletList;
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-migration-rebuild");
+        let registered = wallet_at(&secret, "TKN", POINTER, OtsVersion::V2)?;
+        let data = |address: &str| json!({
+            "address": address,
+            "bundleHash": generate_bundle_hash(&secret),
+            "tokenSlug": "TKN",
+            "position": POINTER,
+            "batchId": null,
+            "characters": null,
+            "pubkey": null,
+            "amount": "5",
+            "tokenUnits": [],
+            "tradeRates": [],
+            "createdAt": "0",
+        });
+        let address = registered.address.clone().ok_or("address")?;
+
+        let rebuilt = ResponseWalletList::wallet_from_data(&data(&address), Some(&secret)).ok_or("rebuilt wallet")?;
+        assert_eq!(rebuilt.ots_version, OtsVersion::V2);
+        assert_eq!(rebuilt.address, registered.address);
+        assert_eq!(rebuilt.key, registered.key);
+        assert_eq!(rebuilt.pubkey, registered.pubkey);
+
+        let unrelated = "f".repeat(64);
+        let keyless = ResponseWalletList::wallet_from_data(&data(&unrelated), Some(&secret)).ok_or("keyless wallet")?;
+        assert!(keyless.key.is_none());
+        assert_eq!(keyless.address.as_deref(), Some(unrelated.as_str()));
+        assert_eq!(keyless.position.as_deref(), Some(POINTER));
         Ok(())
     }
 }

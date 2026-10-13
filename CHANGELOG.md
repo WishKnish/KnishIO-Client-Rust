@@ -27,17 +27,34 @@ detail, the entry says so instead of guessing.
   version is refused.
 - `AuthToken::get_snapshot()` records the session wallet's `otsVersion`; `AuthToken::restore()`
   restores it (absent means 1).
+- `OtsVersion::at_least(floor)`: the higher of the two versions.
+- `Wallet::create_remainder_with_min_ots_version(secret, min_ots_version)`: the remainder takes
+  the higher of the wallet's version and `min_ots_version`; `create_remainder(secret)` keeps the
+  wallet's version.
+- `Molecule::min_ots_version` (default V1, not serialized), `Molecule::successor_ots_version()`
+  and `Molecule::with_params_and_min_ots_version(…)`: the remainder, ContinuID and buffer wallets
+  a molecule creates for its signer take the higher of its signing version and `min_ots_version`.
 
 ### Changed
 
-- `KnishIOClient::create_molecule()` creates its default remainder wallet at the source
-  wallet's OTS version.
+- `KnishIOClient::create_molecule()` creates its default remainder wallet at the higher of the
+  source wallet's and the client's OTS version.
+- A client set to `OtsVersion::V2` creates the ContinuID head, token remainders and deposit
+  buffer of every molecule it signs at version 2, so an identity created at version 1 moves to
+  version 2 on its next sign-in or molecule. A client at version 1 keeps a version 2 identity at
+  version 2.
+- `ResponseWalletList::wallet_from_data()` (and `get_wallets()`, `ResponseBalance::to_client_wallet()`)
+  keys a wallet given a secret at the OTS version its address was derived at, and returns it
+  without a key when neither version derives that address.
+- `KnishIOClient::create_meta()` signs from the identity's ContinuID head through
+  `create_molecule()`, as the other SDKs do.
 - Wallets the ledger returns for this client (the ContinuID head in `get_source_wallet()` and
   the login pointer, and the balance wallets `query_source_wallet()` and the credited wallet
   re-derive) are used at the OTS version their address was derived at. Those calls return
   `KnishIOError::WalletCredential` when neither version derives the address; the login pointer
   falls back to an AUTH wallet as before.
-- The profile-login ContinuID remainder is created at the signing wallet's OTS version.
+- The profile-login ContinuID remainder is created at the higher of the signing wallet's and the
+  client's OTS version.
 
 
 ## [1.5.0] — 2026-10-12
