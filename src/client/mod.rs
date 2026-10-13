@@ -1918,8 +1918,10 @@ impl KnishIOClient {
             self.ots_version,
         )?;
 
-        // Create mutation (matches JS lines 1021-1023)
-        let mut mutation = MutationCreateWallet::from_molecule(self.new_molecule());
+        // Create the molecule from the identity's ContinuID head (matches JS createMoleculeMutation's
+        // default createMolecule({}))
+        let molecule = self.create_molecule(None, None, None, None).await?;
+        let mut mutation = MutationCreateWallet::from_molecule(molecule);
 
         // Fill molecule with wallet (matches JS line 1025)
         mutation.fill_molecule(&new_wallet)?;
@@ -2383,8 +2385,10 @@ impl KnishIOClient {
             ("walletBundle".to_string(), self.bundle.clone().ok_or(KnishIOError::MissingBundle)?)
         };
 
-        // Create mutation (matches JS lines 1544-1546)
-        let mut mutation = MutationRequestTokens::from_molecule(self.new_molecule());
+        // Create the molecule from the identity's ContinuID head (matches JS createMoleculeMutation's
+        // default createMolecule({}))
+        let molecule = self.create_molecule(None, None, None, None).await?;
+        let mut mutation = MutationRequestTokens::from_molecule(molecule);
 
         // Fill molecule (matches JS lines 1548-1555)
         mutation.fill_molecule(RequestTokensParams {
@@ -2885,12 +2889,9 @@ impl KnishIOClient {
         use crate::mutation::create_rule::{MutationCreateRule, CreateRuleParams};
         use crate::mutation::Mutation;
 
-        // Create molecule with secret (matches JS lines 1230-1233)
-        let secret = self.secret.as_ref()
-            .ok_or(KnishIOError::MissingSecret)?;
-
-        let mut molecule = self.new_molecule();
-        molecule.secret = Some(secret.clone());
+        // Create the molecule from the identity's ContinuID head (matches JS createRule's
+        // createMolecule({ secret }))
+        let molecule = self.create_molecule(None, None, None, None).await?;
 
         // Create mutation (matches JS lines 1228-1235)
         let mut mutation = MutationCreateRule::from_molecule(molecule);
@@ -2973,8 +2974,10 @@ impl KnishIOClient {
         use crate::mutation::create_identifier::{MutationCreateIdentifier, CreateIdentifierParams};
         use crate::mutation::Mutation;
 
-        // Create mutation (matches JS lines 1302-1304)
-        let mut mutation = MutationCreateIdentifier::from_molecule(self.new_molecule());
+        // Create the molecule from the identity's ContinuID head (matches JS createMoleculeMutation's
+        // default createMolecule({}))
+        let molecule = self.create_molecule(None, None, None, None).await?;
+        let mut mutation = MutationCreateIdentifier::from_molecule(molecule);
 
         // Fill molecule with identifier data (matches JS lines 1306-1310)
         mutation.fill_molecule(CreateIdentifierParams {
@@ -4351,6 +4354,60 @@ mod tests {
         assert_eq!(proposals.len(), 1);
         let atoms = proposals[0]["atoms"].as_array().ok_or("proposal has no atoms")?;
         assert_signer_and_head(atoms, &secret, signer.address.as_deref(), OtsVersion::V2)
+    }
+
+    /// Asserts the last proposal is signed by the ledger's v1 USER head and registers a v1 head.
+    fn assert_last_proposal_signed_from_head(stub: &mut StubValidator, secret: &str, signer_address: Option<&str>, proposals: usize) -> TestResult {
+        let sent = stub.proposals();
+        assert_eq!(sent.len(), proposals);
+        let atoms = sent[proposals - 1]["atoms"].as_array().ok_or("proposal has no atoms")?;
+        assert!(atoms[0]["otsFragment"].as_str().is_some_and(|f| !f.is_empty()), "the molecule is signed");
+        assert_signer_and_head(atoms, secret, signer_address, crate::wallet::OtsVersion::V1)
+    }
+
+    /// A v1 client holding a secret, a stub whose ContinuID head is that secret's v1 USER wallet,
+    /// and the head's address.
+    async fn signed_op_fixture(label: &str, verdicts: Vec<bool>) -> std::result::Result<(StubValidator, KnishIOClient, String, Option<String>), Box<dyn Error>> {
+        let secret = generate_secret(label);
+        let signer = wallet_at(&secret, "USER", POINTER, crate::wallet::OtsVersion::V1)?;
+        let stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), verdicts).await?;
+        let mut client = client_for(&stub);
+        client.set_secret(secret.as_str());
+        Ok((stub, client, secret, signer.address))
+    }
+
+    #[tokio::test]
+    async fn create_wallet_signs_from_the_continuid_head() -> TestResult {
+        let (mut stub, mut client, secret, signer) = signed_op_fixture("signed-create-wallet", vec![true]).await?;
+        client.create_wallet("TKN").await?;
+        assert_last_proposal_signed_from_head(&mut stub, &secret, signer.as_deref(), 1)
+    }
+
+    #[tokio::test]
+    async fn create_identifier_signs_from_the_continuid_head() -> TestResult {
+        let (mut stub, mut client, secret, signer) = signed_op_fixture("signed-create-identifier", vec![true]).await?;
+        client.create_identifier("email", "user@example.com", "1234").await?;
+        assert_last_proposal_signed_from_head(&mut stub, &secret, signer.as_deref(), 1)
+    }
+
+    #[tokio::test]
+    async fn create_rule_signs_from_the_continuid_head() -> TestResult {
+        let (mut stub, mut client, secret, signer) = signed_op_fixture("signed-create-rule", vec![true]).await?;
+        let rule = json!({
+            "condition": [{ "key": "status", "value": "active", "comparison": "==" }],
+            "callback": [{ "action": "reject" }],
+        });
+        client.create_rule("ots", "rule", vec![rule], None).await?;
+        assert_last_proposal_signed_from_head(&mut stub, &secret, signer.as_deref(), 1)
+    }
+
+    /// Login, the token query (answered from the verdict queue) and the request.
+    #[tokio::test]
+    async fn request_tokens_signs_from_the_continuid_head() -> TestResult {
+        let (mut stub, mut client, secret, signer) = signed_op_fixture("signed-request-tokens", vec![true, true, true]).await?;
+        client.request_profile_auth_token(&secret, Some(false)).await?;
+        client.request_tokens("TKN", None, Some(10.0), vec![], None, None).await?;
+        assert_last_proposal_signed_from_head(&mut stub, &secret, signer.as_deref(), 2)
     }
 
     /// `create_remainder_with_min_ots_version` takes the higher of the wallet's OTS version and

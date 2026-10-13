@@ -983,6 +983,7 @@ impl Molecule {
             };
 
             self.add_atom(Atom::create(params));
+            self.add_continuid_atom()?;
         }
         
         Ok(())

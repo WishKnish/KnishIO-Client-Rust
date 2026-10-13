@@ -46,8 +46,6 @@ detail, the entry says so instead of guessing.
 - `ResponseWalletList::wallet_from_data()` (and `get_wallets()`, `ResponseBalance::to_client_wallet()`)
   keys a wallet given a secret at the OTS version its address was derived at, and returns it
   without a key when neither version derives that address.
-- `KnishIOClient::create_meta()` signs from the identity's ContinuID head through
-  `create_molecule()`, as the other SDKs do.
 - Wallets the ledger returns for this client (the ContinuID head in `get_source_wallet()` and
   the login pointer, and the balance wallets `query_source_wallet()` and the credited wallet
   re-derive) are used at the OTS version their address was derived at. Those calls return
@@ -55,6 +53,13 @@ detail, the entry says so instead of guessing.
   falls back to an AUTH wallet as before.
 - The profile-login ContinuID remainder is created at the higher of the signing wallet's and the
   client's OTS version.
+
+### Fixed
+
+- `KnishIOClient::create_meta()`, `create_wallet()`, `request_tokens()`, `create_identifier()` and
+  `create_rule()` sign from the identity's ContinuID head; they previously failed with
+  `AtomsMissing` before proposing. The token request molecule carries the ContinuID atom, as in
+  the other SDKs.
 
 
 ## [1.5.0] — 2026-10-12
