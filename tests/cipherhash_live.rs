@@ -5,6 +5,7 @@
 //! than passed. Run them live against a validator (without `CIPHERHASH_TEST_URL` they fail):
 //!   CIPHERHASH_TEST_URL=http://localhost:8081/graphql cargo test --test cipherhash_live -- --ignored
 //! `CIPHERHASH_MLKEM_PARAMETER_SET=768` selects ML-KEM-768 (default: ML-KEM-1024).
+//! `CIPHERHASH_OTS_VERSION=2` selects client-level OTS v2 (default: OTS v1).
 //!
 //! Mirrors the JS reference suite (`tests/cipherhash-live.test.js`): the encrypted
 //! client conveys its AUTH wallet's ML-KEM pubkey at auth (a signed `walletPubkey`
@@ -12,7 +13,7 @@
 //! encrypts the response back to that pubkey, which the client decrypts.
 
 use knishio_client::crypto::generate_secret_with_params;
-use knishio_client::wallet::MlKemParameterSet;
+use knishio_client::wallet::{MlKemParameterSet, OtsVersion};
 use knishio_client::KnishIOClient;
 
 fn test_url() -> Option<String> {
@@ -26,9 +27,22 @@ fn param_set() -> MlKemParameterSet {
     }
 }
 
+fn ots_version() -> OtsVersion {
+    match std::env::var("CIPHERHASH_OTS_VERSION").as_deref() {
+        Ok("2") => OtsVersion::V2,
+        _ => OtsVersion::V1,
+    }
+}
+
+fn assert_session_ots_version(token: &knishio_client::auth::AuthToken) {
+    let wallet = token.get_wallet().expect("the session is bound to a wallet");
+    assert_eq!(wallet.ots_version, ots_version(), "the session wallet carries the requested OTS version");
+}
+
 fn client_for(uri: &str) -> KnishIOClient {
     let mut client = KnishIOClient::new(uri, Some("public".to_string()), None, None, None, Some(false));
     client.set_mlkem_parameter_set(param_set());
+    client.set_ots_version(ots_version());
     client
 }
 
@@ -48,10 +62,11 @@ async fn encrypted_query_round_trips_and_matches_plaintext() {
 
     let secret = generate_secret_with_params(None, 2048);
     let mut client = client_for(&uri);
-    client
+    let token = client
         .request_profile_auth_token(&secret, Some(false))
         .await
         .expect("authenticated session");
+    assert_session_ots_version(&token);
 
     // Encrypted round-trip: the validator ML-KEM-decrypts the request, executes it,
     // and encrypts the response back to the client's ML-KEM pubkey.
@@ -94,10 +109,11 @@ async fn an_encrypt_true_session_is_refused_when_it_drops_to_plaintext() {
     // set_encrypt BEFORE auth: the transport must be encrypting for this session's first query,
     // which is only true when set_encrypt reaches the GraphQL client.
     client.set_encrypt(true);
-    client
+    let token = client
         .request_profile_auth_token(&secret, Some(true))
         .await
         .expect("authenticated encrypted session");
+    assert_session_ots_version(&token);
 
     // The encrypted transport still works for this session.
     client

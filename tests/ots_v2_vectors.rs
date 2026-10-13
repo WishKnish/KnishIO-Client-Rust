@@ -192,4 +192,20 @@ mod ots_v2 {
         }
         Ok(())
     }
+
+    #[test]
+    fn detect_finds_the_version_that_derives_the_address() -> TestResult {
+        for case in tests("key_derivation")? {
+            let name = text(&case, "name")?;
+            let (secret, token, position) = (text(&case, "secret")?, text(&case, "token")?, text(&case, "position")?);
+            for preferred in [OtsVersion::V1, OtsVersion::V2] {
+                let v2 = text(&case, "expectedAddressV2")?;
+                let v1 = text(&case, "expectedAddressV1")?;
+                assert_eq!(OtsVersion::detect(secret, token, position, v2, preferred), Some(OtsVersion::V2), "{name}: v2 address, preferred {preferred:?}");
+                assert_eq!(OtsVersion::detect(secret, token, position, v1, preferred), Some(OtsVersion::V1), "{name}: v1 address, preferred {preferred:?}");
+                assert_eq!(OtsVersion::detect(secret, token, position, &"0".repeat(64), preferred), None, "{name}: unrelated address, preferred {preferred:?}");
+            }
+        }
+        Ok(())
+    }
 }

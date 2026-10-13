@@ -123,6 +123,8 @@ pub struct KnishIOClient {
     abort_controllers: Arc<Mutex<HashMap<String, bool>>>,
     /// ML-KEM parameter set for quantum encryption
     pub mlkem_parameter_set: crate::wallet::MlKemParameterSet,
+    /// OTS version of new keys this client derives from its secret (default: V1)
+    pub ots_version: crate::wallet::OtsVersion,
 }
 
 impl KnishIOClient {
@@ -156,6 +158,7 @@ impl KnishIOClient {
             last_molecule_query: None,
             abort_controllers: Arc::new(Mutex::new(HashMap::new())),
             mlkem_parameter_set: crate::wallet::MlKemParameterSet::default(),
+            ots_version: crate::wallet::OtsVersion::default(),
         };
 
         client_instance.initialize(uri, cell_slug, socket, client, server_sdk_version, logging);
@@ -218,6 +221,44 @@ impl KnishIOClient {
     /// Set the ML-KEM parameter set
     pub fn set_mlkem_parameter_set(&mut self, param_set: crate::wallet::MlKemParameterSet) {
         self.mlkem_parameter_set = param_set;
+    }
+
+    /// Get the OTS version of new keys this client derives from its secret
+    pub fn ots_version(&self) -> crate::wallet::OtsVersion {
+        self.ots_version
+    }
+
+    /// Set the OTS version of new keys this client derives from its secret
+    pub fn set_ots_version(&mut self, ots_version: crate::wallet::OtsVersion) {
+        self.ots_version = ots_version;
+    }
+
+    /// Bind a ledger-returned wallet of this client's identity to the OTS version that derives
+    /// its address from the client secret, preferring the client version.
+    ///
+    /// A wallet with no position or address takes the client version.
+    ///
+    /// # Errors
+    ///
+    /// `WalletCredential` when neither version derives the wallet's address.
+    fn bind_own_wallet_ots_version(&self, wallet: &mut Wallet) -> Result<crate::wallet::OtsVersion> {
+        let (Some(position), Some(address)) = (wallet.position.clone(), wallet.address.clone()) else {
+            wallet.set_ots_version(self.ots_version)?;
+            return Ok(self.ots_version);
+        };
+        let secret = self.secret.as_deref().ok_or(KnishIOError::MissingSecret)?;
+        match crate::wallet::OtsVersion::detect(secret, &wallet.token, &position, &address, self.ots_version) {
+            Some(version) => {
+                wallet.set_ots_version(version)?;
+                Ok(version)
+            }
+            None => {
+                self.log("warn", &format!(
+                    "KnishIO: wallet {address} is not derived from this secret at position {position} under OTS version 1 or 2."
+                ));
+                Err(KnishIOError::WalletCredential)
+            }
+        }
     }
 
     /// Get the subscription manager for real-time subscriptions
@@ -649,15 +690,16 @@ impl KnishIOClient {
         // Query ContinuID for latest wallet
         let continu_id_result = self.query_continu_id(self.get_bundle(), None).await?;
 
-        let mut source_wallet = if let Some(wallet) = continu_id_result {
-            // ContinuID exists, use it as source
+        let mut source_wallet = if let Some(mut wallet) = continu_id_result {
+            // ContinuID exists, use it as source at the version that derives its address
+            self.bind_own_wallet_ots_version(&mut wallet)?;
             wallet
         } else {
             // No ContinuID, create new wallet from secret
             let secret = self.secret.as_ref()
                 .ok_or(KnishIOError::MissingSecret)?;
 
-            Wallet::new(
+            Wallet::new_with_ots_version(
                 Some(secret.as_str()),
                 None,  // bundle will be auto-generated from secret
                 None,  // token defaults to "USER"
@@ -666,6 +708,7 @@ impl KnishIOClient {
                 None,  // batch_id
                 None,  // characters
                 Some(self.mlkem_parameter_set),
+                self.ots_version,
             )?
         };
 
@@ -848,7 +891,7 @@ impl KnishIOClient {
         // Inner block captures Result so we can always reset the flag
         let result: Result<bool> = async {
             // Create AUTH wallet from secret
-            let auth_wallet = Wallet::new(
+            let auth_wallet = Wallet::new_with_ots_version(
                 Some(&secret),
                 None,
                 Some("AUTH"),
@@ -857,6 +900,7 @@ impl KnishIOClient {
                 None,
                 None,
                 Some(self.mlkem_parameter_set),
+                self.ots_version,
             )?;
 
             // Create molecule with secret and source wallet
@@ -1315,7 +1359,9 @@ impl KnishIOClient {
     /// token units and batch id carry over.
     fn own_wallet_at(&self, queried: &Wallet) -> Result<Wallet> {
         let secret = self.secret.as_deref().ok_or(KnishIOError::Unauthenticated)?;
-        let mut wallet = Wallet::new(
+        let mut bound = queried.clone();
+        let ots_version = self.bind_own_wallet_ots_version(&mut bound)?;
+        let mut wallet = Wallet::new_with_ots_version(
             Some(secret),
             queried.bundle.as_deref(),
             Some(&queried.token),
@@ -1324,6 +1370,7 @@ impl KnishIOClient {
             None,
             queried.characters.as_deref(),
             Some(self.mlkem_parameter_set),
+            ots_version,
         )?;
         wallet.balance = queried.balance.clone();
         // Without the queried stackable token units the molecule emits no tokenUnits meta and a
@@ -1850,7 +1897,7 @@ impl KnishIOClient {
         use crate::mutation::Mutation;
 
         // Create new wallet (matches JS line 1013-1016)
-        let new_wallet = Wallet::new(
+        let new_wallet = Wallet::new_with_ots_version(
             Some(self.secret.as_ref().ok_or(KnishIOError::MissingSecret)?),
             None,
             Some(token),
@@ -1859,6 +1906,7 @@ impl KnishIOClient {
             None,
             None,
             Some(self.mlkem_parameter_set),
+            self.ots_version,
         )?;
 
         // Create mutation (matches JS lines 1021-1023)
@@ -1970,7 +2018,7 @@ impl KnishIOClient {
         // Creating the wallet that will receive the new tokens (matches JS lines 1187-1192).
         // Wallet::new args: (secret, bundle, token, address, position, batch_id, characters) —
         // final_batch_id belongs in the batch_id (6th) slot, NOT the address slot.
-        let recipient_wallet = Wallet::new(
+        let recipient_wallet = Wallet::new_with_ots_version(
             Some(self.secret.as_ref().ok_or(KnishIOError::MissingSecret)?),
             Some(self.bundle.as_ref().ok_or(KnishIOError::MissingBundle)?),
             Some(token),
@@ -1979,6 +2027,7 @@ impl KnishIOClient {
             final_batch_id.as_deref(),  // batch_id
             None,                       // characters
             Some(self.mlkem_parameter_set),
+            self.ots_version,
         )?;
 
         // Resolve the USER source wallet (ContinuID chain head) + a remainder, and set them on the
@@ -2296,13 +2345,14 @@ impl KnishIOClient {
 
                 // String + NOT bundle → create wallet from secret
                 RecipientType::Secret(secret) => {
-                    let wallet = Wallet::create(
+                    let wallet = Wallet::create_with_ots_version(
                         Some(&secret),
                         None,
                         token,
                         None,
                         None,
                         Some(self.mlkem_parameter_set),
+                        self.ots_version,
                     )?;
 
                     meta_map.insert("position".to_string(), Value::String(wallet.position.clone().unwrap_or_default()));
@@ -2483,7 +2533,7 @@ impl KnishIOClient {
             Some(wallet) => wallet,
             None => match self.query_balance_wallet(token, None, None).await? {
                 Some(queried) if queried.address.is_some() && queried.position.is_some() => self.own_wallet_at(&queried)?,
-                _ => Wallet::create(Some(&secret), None, token, None, None, Some(self.mlkem_parameter_set))?,
+                _ => Wallet::create_with_ots_version(Some(&secret), None, token, None, None, Some(self.mlkem_parameter_set), self.ots_version)?,
             },
         };
 
@@ -2552,7 +2602,7 @@ impl KnishIOClient {
         // The recipient wallet for R: a new wallet of ours for the own bundle, otherwise the
         // bundle-only recipient wallet transfer_token builds; a fresh batch id when S has one.
         let mut recipient_wallet = if self.bundle.as_deref() == Some(bundle_hash) {
-            Wallet::create(Some(&secret), None, token_slug, None, None, Some(self.mlkem_parameter_set))?
+            Wallet::create_with_ots_version(Some(&secret), None, token_slug, None, None, Some(self.mlkem_parameter_set), self.ots_version)?
         } else {
             Wallet::create(None, Some(bundle_hash), token_slug, None, None, Some(self.mlkem_parameter_set))?
         };
@@ -2754,7 +2804,7 @@ impl KnishIOClient {
         // matches no shadow (matches JS Wallet.create({secret, token, batchId})).
         let secret = self.secret.as_deref().ok_or(KnishIOError::MissingSecret)?;
         let bundle = self.bundle.as_deref();
-        let mut wallet = Wallet::create(Some(secret), bundle, token, None, None, Some(self.mlkem_parameter_set))?;
+        let mut wallet = Wallet::create_with_ots_version(Some(secret), bundle, token, None, None, Some(self.mlkem_parameter_set), self.ots_version)?;
         wallet.batch_id = Some(batch_id);
 
         mutation.fill_molecule(params, &wallet)?;
@@ -3130,7 +3180,7 @@ impl KnishIOClient {
         // Rust: Use fixed seed since we don't have browser fingerprinting
         let secret = generate_secret("guest-default-seed");
 
-        let wallet = Wallet::new(
+        let wallet = Wallet::new_with_ots_version(
             Some(&secret),
             None,
             Some("AUTH"),
@@ -3139,6 +3189,7 @@ impl KnishIOClient {
             None,
             None,
             Some(self.mlkem_parameter_set),
+            self.ots_version,
         )?;
 
         // Create mutation
@@ -3248,7 +3299,7 @@ impl KnishIOClient {
         };
 
         // Create AUTH wallet from secret
-        let wallet = Wallet::new(
+        let wallet = Wallet::new_with_ots_version(
             Some(secret),
             None,
             Some("AUTH"),
@@ -3257,6 +3308,7 @@ impl KnishIOClient {
             None,
             None,
             Some(self.mlkem_parameter_set),
+            self.ots_version,
         )?;
 
         match self.propose_profile_authorization(secret, wallet, encrypt).await? {
@@ -3276,9 +3328,11 @@ impl KnishIOClient {
     }
 
     /// The USER wallet at the bundle's ContinuID pointer, derived from `secret` with the client's
-    /// ML-KEM parameter set. `None` when the bundle has no pointer (first login), the head is not
-    /// a USER wallet or has no position, or the head's address is not the one `secret` derives
-    /// at that position. Query and transport errors propagate.
+    /// ML-KEM parameter set at the OTS version that derives the head's address (preferring the
+    /// client version; the client version when the head has no address). `None` when the bundle
+    /// has no pointer (first login), the head is not a USER wallet or has no position, or neither
+    /// OTS version derives the head's address from `secret` at that position. Query and
+    /// transport errors propagate.
     async fn continu_id_signing_wallet(&self, secret: &str, bundle: &str) -> Result<Option<Wallet>> {
         // Filter on USER: without it the validator falls back to the bundle's newest wallet of
         // ANY token when the bundle has no ContinuID meta.
@@ -3290,7 +3344,18 @@ impl KnishIOClient {
             _ => return Ok(None),
         };
 
-        let wallet = Wallet::new(
+        let ots_version = match head.address.as_deref().filter(|a| !a.is_empty()) {
+            Some(address) => match crate::wallet::OtsVersion::detect(secret, "USER", position, address, self.ots_version) {
+                Some(version) => version,
+                None => {
+                    self.log("warn", "KnishIOClient::request_profile_auth_token() - ContinuID head address is not derived by this secret; signing with a fresh AUTH wallet");
+                    return Ok(None);
+                }
+            },
+            None => self.ots_version,
+        };
+
+        let wallet = Wallet::new_with_ots_version(
             Some(secret),
             None,
             Some("USER"),
@@ -3299,14 +3364,8 @@ impl KnishIOClient {
             None,
             None,
             Some(self.mlkem_parameter_set),
+            ots_version,
         )?;
-
-        if let Some(address) = head.address.as_deref().filter(|a| !a.is_empty()) {
-            if wallet.address.as_deref() != Some(address) {
-                self.log("warn", "KnishIOClient::request_profile_auth_token() - ContinuID head address is not derived by this secret; signing with a fresh AUTH wallet");
-                return Ok(None);
-            }
-        }
 
         Ok(Some(wallet))
     }
@@ -3335,7 +3394,7 @@ impl KnishIOClient {
         // registers the bundle's ContinuID relay head on-ledger so subsequent molecules advance the
         // chain instead of falling to fresh genesis; its previousPosition is the source's position
         // (the consumed pointer on a pointer-signed login). Carries the source's characters for parity.
-        let remainder = Wallet::create(Some(secret), None, "USER", None, wallet.characters.as_deref(), Some(self.mlkem_parameter_set))?;
+        let remainder = Wallet::create_with_ots_version(Some(secret), None, "USER", None, wallet.characters.as_deref(), Some(self.mlkem_parameter_set), wallet.ots_version)?;
         molecule.remainder_wallet = Some(remainder);
 
         // Create mutation
@@ -3593,6 +3652,7 @@ impl Clone for KnishIOClient {
             secret_storage: self.secret_storage.clone(),
             abort_controllers: Arc::new(Mutex::new(HashMap::new())), // Create new Arc for clone
             mlkem_parameter_set: self.mlkem_parameter_set,
+            ots_version: self.ots_version,
         }
     }
 }
@@ -4078,6 +4138,139 @@ mod tests {
         assert_eq!(remainder.ots_version, OtsVersion::V2);
         assert_eq!(client.remainder_wallet.as_ref().ok_or("client remainder")?.ots_version, OtsVersion::V2);
         assert!(stub.requests().is_empty(), "an explicit source wallet must not query the ledger");
+        Ok(())
+    }
+
+    fn v2_client(stub: &StubValidator) -> KnishIOClient {
+        let mut client = client_for(stub);
+        client.set_ots_version(crate::wallet::OtsVersion::V2);
+        client
+    }
+
+    fn wallet_at(secret: &str, token: &str, position: &str, version: crate::wallet::OtsVersion) -> crate::error::Result<Wallet> {
+        Wallet::new_with_ots_version(Some(secret), None, Some(token), None, Some(position), None, None, None, version)
+    }
+
+    #[tokio::test]
+    async fn ots_version_defaults_to_v1_and_is_settable() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let stub = stub_validator(Value::Null, vec![]).await?;
+        let mut client = client_for(&stub);
+        assert_eq!(client.ots_version(), OtsVersion::V1);
+        client.set_ots_version(OtsVersion::V2);
+        assert_eq!(client.ots_version(), OtsVersion::V2);
+        assert_eq!(client.clone().ots_version(), OtsVersion::V2);
+        Ok(())
+    }
+
+    /// A v2 client keys the no-ContinuID source wallet at v2.
+    #[tokio::test]
+    async fn a_v2_client_keys_the_fallback_source_wallet_at_v2() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-v2-client-fallback");
+        let stub = stub_validator(Value::Null, vec![]).await?;
+        let mut client = v2_client(&stub);
+        client.set_secret(secret.as_str());
+        let source = client.get_source_wallet().await?;
+        assert_eq!(source.ots_version, OtsVersion::V2);
+        assert_eq!(source.key.as_deref().map(str::len), Some(8192));
+        let position = source.position.as_deref().ok_or("position")?;
+        assert_eq!(source.address, wallet_at(&secret, "USER", position, OtsVersion::V2)?.address);
+        Ok(())
+    }
+
+    /// A v2 client signs a first login with a v2 AUTH wallet and binds the session to it.
+    #[tokio::test]
+    async fn a_v2_client_signs_a_first_login_with_a_v2_auth_wallet() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-v2-client-auth");
+        let mut stub = stub_validator(Value::Null, vec![true]).await?;
+        let mut client = v2_client(&stub);
+        let token = client.request_profile_auth_token(&secret, Some(false)).await?;
+
+        let bound = token.get_wallet().ok_or("token is not bound to a wallet")?;
+        assert_eq!(bound.token, "AUTH");
+        assert_eq!(bound.ots_version, OtsVersion::V2);
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1);
+        let atoms = proposals[0]["atoms"].as_array().ok_or("proposal has no atoms")?;
+        let position = atoms[0]["position"].as_str().ok_or("position")?;
+        assert_eq!(atoms[0]["walletAddress"].as_str(), wallet_at(&secret, "AUTH", position, OtsVersion::V2)?.address.as_deref());
+        Ok(())
+    }
+
+    /// A v1 client signs from a ContinuID head that the secret derives at v2, at v2.
+    #[tokio::test]
+    async fn a_v1_client_binds_a_v2_continuid_head_to_v2() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-v2-detect-head");
+        let head = wallet_at(&secret, "USER", POINTER, OtsVersion::V2)?;
+        let stub = stub_validator(continu_id_head(&secret, "USER", head.address.clone()), vec![]).await?;
+        let mut client = client_for(&stub);
+        client.set_secret(secret.as_str());
+
+        let source = client.get_source_wallet().await?;
+        assert_eq!(source.ots_version, OtsVersion::V2);
+        assert_eq!(source.key, head.key);
+        assert_eq!(source.address, head.address);
+        Ok(())
+    }
+
+    /// A ContinuID head that neither OTS version derives from the secret is refused.
+    #[tokio::test]
+    async fn an_underivable_continuid_head_is_refused() -> TestResult {
+        let secret = generate_secret("ots-v2-detect-foreign");
+        let stub = stub_validator(continu_id_head(&secret, "USER", Some("f".repeat(64))), vec![]).await?;
+        let mut client = client_for(&stub);
+        client.set_secret(secret.as_str());
+        let err = client.get_source_wallet().await.err().ok_or("an underivable head must be refused")?;
+        assert!(matches!(err, KnishIOError::WalletCredential), "{err}");
+        Ok(())
+    }
+
+    /// A ledger wallet re-derived for signing takes the version that derives its address.
+    #[tokio::test]
+    async fn own_wallet_at_binds_the_detected_version() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-v2-own-wallet");
+        let stub = stub_validator(Value::Null, vec![]).await?;
+        let mut client = client_for(&stub);
+        client.set_secret(secret.as_str());
+        let registered = wallet_at(&secret, "OTSV2", POINTER, OtsVersion::V2)?;
+        let mut queried = Wallet::create(None, registered.bundle.as_deref(), "OTSV2", Some(POINTER), None, None)?;
+        queried.address = registered.address.clone();
+
+        let own = client.own_wallet_at(&queried)?;
+        assert_eq!(own.ots_version, OtsVersion::V2);
+        assert_eq!(own.address, registered.address);
+        assert_eq!(own.key, registered.key);
+
+        queried.address = Some("f".repeat(64));
+        assert!(matches!(client.own_wallet_at(&queried), Err(KnishIOError::WalletCredential)));
+        Ok(())
+    }
+
+    /// A v1 client logs in from a v2 ContinuID pointer at v2, and its remainder stays v2.
+    #[tokio::test]
+    async fn a_v1_client_signs_a_login_from_a_v2_pointer() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("ots-v2-detect-pointer");
+        let signer = wallet_at(&secret, "USER", POINTER, OtsVersion::V2)?;
+        let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![true]).await?;
+        let mut client = client_for(&stub);
+
+        let token = client.request_profile_auth_token(&secret, Some(false)).await?;
+
+        let bound = token.get_wallet().ok_or("token is not bound to a wallet")?;
+        assert_eq!(bound.token, "USER");
+        assert_eq!(bound.ots_version, OtsVersion::V2);
+        assert_eq!(bound.address, signer.address);
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1);
+        let atoms = proposals[0]["atoms"].as_array().ok_or("proposal has no atoms")?;
+        assert_eq!(atoms[0]["walletAddress"].as_str(), signer.address.as_deref());
+        let remainder_position = atoms[1]["position"].as_str().ok_or("remainder position")?;
+        assert_eq!(atoms[1]["walletAddress"].as_str(), wallet_at(&secret, "USER", remainder_position, OtsVersion::V2)?.address.as_deref());
         Ok(())
     }
 }

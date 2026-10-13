@@ -72,6 +72,25 @@ impl OtsVersion {
             Self::V2 => generate_key_v2(secret, token, position),
         }
     }
+
+    /// The other OTS version
+    pub fn other(self) -> Self {
+        match self {
+            Self::V1 => Self::V2,
+            Self::V2 => Self::V1,
+        }
+    }
+
+    /// The OTS version under which `secret` derives `address` for `token` at `position`
+    ///
+    /// Tries `preferred` first, then the other version; the address comparison ignores case.
+    /// `None` when neither version derives `address`.
+    pub fn detect(secret: &str, token: &str, position: &str, address: &str, preferred: OtsVersion) -> Option<OtsVersion> {
+        [preferred, preferred.other()].into_iter().find(|version| {
+            generate_address(&version.derive_key(secret, token, position))
+                .is_ok_and(|derived| derived.eq_ignore_ascii_case(address))
+        })
+    }
 }
 
 impl From<OtsVersion> for u8 {
@@ -90,7 +109,7 @@ impl TryFrom<u8> for OtsVersion {
         match version {
             1 => Ok(Self::V1),
             2 => Ok(Self::V2),
-            other => Err(format!("unsupported OTS version {other}; expected 1 or 2")),
+            other => Err(format!("KnishIO: unsupported OTS version {other}; expected 1 or 2.")),
         }
     }
 }
@@ -279,6 +298,25 @@ impl Wallet {
         }
 
         Ok(wallet)
+    }
+
+    /// Set the wallet's OTS version
+    ///
+    /// # Errors
+    ///
+    /// `Custom` when the wallet already holds a key of the other version.
+    pub fn set_ots_version(&mut self, ots_version: OtsVersion) -> Result<()> {
+        let key_version = match self.key.as_deref().map(str::len) {
+            Some(2048) => Some(OtsVersion::V1),
+            Some(8192) => Some(OtsVersion::V2),
+            Some(_) => Some(self.ots_version),
+            None => None,
+        };
+        if key_version.is_some_and(|version| version != ots_version) {
+            return Err(KnishIOError::Custom("KnishIO: cannot change the OTS version of a keyed wallet.".to_string()));
+        }
+        self.ots_version = ots_version;
+        Ok(())
     }
 
     /// Create a new Wallet instance using the builder pattern
@@ -1287,7 +1325,47 @@ mod tests {
         assert_eq!(defaulted.ots_version, OtsVersion::V1);
 
         let err = serde_json::from_str::<OtsVersion>("3").expect_err("3 is not a version");
-        assert!(err.to_string().contains("unsupported OTS version 3; expected 1 or 2"), "{err}");
+        assert!(err.to_string().contains("KnishIO: unsupported OTS version 3; expected 1 or 2."), "{err}");
+    }
+
+    const DETECT_SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const DETECT_POSITION: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+
+    fn address_at(version: OtsVersion) -> String {
+        generate_address(&version.derive_key(DETECT_SECRET, "USER", DETECT_POSITION)).expect("address")
+    }
+
+    #[test]
+    fn detect_returns_the_version_that_derives_the_address() {
+        let (v1, v2) = (address_at(OtsVersion::V1), address_at(OtsVersion::V2));
+        assert_ne!(v1, v2);
+        for preferred in [OtsVersion::V1, OtsVersion::V2] {
+            assert_eq!(OtsVersion::detect(DETECT_SECRET, "USER", DETECT_POSITION, &v2, preferred), Some(OtsVersion::V2));
+            assert_eq!(OtsVersion::detect(DETECT_SECRET, "USER", DETECT_POSITION, &v1, preferred), Some(OtsVersion::V1));
+            assert_eq!(OtsVersion::detect(DETECT_SECRET, "USER", DETECT_POSITION, &v2.to_uppercase(), preferred), Some(OtsVersion::V2));
+            assert_eq!(OtsVersion::detect(DETECT_SECRET, "USER", DETECT_POSITION, &Wallet::generate_position(64), preferred), None);
+        }
+    }
+
+    #[test]
+    fn set_ots_version_on_a_keyless_wallet_sets_it() {
+        let mut wallet = Wallet::create(None, Some("bundle"), "USER", None, None, None).expect("keyless wallet");
+        assert!(wallet.key.is_none());
+        wallet.set_ots_version(OtsVersion::V2).expect("keyless wallet takes a version");
+        assert_eq!(wallet.ots_version, OtsVersion::V2);
+    }
+
+    #[test]
+    fn set_ots_version_on_a_keyed_wallet_of_the_other_version_is_refused() {
+        let mut v1 = Wallet::new(Some(DETECT_SECRET), None, Some("USER"), None, Some(DETECT_POSITION), None, None, None).expect("v1 wallet");
+        let err = v1.set_ots_version(OtsVersion::V2).expect_err("a v1 key cannot become v2");
+        assert_eq!(err.to_string(), "KnishIO: cannot change the OTS version of a keyed wallet.");
+        assert_eq!(v1.ots_version, OtsVersion::V1);
+        v1.set_ots_version(OtsVersion::V1).expect("the same version is accepted");
+
+        let mut v2 = Wallet::new_with_ots_version(Some(DETECT_SECRET), None, Some("USER"), None, Some(DETECT_POSITION), None, None, None, OtsVersion::V2).expect("v2 wallet");
+        let err = v2.set_ots_version(OtsVersion::V1).expect_err("a v2 key cannot become v1");
+        assert_eq!(err.to_string(), "KnishIO: cannot change the OTS version of a keyed wallet.");
     }
 
     #[test]

@@ -4,8 +4,8 @@
 //! Maintains exact compatibility with JavaScript AuthToken.js implementation.
 
 use serde::{Deserialize, Serialize};
-use crate::wallet::{MlKemParameterSet, Wallet};
-use crate::error::Result;
+use crate::wallet::{MlKemParameterSet, OtsVersion, Wallet};
+use crate::error::{KnishIOError, Result};
 
 /// Snapshot structure for token restoration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +35,9 @@ pub struct WalletSnapshot {
     /// which were all AUTH-bound.
     #[serde(default)]
     pub token: Option<String>,
+    /// OTS version of the session wallet's key (`1` or `2`); absent means `1`.
+    #[serde(default, rename = "otsVersion")]
+    pub ots_version: Option<u8>,
 }
 
 /// Authentication data structure
@@ -138,7 +141,9 @@ impl AuthToken {
             })
             .unwrap_or(MlKemParameterSet::MlKem768);
 
-        let wallet = Wallet::new(
+        let ots_version = Self::resolve_ots_version(&snapshot)?;
+
+        let wallet = Wallet::new_with_ots_version(
             Some(secret),
             None,
             Some(snapshot.wallet.token.as_deref().unwrap_or("AUTH")),
@@ -147,6 +152,7 @@ impl AuthToken {
             None,
             snapshot.wallet.characters.as_deref(),
             Some(mlkem_parameter_set),
+            ots_version,
         )?;
         
         Ok(Self::create(
@@ -156,6 +162,18 @@ impl AuthToken {
             snapshot.pubkey,
             wallet,
         ))
+    }
+
+    /// The OTS version a snapshot's wallet was keyed at: absent → V1.
+    ///
+    /// # Errors
+    ///
+    /// `Custom` for a value other than 1 or 2.
+    fn resolve_ots_version(snapshot: &AuthTokenSnapshot) -> Result<OtsVersion> {
+        snapshot
+            .wallet
+            .ots_version
+            .map_or(Ok(OtsVersion::V1), |version| OtsVersion::try_from(version).map_err(KnishIOError::Custom))
     }
     
     /// Set associated wallet (matches JS setWallet)
@@ -197,6 +215,7 @@ impl AuthToken {
                 characters: wallet.characters.clone(),
                 mlkem_parameter_set: Some(wallet.mlkem_parameter_set),
                 token: Some(wallet.token.clone()),
+                ots_version: Some(wallet.ots_version.into()),
             }
         } else {
             WalletSnapshot {
@@ -204,6 +223,7 @@ impl AuthToken {
                 characters: None,
                 mlkem_parameter_set: None,
                 token: None,
+                ots_version: None,
             }
         };
         
@@ -588,6 +608,44 @@ mod tests {
 
         assert_eq!(restored_wallet.token, "AUTH");
         assert_eq!(restored_wallet.address, expected.address);
+        Ok(())
+    }
+
+    /// The snapshot records the session wallet's OTS version and restore re-derives that wallet.
+    #[test]
+    fn test_snapshot_round_trip_preserves_ots_version_2() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let wallet = Wallet::new_with_ots_version(
+            Some(RESTORE_SECRET), None, Some("AUTH"), None, Some(RESTORE_POSITION), None, None, None, OtsVersion::V2,
+        )?;
+        let auth_token = AuthToken::create("v2-session".to_string(), None, Some(false), None, wallet.clone());
+
+        let persisted = serde_json::to_value(auth_token.get_snapshot())?;
+        assert_eq!(persisted["wallet"]["otsVersion"], serde_json::json!(2));
+        let restored = AuthToken::restore(serde_json::from_value(persisted)?, RESTORE_SECRET)?;
+        let restored_wallet = restored.get_wallet().ok_or("restored token has no wallet")?;
+
+        assert_eq!(restored_wallet.ots_version, OtsVersion::V2);
+        assert_eq!(restored_wallet.address, wallet.address);
+        Ok(())
+    }
+
+    /// A snapshot without `otsVersion` restores at OTS v1; an unknown version is refused.
+    #[test]
+    fn test_restore_snapshot_without_ots_version_restores_v1() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let legacy = format!(
+            r#"{{"token":"legacy-session","expires_at":null,"pubkey":null,"encrypt":false,"wallet":{{"position":"{RESTORE_POSITION}","characters":null,"mlkem_parameter_set":"MlKem1024","token":"AUTH"}}}}"#
+        );
+        let snapshot: AuthTokenSnapshot = serde_json::from_str(&legacy)?;
+        let restored = AuthToken::restore(snapshot, RESTORE_SECRET)?;
+        let expected = Wallet::create(Some(RESTORE_SECRET), None, "AUTH", Some(RESTORE_POSITION), None, None)?;
+        let restored_wallet = restored.get_wallet().ok_or("restored token has no wallet")?;
+        assert_eq!(restored_wallet.ots_version, OtsVersion::V1);
+        assert_eq!(restored_wallet.address, expected.address);
+
+        let mut snapshot: AuthTokenSnapshot = serde_json::from_str(&legacy)?;
+        snapshot.wallet.ots_version = Some(3);
+        let err = AuthToken::restore(snapshot, RESTORE_SECRET).err().ok_or("version 3 must be refused")?;
+        assert_eq!(err.to_string(), "KnishIO: unsupported OTS version 3; expected 1 or 2.");
         Ok(())
     }
 }

@@ -16,10 +16,28 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Added
+
+- **Client-level OTS version.** `KnishIOClient::ots_version()` and `set_ots_version()` (V1
+  default, or V2). Keys the client creates from its secret (the first source wallet, AUTH and
+  guest wallets, `create_wallet()`, token, recipient and claim wallets) use it.
+- `OtsVersion::detect(secret, token, position, address, preferred)`: the OTS version under which
+  `secret` derives `address`, trying `preferred` first, or `None`.
+- `Wallet::set_ots_version()`: sets the version of a keyless wallet; a wallet keyed at the other
+  version is refused.
+- `AuthToken::get_snapshot()` records the session wallet's `otsVersion`; `AuthToken::restore()`
+  restores it (absent means 1).
+
 ### Changed
 
 - `KnishIOClient::create_molecule()` creates its default remainder wallet at the source
   wallet's OTS version.
+- Wallets the ledger returns for this client (the ContinuID head in `get_source_wallet()` and
+  the login pointer, and the balance wallets `query_source_wallet()` and the credited wallet
+  re-derive) are used at the OTS version their address was derived at. Those calls return
+  `KnishIOError::WalletCredential` when neither version derives the address; the login pointer
+  falls back to an AUTH wallet as before.
+- The profile-login ContinuID remainder is created at the signing wallet's OTS version.
 
 
 ## [1.5.0] — 2026-10-12
