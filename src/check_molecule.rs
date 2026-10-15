@@ -36,6 +36,9 @@ pub struct IntegrityReport {
     pub molecules: Vec<MoleculeIntegrityResult>,
 }
 
+/// Atom version applied when a served molecule carries no atom versions.
+const FALLBACK_ATOM_VERSION: &str = "4";
+
 /// Comprehensive molecule validation class
 ///
 /// Equivalent to CheckMolecule.js, this class provides thorough validation
@@ -830,6 +833,7 @@ impl<'a> CheckMolecule<'a> {
                         "index": server_atom.get("index").and_then(|v| v.as_u64()),
                         "otsFragment": server_atom.get("otsFragment").and_then(|v| v.as_str()),
                         "createdAt": Self::normalize_created_at(server_atom.get("createdAt")),
+                        "version": server_atom.get("version").and_then(|v| v.as_str()),
                     })
                 }).collect()
             })
@@ -908,11 +912,31 @@ impl<'a> CheckMolecule<'a> {
     }
 
     /// Internal helper that attempts verification and returns Result for error propagation.
+    ///
+    /// Validators before 0.8.5 do not serve atom versions, so a molecule signed with
+    /// versioned (version 4) hashing is retried with that version on every atom, but only
+    /// when the hash mismatches and no served atom carries a version.
     fn try_verify_server_data(molecule_data: &Value) -> Result<()> {
-        let molecule = Self::from_server_data(molecule_data)?;
-        let checker = CheckMolecule::new(&molecule)?;
-        checker.verify(None)?;
-        Ok(())
+        match Self::verify_molecule(&Self::from_server_data(molecule_data)?) {
+            Err(KnishIOError::MolecularHashMismatch) if !Self::has_served_atom_version(molecule_data) => {
+                let mut molecule = Self::from_server_data(molecule_data)?;
+                for atom in &mut molecule.atoms {
+                    atom.version = Some(FALLBACK_ATOM_VERSION.to_string());
+                }
+                Self::verify_molecule(&molecule)
+            }
+            result => result,
+        }
+    }
+
+    fn verify_molecule(molecule: &Molecule) -> Result<()> {
+        CheckMolecule::new(molecule)?.verify(None).map(|_| ())
+    }
+
+    fn has_served_atom_version(molecule_data: &Value) -> bool {
+        molecule_data.get("atoms")
+            .and_then(|v| v.as_array())
+            .is_some_and(|atoms| atoms.iter().any(|a| a.get("version").is_some_and(|v| !v.is_null())))
     }
 }
 
