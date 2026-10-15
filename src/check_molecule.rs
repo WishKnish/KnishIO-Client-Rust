@@ -36,9 +36,6 @@ pub struct IntegrityReport {
     pub molecules: Vec<MoleculeIntegrityResult>,
 }
 
-/// Atom version applied when a served molecule carries no atom versions.
-const FALLBACK_ATOM_VERSION: &str = "4";
-
 /// Comprehensive molecule validation class
 ///
 /// Equivalent to CheckMolecule.js, this class provides thorough validation
@@ -921,7 +918,7 @@ impl<'a> CheckMolecule<'a> {
             Err(KnishIOError::MolecularHashMismatch) if !Self::has_served_atom_version(molecule_data) => {
                 let mut molecule = Self::from_server_data(molecule_data)?;
                 for atom in &mut molecule.atoms {
-                    atom.version = Some(FALLBACK_ATOM_VERSION.to_string());
+                    atom.version = Some(crate::versions::VERSIONED_ATOM_HASHING.to_string());
                 }
                 Self::verify_molecule(&molecule)
             }

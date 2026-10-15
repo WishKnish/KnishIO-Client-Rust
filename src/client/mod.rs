@@ -824,7 +824,8 @@ impl KnishIOClient {
         molecule.source_wallet = Some(source_wallet);
         molecule.remainder_wallet = Some(remainder);
         molecule.cell_slug = self.cell_slug.clone();
-        molecule.version = Some(self.server_sdk_version.to_string());
+        molecule.version = (self.server_sdk_version.to_string() == crate::versions::VERSIONED_ATOM_HASHING)
+            .then(|| crate::versions::VERSIONED_ATOM_HASHING.to_string());
         molecule.bundle = bundle;
 
         Ok(molecule)
@@ -4354,6 +4355,50 @@ mod tests {
         assert_eq!(proposals.len(), 1);
         let atoms = proposals[0]["atoms"].as_array().ok_or("proposal has no atoms")?;
         assert_signer_and_head(atoms, &secret, signer.address.as_deref(), OtsVersion::V2)
+    }
+
+    /// A client at the default SDK version signs unversioned atoms, as the other SDKs do.
+    #[tokio::test]
+    async fn create_meta_signs_unversioned_atoms_by_default() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("atom-version-default");
+        let signer = wallet_at(&secret, "USER", POINTER, OtsVersion::V1)?;
+        let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![true]).await?;
+        let mut client = client_for(&stub);
+        client.set_secret(secret.as_str());
+
+        client.create_meta("parity", "default", HashMap::from([("k".to_string(), json!("v"))]), None).await?;
+
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1);
+        let atoms = proposals[0]["atoms"].as_array().ok_or("proposal has no atoms")?;
+        assert!(!atoms.is_empty());
+        for atom in atoms {
+            assert_eq!(atom["version"], Value::Null, "atom {} is versioned", atom["isotope"]);
+        }
+        Ok(())
+    }
+
+    /// A client at SDK version 4 signs every atom with version "4".
+    #[tokio::test]
+    async fn create_meta_signs_version_4_atoms_when_the_client_uses_sdk_version_4() -> TestResult {
+        use crate::wallet::OtsVersion;
+        let secret = generate_secret("atom-version-4");
+        let signer = wallet_at(&secret, "USER", POINTER, OtsVersion::V1)?;
+        let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![true]).await?;
+        let mut client = KnishIOClient::new(stub.url.as_str(), Some("public".to_string()), None, None, Some(4), Some(false));
+        client.set_secret(secret.as_str());
+
+        client.create_meta("parity", "v4", HashMap::from([("k".to_string(), json!("v"))]), None).await?;
+
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1);
+        let atoms = proposals[0]["atoms"].as_array().ok_or("proposal has no atoms")?;
+        assert!(!atoms.is_empty());
+        for atom in atoms {
+            assert_eq!(atom["version"], "4", "atom {}", atom["isotope"]);
+        }
+        Ok(())
     }
 
     /// Asserts the last proposal is signed by the ledger's v1 USER head and registers a v1 head.
