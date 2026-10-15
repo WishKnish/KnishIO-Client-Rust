@@ -16,6 +16,12 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+## [1.6.2] — 2026-10-15
+
+### Fixed
+
+- `CheckMolecule::verify_from_server_data` verifies molecules whose atoms were signed with atom version 4, including molecules served without a version.
+
 ## [1.6.1] — 2026-10-14
 
 ### Fixed
@@ -575,7 +581,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.6.1...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.6.2...HEAD
+[1.6.2]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.2
 [1.6.1]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.1
 [1.6.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.0
 [1.5.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.5.0
