@@ -16,6 +16,12 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+## [1.6.4] — 2026-10-15
+
+### Changed
+
+- Dependency updates: libcrux-ml-kem 0.0.11 (ML-KEM output unchanged: identical keys, ciphertexts and shared secrets to 0.0.10 for ML-KEM-768 and ML-KEM-1024), rustls 0.23.46 (RUSTSEC-2026-0346 to -0349), tokio 1.53.2, zeroize 1.9.1, uuid 1.27.0.
+
 ## [1.6.3] — 2026-10-15
 
 ### Fixed
@@ -587,7 +593,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.6.3...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.6.4...HEAD
+[1.6.4]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.4
 [1.6.3]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.3
 [1.6.2]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.2
 [1.6.1]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.1
