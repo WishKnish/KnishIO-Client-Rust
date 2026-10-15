@@ -751,6 +751,22 @@ impl<'a> CheckMolecule<'a> {
         chunks
     }
 
+    /// Validators return createdAt as an RFC 3339 string; molecules are signed over epoch milliseconds.
+    fn normalize_created_at(value: Option<&Value>) -> Option<String> {
+        match value? {
+            Value::Number(n) => n.as_i64().map(|v| v.to_string()),
+            Value::String(s) if s.is_empty() => None,
+            Value::String(s) if s.bytes().all(|b| b.is_ascii_digit()) => Some(s.clone()),
+            Value::String(s) if s.as_bytes().get(10) == Some(&b'T') => Some(
+                chrono::DateTime::parse_from_rfc3339(s)
+                    .map(|dt| dt.timestamp_millis().to_string())
+                    .unwrap_or_else(|_| s.clone()),
+            ),
+            Value::String(s) => Some(s.clone()),
+            _ => None,
+        }
+    }
+
     /// Reconstruct a Molecule from server-side GraphQL response data.
     ///
     /// Maps server field names to SDK field names:
@@ -772,9 +788,7 @@ impl<'a> CheckMolecule<'a> {
         let status = molecule_data.get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        let created_at = molecule_data.get("createdAt")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        let created_at = Self::normalize_created_at(molecule_data.get("createdAt"));
 
         // Map server atoms to SDK atom JSON format
         let mapped_atoms: Vec<Value> = molecule_data.get("atoms")
@@ -815,7 +829,7 @@ impl<'a> CheckMolecule<'a> {
                         "meta": meta,
                         "index": server_atom.get("index").and_then(|v| v.as_u64()),
                         "otsFragment": server_atom.get("otsFragment").and_then(|v| v.as_str()),
-                        "createdAt": server_atom.get("createdAt").and_then(|v| v.as_str()),
+                        "createdAt": Self::normalize_created_at(server_atom.get("createdAt")),
                     })
                 }).collect()
             })
