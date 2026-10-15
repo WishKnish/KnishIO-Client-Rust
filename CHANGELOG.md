@@ -16,6 +16,12 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+## [1.6.3] — 2026-10-15
+
+### Fixed
+
+- Molecules built through `KnishIOClient::create_molecule` (`create_meta`, `create_wallet`, `create_rule`, `create_identifier`, `request_tokens`, `claim_shadow_wallet`) carry unversioned atoms unless `server_sdk_version` is 4, as in the other SDKs, so other SDKs verify them when they are served back.
+
 ## [1.6.2] — 2026-10-15
 
 ### Fixed
@@ -581,7 +587,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.6.2...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.6.3...HEAD
+[1.6.3]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.3
 [1.6.2]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.2
 [1.6.1]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.1
 [1.6.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.0
