@@ -16,6 +16,8 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-10-16
+
 ### Changed
 
 - **Breaking:** `MetaItem.value` is `Option<String>`. `None` is a null meta value and serializes as JSON `null`; `Some("")` is an empty string. `MetaItem::new` still takes a string value. `Meta::to_map`, `Meta::aggregate_meta`, `AtomMeta::to_map` and `Atom::aggregated_meta` leave out items whose value is null.
@@ -607,7 +609,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/1.6.5...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/2.0.0...HEAD
+[2.0.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.0.0
 [1.6.5]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.5
 [1.6.4]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.4
 [1.6.3]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.3
