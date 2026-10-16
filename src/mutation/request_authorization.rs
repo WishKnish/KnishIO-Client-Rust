@@ -192,7 +192,7 @@ mod tests {
                 .meta
                 .iter()
                 .find(|m| m.key == key)
-                .map(|m| m.value.clone())
+                .and_then(|m| m.value.clone())
                 .unwrap_or_else(|| panic!("{key} meta missing"))
         };
 

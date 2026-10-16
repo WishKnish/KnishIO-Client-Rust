@@ -901,14 +901,8 @@ impl SelfTestRunner {
 
         // Create metadata (JavaScript compatibility)
         let metadata = vec![
-            MetaItem {
-                key: "name".to_string(),
-                value: "Test Metadata".to_string(),
-            },
-            MetaItem {
-                key: "description".to_string(),
-                value: "This is a test metadata for SDK testing.".to_string(),
-            },
+            MetaItem::new("name", "Test Metadata"),
+            MetaItem::new("description", "This is a test metadata for SDK testing."),
         ];
 
         // Initialize metadata molecule (includes M + I atoms via add_continuid_atom)

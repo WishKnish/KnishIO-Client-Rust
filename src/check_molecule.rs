@@ -858,7 +858,9 @@ impl<'a> CheckMolecule<'a> {
     /// Parse metasJson field from a server atom into a meta array.
     ///
     /// Server atoms carry metadata as a JSON string in `metasJson`.
-    /// This parses it into the `[{key, value}]` format the SDK expects.
+    /// This parses it into the `[{key, value}]` format the SDK expects. Values keep null
+    /// and strings as they are; numbers and booleans become their JavaScript `String()`
+    /// form.
     fn parse_metas_json(server_atom: &Value) -> Vec<Value> {
         let metas_json = match server_atom.get("metasJson").and_then(|v| v.as_str()) {
             Some(s) => s,
@@ -866,19 +868,51 @@ impl<'a> CheckMolecule<'a> {
         };
 
         match serde_json::from_str::<Value>(metas_json) {
-            Ok(Value::Array(arr)) => arr,
+            Ok(Value::Array(arr)) => arr
+                .into_iter()
+                .map(|mut item| {
+                    if let Some(value) = item.get_mut("value") {
+                        *value = Self::served_meta_value(value);
+                    }
+                    item
+                })
+                .collect(),
             Ok(Value::Object(obj)) => {
                 // Object format {key1: val1, ...} → [{key, value}]
                 obj.into_iter()
                     .map(|(key, value)| {
                         serde_json::json!({
                             "key": key,
-                            "value": value.as_str().unwrap_or_default()
+                            "value": Self::served_meta_value(&value)
                         })
                     })
                     .collect()
             }
             _ => Vec::new(),
+        }
+    }
+
+    /// A served meta value as the SDK's client format holds it: null and strings unchanged,
+    /// numbers and booleans as JavaScript `String(v)`; other values are left for the atom
+    /// parser to skip.
+    fn served_meta_value(value: &Value) -> Value {
+        match value {
+            Value::Bool(b) => Value::String(b.to_string()),
+            Value::Number(n) => Value::String(Self::js_number_string(n)),
+            other => other.clone(),
+        }
+    }
+
+    /// JavaScript `String(n)` for a JSON number: integers as decimal, whole-valued floats
+    /// without a fraction (`1.0` → `"1"`), other floats in shortest round-trip form.
+    fn js_number_string(n: &serde_json::Number) -> String {
+        if n.is_i64() || n.is_u64() {
+            return n.to_string();
+        }
+        match n.as_f64() {
+            Some(f) if f.is_finite() && f.fract() == 0.0 && f.abs() < 1e21 => format!("{f:.0}"),
+            Some(f) => f.to_string(),
+            None => n.to_string(),
         }
     }
 
@@ -1028,7 +1062,7 @@ mod tests {
         assert_eq!(molecule.atoms[0].ots_fragment.as_deref(), Some("frag1"));
         assert_eq!(molecule.atoms[0].meta.len(), 1);
         assert_eq!(molecule.atoms[0].meta[0].key, "name");
-        assert_eq!(molecule.atoms[0].meta[0].value, "test");
+        assert_eq!(molecule.atoms[0].meta[0].value.as_deref(), Some("test"));
     }
 
     #[test]
@@ -1065,6 +1099,38 @@ mod tests {
         let meta_keys: Vec<&str> = molecule.atoms[0].meta.iter().map(|m| m.key.as_str()).collect();
         assert!(meta_keys.contains(&"color"));
         assert!(meta_keys.contains(&"size"));
+    }
+
+    #[test]
+    fn test_from_server_data_meta_values_null_empty_and_scalars() {
+        let metas = |metas_json: &str| {
+            let server_data = serde_json::json!({
+                "molecularHash": "hash3",
+                "atoms": [{
+                    "position": "p", "walletAddress": "a",
+                    "isotope": "M", "tokenSlug": "USER",
+                    "metasJson": metas_json,
+                    "index": 0
+                }]
+            });
+            let mut meta = CheckMolecule::from_server_data(&server_data).unwrap().atoms[0].meta.clone();
+            meta.sort_by(|a, b| a.key.cmp(&b.key));
+            meta
+        };
+        let expected = vec![
+            MetaItem::new("b", "true"),
+            MetaItem::new("e", ""),
+            MetaItem::new("f", "1.5"),
+            MetaItem::new("i", "7"),
+            MetaItem { key: "n".to_string(), value: None },
+            MetaItem::new("w", "2"),
+        ];
+        assert_eq!(metas(r#"{"n":null,"e":"","i":7,"f":1.5,"w":2.0,"b":true}"#), expected);
+        assert_eq!(
+            metas(r#"[{"key":"n","value":null},{"key":"e","value":""},{"key":"i","value":7},
+                     {"key":"f","value":1.5},{"key":"w","value":2.0},{"key":"b","value":true}]"#),
+            expected
+        );
     }
 
     #[test]
@@ -1169,7 +1235,7 @@ mod tests {
     }
 
     fn meta_item(key: &str, value: &str) -> MetaItem {
-        MetaItem { key: key.to_string(), value: value.to_string() }
+        MetaItem::new(key, value)
     }
 
     #[test]

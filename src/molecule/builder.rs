@@ -1447,7 +1447,7 @@ mod tests {
         assert_eq!(atoms[1].value, Some("1".to_string()));
         assert_eq!(atoms[2].value, Some("1".to_string()));
 
-        let units_of = |i: usize| atoms[i].meta.iter().find(|m| m.key == "tokenUnits").map(|m| m.value.clone());
+        let units_of = |i: usize| atoms[i].meta.iter().find(|m| m.key == "tokenUnits").and_then(|m| m.value.clone());
 
         // SENT (u1) on the source atom — and NOT the kept u2.
         let src = units_of(0).expect("source atom carries tokenUnits");

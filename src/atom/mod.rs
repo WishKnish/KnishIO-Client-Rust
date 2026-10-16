@@ -309,14 +309,9 @@ impl Atom {
             Value::Array(
                 meta.iter()
                     .map(|m| {
-                        let meta_value = if m.value.is_empty() {
-                            Value::Null
-                        } else {
-                            Value::String(m.value.clone())
-                        };
                         Value::Array(vec![
                             json!({"key": m.key}),
-                            json!({"value": meta_value}),
+                            json!({"value": opt_str_to_json(&m.value)}),
                         ])
                     })
                     .collect(),
@@ -389,9 +384,10 @@ impl Atom {
             if property == "meta" {
                 for meta_item in &self.meta {
                     // JavaScript: if (typeof meta.value !== 'undefined' && meta.value !== null)
-                    if !meta_item.value.is_empty() {
+                    // A "" value is hashed: its key is absorbed and the value adds nothing.
+                    if let Some(meta_value) = &meta_item.value {
                         hashable_values.push(meta_item.key.clone());
-                        hashable_values.push(meta_item.value.clone());
+                        hashable_values.push(meta_value.clone());
                     }
                 }
             } else {
@@ -407,12 +403,14 @@ impl Atom {
     ///
     /// # Returns
     ///
-    /// HashMap containing aggregated metadata
+    /// HashMap containing aggregated metadata; items whose value is null are left out
     pub fn aggregated_meta(&self) -> HashMap<String, String> {
         let mut aggregated = HashMap::new();
         
         for meta_item in &self.meta {
-            aggregated.insert(meta_item.key.clone(), meta_item.value.clone());
+            if let Some(value) = &meta_item.value {
+                aggregated.insert(meta_item.key.clone(), value.clone());
+            }
         }
         
         aggregated
@@ -557,17 +555,14 @@ impl Atom {
         if let Some(meta_array) = json.get("meta").and_then(|v| v.as_array()) {
             atom.meta = meta_array.iter()
                 .filter_map(|meta_item| {
-                    if let (Some(key), Some(value)) = (
-                        meta_item.get("key").and_then(|k| k.as_str()),
-                        meta_item.get("value").and_then(|v| v.as_str())
-                    ) {
-                        Some(MetaItem {
-                            key: key.to_string(),
-                            value: value.to_string(),
-                        })
-                    } else {
-                        None
-                    }
+                    let key = meta_item.get("key").and_then(|k| k.as_str())?;
+                    // null -> None, string -> Some; other values are skipped.
+                    let value = match meta_item.get("value")? {
+                        serde_json::Value::String(s) => Some(s.clone()),
+                        serde_json::Value::Null => None,
+                        _ => return None,
+                    };
+                    Some(MetaItem { key: key.to_string(), value })
                 })
                 .collect();
         }
@@ -1004,6 +999,36 @@ mod tests {
         assert_eq!(atom.isotope, Isotope::V);
         assert_eq!(atom.token, "TEST");
         assert_eq!(atom.value, Some("100".to_string()));
+    }
+
+    #[test]
+    fn test_from_json_keeps_null_and_empty_meta_values_apart() {
+        let json = r#"{
+            "position": "test_pos",
+            "walletAddress": "test_addr",
+            "isotope": "M",
+            "token": "USER",
+            "meta": [
+                {"key": "nul", "value": null},
+                {"key": "blank", "value": ""},
+                {"key": "set", "value": "x"},
+                {"key": "num", "value": 1}
+            ]
+        }"#;
+
+        let atom = Atom::fromJSON(json).unwrap();
+        assert_eq!(
+            atom.meta,
+            vec![
+                MetaItem { key: "nul".to_string(), value: None },
+                MetaItem::new("blank", ""),
+                MetaItem::new("set", "x"),
+            ]
+        );
+        // The legacy hash skips the null item and absorbs the key of the "" item.
+        let hashable = atom.get_hashable_values();
+        assert!(!hashable.contains(&"nul".to_string()));
+        assert!(hashable.contains(&"blank".to_string()));
     }
     
     #[test]

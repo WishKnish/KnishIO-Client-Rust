@@ -78,19 +78,21 @@ impl Isotope {
 
 /// Metadata item structure
 ///
-/// Represents a key-value pair for metadata storage.
+/// Represents a key-value pair for metadata storage. `value` is `None` for a JSON null
+/// value: the legacy molecular hash skips such an item and the versioned (atom version 4)
+/// view hashes it as null. `Some("")` is a genuine empty string and is hashed as one.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MetaItem {
     pub key: String,
-    pub value: String,
+    pub value: Option<String>,
 }
 
 impl MetaItem {
-    /// Create a new metadata item
+    /// Create a new metadata item with a string value
     pub fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
         MetaItem {
             key: key.into(),
-            value: value.into(),
+            value: Some(value.into()),
         }
     }
 
@@ -104,10 +106,10 @@ impl MetaItem {
     pub fn from_json(key: impl Into<String>, value: &serde_json::Value) -> Self {
         MetaItem {
             key: key.into(),
-            value: match value {
+            value: Some(match value {
                 serde_json::Value::String(s) => s.clone(),
                 other => other.to_string(),
-            },
+            }),
         }
     }
 }
@@ -240,7 +242,19 @@ mod tests {
     fn test_meta_item() {
         let meta = MetaItem::new("key", "value");
         assert_eq!(meta.key, "key");
-        assert_eq!(meta.value, "value");
+        assert_eq!(meta.value.as_deref(), Some("value"));
+    }
+
+    #[test]
+    fn test_meta_item_serde_keeps_null_and_empty_apart() {
+        let items = vec![
+            MetaItem { key: "n".to_string(), value: None },
+            MetaItem::new("e", ""),
+        ];
+        let json = serde_json::to_string(&items).unwrap();
+        assert_eq!(json, r#"[{"key":"n","value":null},{"key":"e","value":""}]"#);
+        let back: Vec<MetaItem> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, items);
     }
     
     #[test]

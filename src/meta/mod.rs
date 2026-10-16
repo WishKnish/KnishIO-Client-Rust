@@ -34,21 +34,19 @@ impl Meta {
         self.meta.push(MetaItem::new(key, value));
     }
     
-    /// Convert to HashMap
+    /// Convert to HashMap; items whose value is null are left out
     pub fn to_map(&self) -> HashMap<String, String> {
-        self.meta
-            .iter()
-            .map(|item| (item.key.clone(), item.value.clone()))
-            .collect()
+        Self::aggregate_meta(&self.meta)
     }
     
-    /// Aggregate metadata from a vector of MetaItems into a HashMap
+    /// Aggregate metadata from a vector of MetaItems into a HashMap; items whose value is
+    /// null are left out
     ///
     /// Equivalent to Meta.aggregateMeta() in JavaScript SDK
     pub fn aggregate_meta(meta_items: &[MetaItem]) -> HashMap<String, String> {
         meta_items
             .iter()
-            .map(|item| (item.key.clone(), item.value.clone()))
+            .filter_map(|item| item.value.clone().map(|value| (item.key.clone(), value)))
             .collect()
     }
 }
@@ -263,12 +261,9 @@ impl AtomMeta {
     ///
     /// # Returns
     ///
-    /// HashMap representation of the metadata
+    /// HashMap representation of the metadata; items whose value is null are left out
     pub fn to_map(&self) -> HashMap<String, String> {
-        self.meta
-            .iter()
-            .map(|item| (item.key.clone(), item.value.clone()))
-            .collect()
+        Meta::aggregate_meta(&self.meta)
     }
 }
 

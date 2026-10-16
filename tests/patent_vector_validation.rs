@@ -43,7 +43,7 @@ mod phase_b_vectors {
     }
 
     fn meta<'a>(atom: &'a Atom, key: &str) -> Option<&'a str> {
-        atom.meta.iter().find(|m| m.key == key).map(|m| m.value.as_str())
+        atom.meta.iter().find(|m| m.key == key).and_then(|m| m.value.as_deref())
     }
 
     /// The unit ids of an atom's `tokenUnits` meta; an absent meta is the empty list.

@@ -2204,7 +2204,7 @@ mod tests {
             .sum();
         assert_eq!(sum, 0, "V-atoms conserve");
 
-        let units_of = |atom: &Atom| atom.meta.iter().find(|m| m.key == "tokenUnits").map(|m| m.value.clone());
+        let units_of = |atom: &Atom| atom.meta.iter().find(|m| m.key == "tokenUnits").and_then(|m| m.value.clone());
 
         // Source atom: -3, carries the SENT union (u1 + u2)
         let source_atom = &molecule.atoms[0];
@@ -2372,7 +2372,7 @@ mod tests {
         let prev_pos_meta = i_atom.meta.iter()
             .find(|m| m.key == "previousPosition")
             .expect("I-atom should have previousPosition metadata");
-        assert_eq!(prev_pos_meta.value, source_pos,
+        assert_eq!(prev_pos_meta.value.as_deref(), Some(source_pos.as_str()),
             "previousPosition must match source wallet position");
     }
 
@@ -2428,7 +2428,7 @@ mod tests {
         let pubkey_meta = i_atom.meta.iter()
             .find(|m| m.key == "pubkey")
             .expect("I-atom should have pubkey metadata when wallet has pubkey");
-        assert_eq!(pubkey_meta.value, "test-pubkey-hex");
+        assert_eq!(pubkey_meta.value.as_deref(), Some("test-pubkey-hex"));
     }
 
     #[test]
@@ -2509,7 +2509,7 @@ mod tests {
             "I-atom must carry the USER remainder's pubkey (chain-verification key)");
         let prev = i_atom.meta.iter().find(|m| m.key == "previousPosition")
             .expect("I-atom must carry previousPosition");
-        assert_eq!(prev.value, source_pos, "previousPosition must equal the AUTH source position");
+        assert_eq!(prev.value.as_deref(), Some(source_pos.as_str()), "previousPosition must equal the AUTH source position");
     }
 
     #[test]

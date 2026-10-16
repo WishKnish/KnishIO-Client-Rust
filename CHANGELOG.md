@@ -16,6 +16,14 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `MetaItem.value` is `Option<String>`. `None` is a null meta value and serializes as JSON `null`; `Some("")` is an empty string. `MetaItem::new` still takes a string value. `Meta::to_map`, `Meta::aggregate_meta`, `AtomMeta::to_map` and `Atom::aggregated_meta` leave out items whose value is null.
+
+### Fixed
+
+- `Atom::from_json` keeps meta items whose value is null, and `CheckMolecule::from_server_data` keeps null `metasJson` values and turns number and boolean values into strings as the other SDKs do. Meta values are hashed like the other SDKs on both hash paths: the versioned (atom version 4) hash shows a null value as null and `""` as `""`; the unversioned hash skips a null value and includes the key of an `""` value.
+
 ## [1.6.5] — 2026-10-16
 
 ### Fixed
