@@ -92,3 +92,43 @@ fn served_version_disables_fallback() -> TestResult {
     assert_eq!(result.error.as_deref(), Some("Molecular hash mismatch"));
     Ok(())
 }
+
+fn without_atom_version(molecule: &Value) -> Value {
+    let mut molecule = molecule.clone();
+    if let Some(atoms) = molecule["atoms"].as_array_mut() {
+        for atom in atoms {
+            atom["version"] = Value::Null;
+        }
+    }
+    molecule
+}
+
+#[test]
+fn v3rust_served_with_version_verifies() -> TestResult {
+    let result = CheckMolecule::verify_from_server_data(&fixture()?["v3rust"]);
+    println!("v3rust verified {}", result.verified);
+    assert!(result.verified, "v3rust must verify, got {result:?}");
+    assert!(result.error.is_none());
+    Ok(())
+}
+
+#[test]
+fn v3rust_served_without_version_verifies() -> TestResult {
+    let result = CheckMolecule::verify_from_server_data(&without_atom_version(&fixture()?["v3rust"]));
+    println!("v3rust without version verified {}", result.verified);
+    assert!(result.verified, "v3rust without version must verify, got {result:?}");
+    assert!(result.error.is_none());
+    Ok(())
+}
+
+#[test]
+fn tampered_v3rust_fails() -> TestResult {
+    let mut value = fixture()?["v3rust"].clone();
+    value["atoms"][0]["metaId"] = Value::from("rust-pre-tampered");
+    for molecule in [value.clone(), without_atom_version(&value)] {
+        let result = CheckMolecule::verify_from_server_data(&molecule);
+        assert!(!result.verified, "tampered v3rust must fail");
+        assert_eq!(result.error.as_deref(), Some("Molecular hash mismatch"));
+    }
+    Ok(())
+}

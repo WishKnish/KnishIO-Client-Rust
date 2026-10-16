@@ -18,6 +18,9 @@ pub use version4::Version4;
 /// The one registered atom version: "4" selects versioned atom hashing (HashAtom / Version4).
 pub(crate) const VERSIONED_ATOM_HASHING: &str = "4";
 
+/// Atom versions retried, in order, for a molecule served without atom versions.
+pub(crate) const UNSERVED_ATOM_VERSIONS: [&str; 2] = ["4", "3"];
+
 /// Trait for version-specific atom implementations
 pub trait AtomVersion {
     /// Create a version-specific atom from a generic Atom

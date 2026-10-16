@@ -910,20 +910,27 @@ impl<'a> CheckMolecule<'a> {
 
     /// Internal helper that attempts verification and returns Result for error propagation.
     ///
-    /// Validators before 0.8.5 do not serve atom versions, so a molecule signed with
-    /// versioned (version 4) hashing is retried with that version on every atom, but only
-    /// when the hash mismatches and no served atom carries a version.
+    /// Validators before 0.8.5 do not serve atom versions, so when the hash mismatches and
+    /// no served atom carries a version, the molecule is retried with each version in
+    /// `UNSERVED_ATOM_VERSIONS` on every atom; the first verified result wins, otherwise
+    /// the last failure is returned.
     fn try_verify_server_data(molecule_data: &Value) -> Result<()> {
-        match Self::verify_molecule(&Self::from_server_data(molecule_data)?) {
-            Err(KnishIOError::MolecularHashMismatch) if !Self::has_served_atom_version(molecule_data) => {
-                let mut molecule = Self::from_server_data(molecule_data)?;
-                for atom in &mut molecule.atoms {
-                    atom.version = Some(crate::versions::VERSIONED_ATOM_HASHING.to_string());
-                }
-                Self::verify_molecule(&molecule)
-            }
-            result => result,
+        let first = Self::verify_molecule(&Self::from_server_data(molecule_data)?);
+        if !matches!(first, Err(KnishIOError::MolecularHashMismatch)) || Self::has_served_atom_version(molecule_data) {
+            return first;
         }
+        let mut result = first;
+        for version in crate::versions::UNSERVED_ATOM_VERSIONS {
+            let mut molecule = Self::from_server_data(molecule_data)?;
+            for atom in &mut molecule.atoms {
+                atom.version = Some(version.to_string());
+            }
+            result = Self::verify_molecule(&molecule);
+            if result.is_ok() {
+                break;
+            }
+        }
+        result
     }
 
     fn verify_molecule(molecule: &Molecule) -> Result<()> {
