@@ -39,7 +39,7 @@ The optional `kcore` feature runs the WOTS+ chains (signing, verification, OTS f
 
 ```toml
 [dependencies]
-knishio-client = { version = "1.6", features = ["kcore"] }
+knishio-client = { version = "2.0", features = ["kcore"] }
 ```
 
 The build needs `KNISHIO_KCORE_DIR` pointing at an extracted KnishIO-Crypto-Core 0.2.0 package (the directory holding `include/kcore.h` and `lib/libkcore.a`, from the [0.2.0 release](https://github.com/WishKnish/KnishIO-Crypto-Core/releases/tag/0.2.0)); without it, or with another kcore version, the build stops rather than silently falling back. Supported targets are those whose package ships `lib/libkcore.a`: Linux x86_64 and aarch64 (gnu and musl) and macOS (universal). wasm32 and Windows are not supported. `knishio_client::kcore::available()` reports whether kcore is linked.
