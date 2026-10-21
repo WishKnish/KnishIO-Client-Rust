@@ -123,7 +123,7 @@ pub struct KnishIOClient {
     abort_controllers: Arc<Mutex<HashMap<String, bool>>>,
     /// ML-KEM parameter set for quantum encryption
     pub mlkem_parameter_set: crate::wallet::MlKemParameterSet,
-    /// OTS version of new keys this client derives from its secret (default: V1)
+    /// OTS version of new keys this client derives from its secret (default: V2)
     pub ots_version: crate::wallet::OtsVersion,
 }
 
@@ -158,7 +158,7 @@ impl KnishIOClient {
             last_molecule_query: None,
             abort_controllers: Arc::new(Mutex::new(HashMap::new())),
             mlkem_parameter_set: crate::wallet::MlKemParameterSet::default(),
-            ots_version: crate::wallet::OtsVersion::default(),
+            ots_version: crate::wallet::OtsVersion::V2,
         };
 
         client_instance.initialize(uri, cell_slug, socket, client, server_sdk_version, logging);
@@ -3857,6 +3857,12 @@ mod tests {
         KnishIOClient::new(stub.url.as_str(), Some("public".to_string()), None, None, None, Some(false))
     }
 
+    fn v1_client_for(stub: &StubValidator) -> KnishIOClient {
+        let mut c = client_for(stub);
+        c.set_ots_version(crate::wallet::OtsVersion::V1);
+        c
+    }
+
     fn meta_value(atom: &Value, key: &str) -> Option<String> {
         atom["meta"]
             .as_array()?
@@ -3899,7 +3905,7 @@ mod tests {
         let secret = generate_secret("phase-b-pointer-login");
         let signer = user_wallet_at(&secret, POINTER)?;
         let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![true]).await?;
-        let mut client = client_for(&stub);
+        let mut client = v1_client_for(&stub);
 
         let token = client.request_profile_auth_token(&secret, Some(false)).await?;
 
@@ -4163,14 +4169,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ots_version_defaults_to_v1_and_is_settable() -> TestResult {
+    async fn ots_version_defaults_to_v2_and_is_settable() -> TestResult {
         use crate::wallet::OtsVersion;
         let stub = stub_validator(Value::Null, vec![]).await?;
         let mut client = client_for(&stub);
-        assert_eq!(client.ots_version(), OtsVersion::V1);
-        client.set_ots_version(OtsVersion::V2);
         assert_eq!(client.ots_version(), OtsVersion::V2);
-        assert_eq!(client.clone().ots_version(), OtsVersion::V2);
+        client.set_ots_version(OtsVersion::V1);
+        assert_eq!(client.ots_version(), OtsVersion::V1);
+        assert_eq!(client.clone().ots_version(), OtsVersion::V1);
         Ok(())
     }
 
@@ -4217,7 +4223,7 @@ mod tests {
         let secret = generate_secret("ots-v2-detect-head");
         let head = wallet_at(&secret, "USER", POINTER, OtsVersion::V2)?;
         let stub = stub_validator(continu_id_head(&secret, "USER", head.address.clone()), vec![]).await?;
-        let mut client = client_for(&stub);
+        let mut client = v1_client_for(&stub);
         client.set_secret(secret.as_str());
 
         let source = client.get_source_wallet().await?;
@@ -4268,7 +4274,7 @@ mod tests {
         let secret = generate_secret("ots-v2-detect-pointer");
         let signer = wallet_at(&secret, "USER", POINTER, OtsVersion::V2)?;
         let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![true]).await?;
-        let mut client = client_for(&stub);
+        let mut client = v1_client_for(&stub);
 
         let token = client.request_profile_auth_token(&secret, Some(false)).await?;
 
@@ -4346,7 +4352,7 @@ mod tests {
         let secret = generate_secret("ots-migration-keep");
         let signer = wallet_at(&secret, "USER", POINTER, OtsVersion::V2)?;
         let mut stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), vec![true]).await?;
-        let mut client = client_for(&stub);
+        let mut client = v1_client_for(&stub);
         client.set_secret(secret.as_str());
 
         client.create_meta("ots", "keep", HashMap::from([("k".to_string(), json!("v"))]), None).await?;
@@ -4416,7 +4422,7 @@ mod tests {
         let secret = generate_secret(label);
         let signer = wallet_at(&secret, "USER", POINTER, crate::wallet::OtsVersion::V1)?;
         let stub = stub_validator(continu_id_head(&secret, "USER", signer.address.clone()), verdicts).await?;
-        let mut client = client_for(&stub);
+        let mut client = v1_client_for(&stub);
         client.set_secret(secret.as_str());
         Ok((stub, client, secret, signer.address))
     }
