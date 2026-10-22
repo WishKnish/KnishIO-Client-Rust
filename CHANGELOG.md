@@ -16,9 +16,15 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-10-21
+
 ### Changed
 
-- `KnishIOClient` creates keys and signs at OTS version 2 by default (was 1). An identity a version-2 client signs for moves to version 2 and stays there, so the client needs a validator that accepts version 2 (0.8.0 or later). Call `set_ots_version(OtsVersion::V1)` to keep version 1. Standalone `Wallet` construction still defaults to version 1.
+- `KnishIOClient` defaults to OTS version 2 and ML-KEM-1024. It creates keys and signs at OTS version 2 (was 1); ML-KEM-1024 stays the post-quantum transport parameter set, as it has been by default since 1.0.0 (ML-KEM-768 remains the opt-in step-back). An identity a version-2 client signs for moves to version 2 and stays there, so the client needs a validator that accepts version 2 (0.8.0 or later). Call `set_ots_version(OtsVersion::V1)` to keep version 1. Standalone `Wallet` construction still defaults to version 1.
+
+### Security
+
+- `Cargo.lock`: rustls-webpki 0.103.16 (RUSTSEC-2026-0382) and webpki-root-certs 1.0.10 (RUSTSEC-2026-0383).
 
 ## [2.0.0] — 2026-10-16
 
@@ -613,7 +619,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/2.0.0...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/2.1.0...HEAD
+[2.1.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.1.0
 [2.0.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.0.0
 [1.6.5]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.5
 [1.6.4]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.4
