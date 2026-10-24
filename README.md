@@ -14,7 +14,7 @@ The SDK can be installed via Cargo:
 ```bash
 # Add to Cargo.toml
 [dependencies]
-knishio-client = "2.1.0"
+knishio-client = "2.2.0"
 
 # Or install from the command line
 cargo add knishio-client
@@ -52,7 +52,7 @@ The optional `parallel` feature adds that fan-out for batches of served molecule
 
 ```toml
 [dependencies]
-knishio-client = { version = "2.1", features = ["parallel"] }
+knishio-client = { version = "2.2", features = ["parallel"] }
 ```
 
 ## Basic Usage

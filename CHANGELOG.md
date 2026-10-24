@@ -16,6 +16,8 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-10-24
+
 ### Added
 
 - `CheckMolecule::verify_payload` runs every check `verify` runs except the WOTS+ signature (`ots`): the molecular hash, batch ID, ContinuID and the isotope rules. It is for callers that have already run `ots()` on the same molecule, such as a validator's second tier, and it proves nothing about authorship. `verify` keeps its checks and their order.
@@ -624,7 +626,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/2.1.0...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/2.2.0...HEAD
+[2.2.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.2.0
 [2.1.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.1.0
 [2.0.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.0.0
 [1.6.5]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/1.6.5
