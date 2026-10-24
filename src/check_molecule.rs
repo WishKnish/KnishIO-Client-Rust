@@ -16,6 +16,11 @@ use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// Smallest batch `verify_from_server_data_batch` spreads across threads: below it the
+/// fan-out costs more than the verification work it splits.
+#[cfg(feature = "parallel")]
+const PARALLEL_MIN_MOLECULES: usize = 4;
+
 /// Result of verifying a single molecule's integrity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MoleculeIntegrityResult {
@@ -96,6 +101,19 @@ impl<'a> CheckMolecule<'a> {
         // Run all validation checks in order (matching JS CheckMolecule.verify)
         self.molecular_hash()?;
         self.ots()?;
+        self.payload_checks(sender_wallet)
+    }
+
+    /// Every check `verify` runs except the WOTS+ signature (`ots`): the molecular hash, then
+    /// batch ID, ContinuID and all isotope rules. For callers that have already run `ots()` on
+    /// this same molecule (the validator's Tier 2); it proves nothing about authorship.
+    pub fn verify_payload(&self, sender_wallet: Option<&Wallet>) -> Result<bool> {
+        self.molecular_hash()?;
+        self.payload_checks(sender_wallet)
+    }
+
+    /// The checks after the signature, in `verify`'s order.
+    fn payload_checks(&self, sender_wallet: Option<&Wallet>) -> Result<bool> {
         self.batch_id()?;
         self.continu_id()?;
         self.isotope_m()?;
@@ -942,6 +960,19 @@ impl<'a> CheckMolecule<'a> {
         }
     }
 
+    /// `verify_from_server_data` for many molecules, results in input order. With the `parallel`
+    /// feature and at least PARALLEL_MIN_MOLECULES inputs it runs on the current rayon pool (the
+    /// global pool, or the caller's via `ThreadPool::install`); otherwise sequentially. It blocks
+    /// the calling thread either way: from async code call it inside `spawn_blocking`.
+    pub fn verify_from_server_data_batch(molecules: &[&Value]) -> Vec<MoleculeIntegrityResult> {
+        #[cfg(feature = "parallel")]
+        if molecules.len() >= PARALLEL_MIN_MOLECULES {
+            use rayon::prelude::*;
+            return molecules.par_iter().map(|m| Self::verify_from_server_data(m)).collect();
+        }
+        molecules.iter().map(|m| Self::verify_from_server_data(m)).collect()
+    }
+
     /// Internal helper that attempts verification and returns Result for error propagation.
     ///
     /// Validators before 0.8.5 do not serve atom versions, so when the hash mismatches and
@@ -1025,6 +1056,27 @@ mod tests {
     fn test_chunk_substr() {
         let result = CheckMolecule::chunk_substr("abcdefgh", 3);
         assert_eq!(result, vec!["abc", "def", "gh"]);
+    }
+
+    #[test]
+    fn verify_payload_skips_only_the_signature() -> Result<()> {
+        let fixture: Value = serde_json::from_str(include_str!("../tests/fixtures/served-molecules.json"))?;
+
+        // otsFragment is not hashed, so a forged signature keeps the molecular hash intact.
+        let mut forged = CheckMolecule::from_server_data(&fixture["v1"])?;
+        let fragment = forged.atoms[0].ots_fragment.clone().unwrap_or_default();
+        let first = if fragment.starts_with('A') { "B" } else { "A" };
+        forged.atoms[0].ots_fragment = Some(format!("{first}{}", &fragment[1..]));
+        let check = CheckMolecule::new(&forged)?;
+        assert!(check.verify(None).is_err(), "verify must reject a forged signature");
+        assert!(matches!(check.verify_payload(None), Ok(true)), "verify_payload must not check the signature");
+
+        let mut rehashed = CheckMolecule::from_server_data(&fixture["v1"])?;
+        rehashed.molecular_hash = Some("0".repeat(64));
+        let check = CheckMolecule::new(&rehashed)?;
+        assert!(matches!(check.verify(None), Err(KnishIOError::MolecularHashMismatch)));
+        assert!(matches!(check.verify_payload(None), Err(KnishIOError::MolecularHashMismatch)));
+        Ok(())
     }
 
     #[test]

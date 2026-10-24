@@ -60,6 +60,10 @@ jobs:
       - name: cargo test
         run: cargo test
 
+      # Batch verification on the rayon pool: results must match the sequential path.
+      - name: cargo test (parallel)
+        run: cargo test --features parallel
+
   # The kcore feature links the static KnishIO-Crypto-Core archive from the pinned 0.2.0 release
   # package; the vector suites then run through kcore's WOTS+ chains and address.
   test-kcore:
@@ -86,11 +90,11 @@ jobs:
           tar -xzf "$RUNNER_TEMP/$PKG" -C "$RUNNER_TEMP/kcore" --strip-components=1
           test -f "$RUNNER_TEMP/kcore/lib/libkcore.a"
 
-      - name: cargo test (kcore)
-        run: KNISHIO_KCORE_DIR="$RUNNER_TEMP/kcore" cargo test --features kcore --locked
+      - name: cargo test (kcore + parallel)
+        run: KNISHIO_KCORE_DIR="$RUNNER_TEMP/kcore" cargo test --features kcore,parallel --locked
 
-      - name: cargo clippy (kcore)
-        run: KNISHIO_KCORE_DIR="$RUNNER_TEMP/kcore" cargo clippy --features kcore --all-targets --locked
+      - name: cargo clippy (kcore + parallel)
+        run: KNISHIO_KCORE_DIR="$RUNNER_TEMP/kcore" cargo clippy --features kcore,parallel --all-targets --locked
 
   features-linux:
     name: features (TPM & Keyring on Linux)

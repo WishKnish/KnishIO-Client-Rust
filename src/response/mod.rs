@@ -1057,7 +1057,6 @@ impl ResponseMetaTypeViaAtom {
     pub fn verify_integrity(&self) -> crate::check_molecule::IntegrityReport {
         use crate::check_molecule::CheckMolecule;
 
-        let mut results = Vec::new();
         let data = self.base.get_data();
 
         // Data may be an array of meta type groupings
@@ -1066,7 +1065,7 @@ impl ResponseMetaTypeViaAtom {
             _ => {
                 return crate::check_molecule::IntegrityReport {
                     verified: true,
-                    molecules: results,
+                    molecules: Vec::new(),
                 };
             }
         };
@@ -1078,19 +1077,17 @@ impl ResponseMetaTypeViaAtom {
             None => {
                 return crate::check_molecule::IntegrityReport {
                     verified: true,
-                    molecules: results,
+                    molecules: Vec::new(),
                 };
             }
         };
 
-        for instance in instances {
-            if let Some(molecule_data) = instance.get("molecule") {
-                if molecule_data.is_null() {
-                    continue;
-                }
-                results.push(CheckMolecule::verify_from_server_data(molecule_data));
-            }
-        }
+        let molecules: Vec<&Value> = instances
+            .iter()
+            .filter_map(|instance| instance.get("molecule"))
+            .filter(|molecule_data| !molecule_data.is_null())
+            .collect();
+        let results = CheckMolecule::verify_from_server_data_batch(&molecules);
 
         let verified = results.is_empty() || results.iter().all(|r| r.verified);
         crate::check_molecule::IntegrityReport {

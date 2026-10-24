@@ -16,6 +16,11 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Added
+
+- `CheckMolecule::verify_payload` runs every check `verify` runs except the WOTS+ signature (`ots`): the molecular hash, batch ID, ContinuID and the isotope rules. It is for callers that have already run `ots()` on the same molecule, such as a validator's second tier, and it proves nothing about authorship. `verify` keeps its checks and their order.
+- `parallel` feature (adds `rayon`): `CheckMolecule::verify_from_server_data_batch` verifies served molecules on the current Rayon pool once a batch holds 4 or more, and returns the results in input order. Smaller batches, and builds without the feature, run sequentially. `ResponseMetaTypeViaAtom::verify_integrity` uses it. A single molecule's signature work is never split across threads.
+
 ## [2.1.0] — 2026-10-21
 
 ### Changed

@@ -46,7 +46,14 @@ The build needs `KNISHIO_KCORE_DIR` pointing at an extracted KnishIO-Crypto-Core
 
 ### Thread safety
 
-`Wallet`, `Molecule`, `Atom` and `KnishIOClient` are `Send + Sync`, and kcore is reentrant (no threads, no mutable globals). Every call runs on the caller's thread, so parallelize at the caller: threads or Rayon over independent molecules.
+`Wallet`, `Molecule`, `Atom` and `KnishIOClient` are `Send + Sync`, and kcore is reentrant (no threads, no mutable globals). Every call runs on the caller's thread, so parallelize at the caller: threads or Rayon over independent molecules. One molecule's sign or verify is not split across threads: it is too small to pay for the hand-off.
+
+The optional `parallel` feature adds that fan-out for batches of served molecules. `CheckMolecule::verify_from_server_data_batch` (and `ResponseMetaTypeViaAtom::verify_integrity`, which uses it) verifies 4 or more molecules on the current Rayon pool and returns the results in input order; smaller batches, and builds without the feature, run sequentially. Both paths block the calling thread, so call them from `spawn_blocking` in async code. To bound the threads, run the call inside your own pool's `ThreadPool::install`.
+
+```toml
+[dependencies]
+knishio-client = { version = "2.1", features = ["parallel"] }
+```
 
 ## Basic Usage
 

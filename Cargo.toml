@@ -113,6 +113,8 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 tss-esapi = { version = "7", optional = true }
 # KnishIO-Crypto-Core static binding (feature `kcore`); its build needs KNISHIO_KCORE_DIR.
 knishio-kcore = { path = "kcore", version = "0.2.0", optional = true }
+# Batch verification across the rayon pool (feature `parallel`).
+rayon = { version = "1.11", optional = true }
 
 # Optional SIMD acceleration - enabled per target architecture
 [target.'cfg(target_arch = "x86_64")'.dependencies]
@@ -139,12 +141,19 @@ benchmark-mode = []              # Enable benchmarking-specific optimizations
 # WOTS+ chains and address through KnishIO-Crypto-Core (static libkcore.a). Build with
 # KNISHIO_KCORE_DIR=<extracted kcore 0.2.0 package root>. ML-KEM stays on libcrux.
 kcore = ["dep:knishio-kcore"]
+# Batch verification across the rayon pool (CheckMolecule::verify_from_server_data_batch).
+parallel = ["dep:rayon"]
 [dev-dependencies]
 ring = "0.17"
 
 [[bench]]
 name = "pq_line_rate"
 harness = false
+
+[[bench]]
+name = "parallel_verify"
+harness = false
+required-features = ["parallel"]
 
 # Self-test binary (follows JavaScript SDK pattern)
 [[bin]]
