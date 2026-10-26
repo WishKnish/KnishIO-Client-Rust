@@ -16,6 +16,14 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Added
+
+- CI generates a CycloneDX SBOM of the committed `Cargo.lock` (default features, all targets) with
+  `cargo-cyclonedx` (`.github/scripts/sbom.sh`) and scans it with OSV on every push and weekly. Each GitHub
+  Release attaches it as `knishio-client-rust-<version>.cdx.json`.
+- `osv-scanner.toml` lists the OSV findings the SBOM gate accepts, each with a reason and an expiry:
+  RUSTSEC-2026-0173 (proc-macro-error2 unmaintained; build-time only, via libcrux), until 2027-01-24.
+
 ### Security
 
 - `Cargo.lock`: tokio 1.53.3 (RUSTSEC-2026-0386).

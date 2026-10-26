@@ -1,0 +1,8 @@
+# OSV findings accepted for the CI `sbom` gate (passed with --config=osv-scanner.toml).
+# Every entry needs a reason and an expiry; at expiry the gate fails again and the entry
+# is reviewed, never silently renewed. cargo audit reports the same IDs as warnings only.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0173"
+ignoreUntil = 2027-01-24
+reason = "proc-macro-error2 2.0.1 is unmaintained (informational, no fixed release). It is a build-time proc-macro reached through libcrux-ml-kem -> libcrux-intrinsics -> core-models -> hax-lib -> hax-lib-macros and is not linked into the library. Clears when libcrux drops hax-lib-macros or the macro gains a maintained successor."

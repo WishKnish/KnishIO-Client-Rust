@@ -26,3 +26,7 @@ target-docker/
 
 # Local agent instructions (not shipped)
 CLAUDE.md
+
+# CycloneDX SBOM output (.github/scripts/sbom.sh)
+/sbom-out/
+/sbom-gen-cargo*.json
