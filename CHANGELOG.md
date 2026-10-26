@@ -16,6 +16,10 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Security
+
+- `Cargo.lock`: tokio 1.53.3 (RUSTSEC-2026-0386).
+
 ## [2.2.0] — 2026-10-24
 
 ### Added
