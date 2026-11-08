@@ -23,6 +23,12 @@ detail, the entry says so instead of guessing.
   Release attaches it as `knishio-client-rust-<version>.cdx.json`.
 - `osv-scanner.toml` lists the OSV findings the SBOM gate accepts, each with a reason and an expiry:
   RUSTSEC-2026-0173 (proc-macro-error2 unmaintained; build-time only, via libcrux), until 2027-01-24.
+- `tests/kcore_parity_vectors.rs` checks the 16 cross-SDK kcore parity vectors
+  (`tests/fixtures/kcore-parity-vectors.json`, vendored from the monorepo master): metadata, value-transfer,
+  token-creation and wallet-creation molecules at OTS v1 and v2, with unique and colliding `createdAt`. Each
+  JS-signed molecule must hash to its declared hash and pass `CheckMolecule::ots`, and re-signing it must
+  reproduce the molecular hash and every OTS fragment byte for byte. It runs on the SDK's own WOTS+ loops in
+  `cargo test` and through kcore in the `test-kcore` CI job; a missing fixture fails the test.
 
 ### Security
 
