@@ -30,6 +30,10 @@ detail, the entry says so instead of guessing.
   reproduce the molecular hash and every OTS fragment byte for byte. It runs on the SDK's own WOTS+ loops in
   `cargo test` and through kcore in the `test-kcore` CI job; a missing fixture fails the test.
 
+### Changed
+
+- Dependency updates (`Cargo.lock` only): tokio 1.54.1, serde_json 1.0.154, sha2 0.11.1, uuid 1.28.0, rayon 1.12.0.
+
 ### Security
 
 - `Cargo.lock`: tokio 1.53.3 (RUSTSEC-2026-0386).
