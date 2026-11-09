@@ -32,7 +32,7 @@ detail, the entry says so instead of guessing.
 
 ### Changed
 
-- Dependency updates (`Cargo.lock` only): tokio 1.54.1, serde_json 1.0.154, sha2 0.11.1, uuid 1.28.0, rayon 1.12.0.
+- Dependency updates (`Cargo.lock` only): tokio 1.54.1, serde_json 1.0.154, sha2 0.11.1, uuid 1.29.0, rayon 1.12.0.
 
 ### Security
 
