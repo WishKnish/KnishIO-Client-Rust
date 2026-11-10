@@ -36,6 +36,13 @@ detail, the entry says so instead of guessing.
 
 ### Security
 
+- **Replies to an encrypted request fail closed.** When `GraphQLClient::send` wrapped a request in the
+  `CipherHash` envelope, it accepts only an envelope that decrypts for this wallet or an errors-only reply
+  (`data` absent, `null` or `{}`), which passes through so the validator's error stays visible. A reply
+  carrying plaintext `data` now returns `CipherHash: plaintext reply to an encrypted request` instead of
+  being returned as if the validator had sent it. The validator re-encrypts every success, so no legitimate
+  reply is refused. Plaintext bootstrap operations (`__schema`, `ContinuId`, `AccessToken`, U-isotope
+  `ProposeMolecule`) are unaffected.
 - `Cargo.lock`: tokio 1.53.3 (RUSTSEC-2026-0386).
 
 ## [2.2.0] — 2026-10-24

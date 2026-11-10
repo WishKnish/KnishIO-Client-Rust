@@ -502,9 +502,24 @@ impl GraphQLClient {
                             KnishIOError::custom(format!("CipherHash: malformed inner response: {e}"))
                         })?
                     }
-                    // Plaintext (e.g. a validator-side error) — pass through unchanged.
-                    None => serde_json::from_str(&text)
-                        .map_err(|e| KnishIOError::custom(format!("Invalid response JSON: {e}")))?,
+                    // No envelope. Only an errors-only reply (`data` absent, null or `{}`)
+                    // passes through, so the validator's error stays visible. Plaintext
+                    // `data` in reply to an encrypted request is refused: the validator
+                    // re-encrypts every success, so it can only come from something else.
+                    None => {
+                        let data_is_empty = match parsed.get("data") {
+                            None | Some(Value::Null) => true,
+                            Some(Value::Object(fields)) => fields.is_empty(),
+                            Some(_) => false,
+                        };
+                        if !data_is_empty {
+                            return Err(KnishIOError::custom(
+                                "CipherHash: plaintext reply to an encrypted request",
+                            ));
+                        }
+                        serde_json::from_value(parsed)
+                            .map_err(|e| KnishIOError::custom(format!("Invalid response JSON: {e}")))?
+                    }
                 }
             }
             None => serde_json::from_str(&text)
@@ -780,5 +795,120 @@ mod cipher_hash_transport_tests {
             !err.to_string().contains("CipherHash:"),
             "introspection must bypass the CipherHash key check, got: {err}"
         );
+    }
+
+    // ── Replies to an encrypted request ──────────────────────────────────────────────────
+    //
+    // A loopback stub answers exactly one request with a fixed body, standing in for
+    // whatever sits between the client and the validator.
+
+    async fn read_request_body(socket: &mut tokio::net::TcpStream) -> std::io::Result<Vec<u8>> {
+        use tokio::io::AsyncReadExt;
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            if let Some(end) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&buffer[..end]).to_ascii_lowercase();
+                let length: usize = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0);
+                if buffer.len() >= end + 4 + length {
+                    return Ok(buffer[end + 4..end + 4 + length].to_vec());
+                }
+            }
+            let n = socket.read(&mut chunk).await?;
+            if n == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "client closed the connection mid-request",
+                ));
+            }
+            buffer.extend_from_slice(&chunk[..n]);
+        }
+    }
+
+    type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
+
+    /// Serve one request on a loopback port, answering `200 OK` with `body`. Returns the URL.
+    async fn stub_replying(body: &'static str) -> std::io::Result<String> {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}/graphql", listener.local_addr()?);
+        tokio::spawn(async move {
+            let Ok((mut socket, _)) = listener.accept().await else { return };
+            if read_request_body(&mut socket).await.is_err() {
+                return;
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            if socket.write_all(response.as_bytes()).await.is_ok() {
+                let _ = socket.shutdown().await;
+            }
+        });
+        Ok(url)
+    }
+
+    /// A client with encryption on and a transport key, so ordinary operations are wrapped.
+    fn keyed_client(url: &str) -> Result<GraphQLClient> {
+        let secret = crate::crypto::generate_secret("cipher-hash-reply-rule");
+        let wallet = crate::wallet::Wallet::new(Some(&secret), None, Some("AUTH"), None, None, None, None, None)?;
+        let mut c = GraphQLClient::new(url);
+        c.set_encryption(true);
+        c.set_auth_data("T".into(), wallet.pubkey.clone(), Some(wallet));
+        Ok(c)
+    }
+
+    /// Send an (encrypted) Balance query to a stub answering `reply`. The outer error is a test
+    /// setup failure; the inner result is what the client made of the reply.
+    async fn balance_query_against(
+        reply: &'static str,
+    ) -> std::result::Result<Result<GraphQLResponse>, Box<dyn std::error::Error>> {
+        let url = stub_replying(reply).await?;
+        let client = keyed_client(&url)?;
+        Ok(client.query(create_query_request("query { Balance { address } }", None)).await)
+    }
+
+    #[tokio::test]
+    async fn plaintext_data_reply_to_an_encrypted_request_is_rejected() -> TestResult {
+        let err = match balance_query_against(r#"{"data":{"Balance":{"address":"x"}}}"#).await? {
+            Ok(accepted) => {
+                return Err(format!("plaintext data was accepted as the reply to an encrypted request: {accepted:?}").into())
+            }
+            Err(err) => err,
+        };
+        assert!(
+            err.to_string().contains("CipherHash: plaintext reply"),
+            "expected the plaintext-reply error, got: {err}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn errors_only_reply_keeps_the_validator_message() -> TestResult {
+        let reply = r#"{"data":null,"errors":[{"message":"CipherHash: no envelope addressed to the validator"}]}"#;
+        let err = match balance_query_against(reply).await? {
+            Ok(accepted) => return Err(format!("an errors-only reply was returned as a success: {accepted:?}").into()),
+            Err(err) => err,
+        };
+        assert!(
+            err.to_string().contains("CipherHash: no envelope addressed to the validator"),
+            "the validator's message must stay visible, got: {err}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn undecryptable_envelope_is_rejected() -> TestResult {
+        let outcome = balance_query_against(r#"{"data":{"CipherHash":{"hash":"{}"}}}"#).await?;
+        assert!(
+            outcome.is_err(),
+            "an envelope with no entry for this wallet must not be accepted, got: {outcome:?}"
+        );
+        Ok(())
     }
 }
