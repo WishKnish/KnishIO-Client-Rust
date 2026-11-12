@@ -8,13 +8,26 @@ use crate::wallet::{MlKemParameterSet, OtsVersion, Wallet};
 use crate::error::{KnishIOError, Result};
 
 /// Snapshot structure for token restoration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AuthTokenSnapshot {
     pub token: String,
     pub expires_at: Option<i64>,
     pub pubkey: Option<String>,
     pub encrypt: Option<bool>,
     pub wallet: WalletSnapshot,
+}
+
+/// Debug impl that redacts the session token
+impl std::fmt::Debug for AuthTokenSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthTokenSnapshot")
+            .field("token", &"[REDACTED]")
+            .field("expires_at", &self.expires_at)
+            .field("pubkey", &self.pubkey)
+            .field("encrypt", &self.encrypt)
+            .field("wallet", &self.wallet)
+            .finish()
+    }
 }
 
 /// Wallet snapshot for auth token
@@ -41,21 +54,45 @@ pub struct WalletSnapshot {
 }
 
 /// Authentication data structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AuthData {
     pub token: String,
     pub pubkey: Option<String>,
     pub wallet: Option<Wallet>,
 }
 
+/// Debug impl that redacts the session token
+impl std::fmt::Debug for AuthData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthData")
+            .field("token", &"[REDACTED]")
+            .field("pubkey", &self.pubkey)
+            .field("wallet", &self.wallet)
+            .finish()
+    }
+}
+
 /// Authentication token structure (matches JS AuthToken exactly)
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AuthToken {
     token: String,
     expires_at: Option<i64>,
     pubkey: Option<String>,
     encrypt: Option<bool>,
     wallet: Option<Wallet>,
+}
+
+/// Debug impl that redacts the session token
+impl std::fmt::Debug for AuthToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthToken")
+            .field("token", &"[REDACTED]")
+            .field("expires_at", &self.expires_at)
+            .field("pubkey", &self.pubkey)
+            .field("encrypt", &self.encrypt)
+            .field("wallet", &self.wallet)
+            .finish()
+    }
 }
 
 impl AuthToken {

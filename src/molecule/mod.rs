@@ -83,7 +83,7 @@ fn chunk_string(s: &str, chunk_size: usize) -> Vec<String> {
 /// Molecules are the fundamental units of transaction on the KnishIO distributed ledger,
 /// containing one or more atoms that represent individual operations. This implementation
 /// ensures exact compatibility with the JavaScript SDK, especially for cryptographic operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Molecule {
     /// Molecular hash computed from atoms
@@ -139,6 +139,28 @@ pub struct Molecule {
     /// ContinuID, buffer); see `successor_ots_version`. Not serialized.
     #[serde(skip)]
     pub min_ots_version: OtsVersion,
+}
+
+/// Debug impl that redacts the signing secret (like `Wallet`'s)
+impl std::fmt::Debug for Molecule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Molecule")
+            .field("molecular_hash", &self.molecular_hash)
+            .field("bundle", &self.bundle)
+            .field("created_at", &self.created_at)
+            .field("status", &self.status)
+            .field("cell_slug", &self.cell_slug)
+            .field("cell_slug_origin", &self.cell_slug_origin)
+            .field("version", &self.version)
+            .field("atoms", &self.atoms)
+            .field("secret", &self.secret.as_ref().map(|_| "[REDACTED]"))
+            .field("source_wallet", &self.source_wallet)
+            .field("remainder_wallet", &self.remainder_wallet)
+            .field("parent_hashes", &self.parent_hashes)
+            .field("continuid_position", &self.continuid_position)
+            .field("min_ots_version", &self.min_ots_version)
+            .finish()
+    }
 }
 
 impl Molecule {

@@ -41,10 +41,19 @@ impl SubscriptionHandle {
 }
 
 /// Simple subscription manager matching JavaScript UrqlClientWrapper
-#[derive(Debug)]
 pub struct SimpleSubscriptionManager {
     subscriptions: Arc<RwLock<HashMap<String, SubscriptionHandle>>>,
     auth_token: Option<String>,
+}
+
+/// Debug impl that redacts the bearer token
+impl std::fmt::Debug for SimpleSubscriptionManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimpleSubscriptionManager")
+            .field("subscriptions", &self.subscriptions)
+            .field("auth_token", &self.auth_token.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 impl SimpleSubscriptionManager {

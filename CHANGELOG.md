@@ -70,6 +70,10 @@ old bytes. `tests/js_reference_digests.rs` pins every digest from the JS SDK wit
 
 ### Security
 
+- `Debug` no longer prints secrets: `Molecule` (`secret`), `StorageOptions` (`passphrase`,
+  `recovery_passphrase`), `Tpm2Policy` (`auth`), `AuthToken`, `AuthTokenSnapshot`, `AuthData` and
+  `SimpleSubscriptionManager` (the session token) print `[REDACTED]` for those fields, as `Wallet` already
+  did for its keys. A `{:?}` in a log line or a failed assertion used to print them in clear.
 - **Replies to an encrypted request fail closed.** When `GraphQLClient::send` wrapped a request in the
   `CipherHash` envelope, it accepts only an envelope that decrypts for this wallet or an errors-only reply
   (`data` absent, `null` or `{}`), which passes through so the validator's error stays visible. A reply

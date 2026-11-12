@@ -86,7 +86,7 @@ pub struct EncryptedSecretPayload {
 }
 
 /// Options for secret storage operations
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct StorageOptions {
     /// Optional label for the stored secret
     pub label: Option<String>,
@@ -96,6 +96,18 @@ pub struct StorageOptions {
     pub recovery_passphrase: Option<Zeroizing<String>>,
     /// Whether to allow storing a secret without a recovery path on non-exportable hardware providers
     pub allow_unrecoverable: bool,
+}
+
+/// Debug impl that redacts both passphrases
+impl std::fmt::Debug for StorageOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StorageOptions")
+            .field("label", &self.label)
+            .field("passphrase", &self.passphrase.as_ref().map(|_| "[REDACTED]"))
+            .field("recovery_passphrase", &self.recovery_passphrase.as_ref().map(|_| "[REDACTED]"))
+            .field("allow_unrecoverable", &self.allow_unrecoverable)
+            .finish()
+    }
 }
 
 impl StorageOptions {

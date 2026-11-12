@@ -52,7 +52,7 @@ pub enum TpmIdentity {
 }
 
 /// TPM 2.0 PCR authorization policy configuration
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Tpm2Policy {
     /// PCR hashing algorithm bank (e.g. HashingAlgorithm::Sha256)
     pub pcr_bank: HashingAlgorithm,
@@ -60,6 +60,17 @@ pub struct Tpm2Policy {
     pub pcrs: Vec<u8>,
     /// Optional authorization password
     pub auth: Option<Zeroizing<String>>,
+}
+
+/// Debug impl that redacts the authorization password
+impl std::fmt::Debug for Tpm2Policy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tpm2Policy")
+            .field("pcr_bank", &self.pcr_bank)
+            .field("pcrs", &self.pcrs)
+            .field("auth", &self.auth.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 impl Default for Tpm2Policy {
