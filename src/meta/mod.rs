@@ -151,20 +151,14 @@ impl AtomMeta {
     ///
     /// * `wallet` - Wallet instance to extract metadata from
     pub fn set_atom_wallet(&mut self, wallet: &crate::wallet::Wallet) -> &mut Self {
-        // JS setAtomWallet: only `tokenUnits` then `tradeRates`, each only when non-empty, in
-        // that order (compact JSON). A Vec keeps the order deterministic; merge_map's HashMap
-        // would not. The wallet's pubkey/characters are not atom metas of a V/B/F atom.
+        // JS setAtomWallet adds `tokenUnits` when the wallet has units (compact JSON). It also
+        // tests `wallet.tradeRates.length`, but JS keeps trade rates in a plain object, which has
+        // no `length`, so JS never emits a `tradeRates` meta; neither does this port.
         let mut wallet_meta: Vec<MetaItem> = Vec::new();
 
         if !wallet.token_units.is_empty() {
             if let Ok(units_json) = serde_json::to_string(&wallet.get_token_units_data()) {
                 wallet_meta.push(MetaItem::new("tokenUnits", units_json));
-            }
-        }
-
-        if !wallet.trade_rates.is_empty() {
-            if let Ok(rates_json) = serde_json::to_string(&wallet.trade_rates) {
-                wallet_meta.push(MetaItem::new("tradeRates", rates_json));
             }
         }
 
@@ -225,18 +219,17 @@ impl AtomMeta {
 
     /// Add policy metadata
     ///
-    /// Equivalent to AtomMeta.addPolicy() in JavaScript
+    /// Equivalent to AtomMeta.addPolicy() in JavaScript, including its default keys: JS passes
+    /// `Object.keys(this.meta)` of the meta ARRAY, i.e. the indices `"0"`, `"1"`, …, so those
+    /// (not the meta key names) get the default read/write permissions.
     ///
     /// # Arguments
     ///
     /// * `policy` - Policy data to add
     pub fn add_policy(&mut self, policy: serde_json::Value) -> Result<&mut Self> {
-        // Get current meta keys for policy validation
-        let meta_keys: Vec<String> = self.meta.iter().map(|item| item.key.clone()).collect();
-        
-        // Create PolicyMeta instance
+        let meta_keys: Vec<String> = (0..self.meta.len()).map(|index| index.to_string()).collect();
+
         let policy_meta = PolicyMeta::new(policy, meta_keys);
-        
         let policy_json = policy_meta.to_json()?;
         let mut policy_map = HashMap::new();
         policy_map.insert("policy".to_string(), policy_json);

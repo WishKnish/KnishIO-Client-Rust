@@ -328,39 +328,10 @@ pub fn simd_generate_secret_optimized(seed: &str, length: usize) -> String {
     hex_encode_optimized(output_buffer.as_slice())
 }
 
-/// Generate large secrets with streaming to minimize memory usage
+/// Large secrets: one SHAKE256 squeeze of `length / 2` bytes, exactly JS `generateSecret(seed,
+/// length)` and `crypto::generate_secret_with_params`.
 fn simd_generate_large_secret(seed: &str, length: usize) -> String {
-    use tiny_keccak::{Hasher, Shake};
-    
-    let mut result = String::with_capacity(length);
-    let chunk_size = 8192; // 8KB chunks
-    let hex_chunk_size = chunk_size * 2;
-    
-    let mut hasher = Shake::v256();
-    hasher.update(seed.as_bytes());
-    
-    let mut remaining = length;
-    while remaining > 0 {
-        let current_chunk = remaining.min(hex_chunk_size);
-        let byte_chunk = current_chunk / 2;
-        
-        let mut chunk_buffer = PooledBuffer::new(byte_chunk);
-        chunk_buffer.as_mut().resize(byte_chunk, 0);
-        
-        // Clone the hasher state for consistent output
-        let chunk_hasher = hasher.clone();
-        chunk_hasher.finalize(chunk_buffer.as_mut());
-        
-        let hex_chunk = hex_encode_optimized(chunk_buffer.as_slice());
-        result.push_str(&hex_chunk[..current_chunk]);
-        
-        remaining -= current_chunk;
-        
-        // Update hasher with chunk info to generate different chunks
-        hasher.update(&(result.len() as u64).to_le_bytes());
-    }
-    
-    result
+    super::generate_secret_with_params(Some(seed), length)
 }
 
 /// Direct SHAKE256 to buffer operation

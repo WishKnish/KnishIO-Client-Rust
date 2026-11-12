@@ -9,7 +9,7 @@ use crate::types::TokenUnit;
 use base64::Engine as _;
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// ML-KEM parameter set for post-quantum key encapsulation
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,9 +164,9 @@ pub struct Wallet {
     #[serde(rename = "tokenUnits")]
     pub token_units: Vec<TokenUnit>,
     
-    /// Trade rates for buffer operations
+    /// Trade rates for buffer operations (sorted keys: deterministic serialization)
     #[serde(rename = "tradeRates")]
-    pub trade_rates: HashMap<String, f64>,
+    pub trade_rates: BTreeMap<String, f64>,
     
     /// Molecules associated with this wallet
     pub molecules: HashMap<String, serde_json::Value>,
@@ -265,7 +265,7 @@ impl Wallet {
             pubkey: None,
             privkey: None,
             token_units: Vec::new(),
-            trade_rates: HashMap::new(),
+            trade_rates: BTreeMap::new(),
             molecules: HashMap::new(),
             mlkem_parameter_set: mlkem_parameter_set.unwrap_or_default(),
             ots_version,
@@ -505,8 +505,8 @@ impl Wallet {
             self.bundle = Some(generate_bundle_hash(secret));
         }
         
-        // Generate key and address
-        self.key = Some(generate_key(secret, token, position));
+        // Generate key and address at this wallet's OTS version (JS generateKey({ otsVersion }))
+        self.key = Some(self.ots_version.derive_key(secret, token, position));
         
         if let Some(key) = &self.key {
             self.address = Some(generate_address(key)?);
@@ -784,22 +784,11 @@ impl Wallet {
                 if is_remainder {
                     self.batch_id = Some(source_batch_id.clone());
                 } else {
-                    // Generate new batch ID for non-remainder wallets
-                    self.batch_id = Some(Self::generate_batch_id());
+                    // A fresh 64-hex batch ID for non-remainder wallets (JS generateBatchId({}))
+                    self.batch_id = Some(crate::crypto::generate_batch_id());
                 }
             }
         }
-    }
-
-    /// Generate a new batch ID
-    ///
-    /// # Returns
-    ///
-    /// A new batch ID string
-    fn generate_batch_id() -> String {
-        use rand::RngExt;
-        let mut rng = rand::rng();
-        format!("{:016x}", rng.random::<u64>())
     }
 
     /// ML-KEM parameter set implied by a serialized public key's raw byte length
@@ -1288,7 +1277,7 @@ impl Default for Wallet {
             pubkey: None,
             privkey: None,
             token_units: Vec::new(),
-            trade_rates: HashMap::new(),
+            trade_rates: BTreeMap::new(),
             molecules: HashMap::new(),
             mlkem_parameter_set: MlKemParameterSet::default(),
             ots_version: OtsVersion::default(),

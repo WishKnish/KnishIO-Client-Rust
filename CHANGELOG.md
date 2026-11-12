@@ -39,6 +39,35 @@ detail, the entry says so instead of guessing.
   suites out, leaving one ignored stub each, in any checkout without the monorepo, which is every GitHub
   CI and publish run. A missing vector file now fails the build.
 
+### Fixed
+
+Each item below changes signed or hashed bytes to match the JS reference SDK; no other SDK produced the
+old bytes. `tests/js_reference_digests.rs` pins every digest from the JS SDK with the same inputs.
+
+- `Molecule::init_identifier_creation` emits `code` and `hash` (the bundle hash of the trimmed contact), as
+  JS does, instead of `contact` and `code`. The cleartext contact is no longer written to the ledger.
+- `Molecule::sign_with_secret` (used by `TypeSafeMoleculeBuilder::sign`) no longer replaces
+  `molecular_hash` with the last atom's position, and it compresses the signature like JS `sign({})`, so the
+  molecule passes `check`. `Molecule::get_molecular_hash` returns the base17 hash `sign` uses, not hex.
+- Policies are no longer dropped. `init_meta` adds the JS R policy atom when the policy is a non-empty
+  object; `create_rule` and `add_policy_atom` always add the `policy` meta (JS defaults `{}`);
+  `add_policy_atom` signs with the molecule's source wallet instead of a fresh random USER wallet, whose
+  position the validator rejects. `AtomMeta::add_policy` gives defaults to the meta indices `"0"`, `"1"`, …
+  as JS does. `PolicyMeta` keeps its maps in a `BTreeMap`, so the hashed policy JSON no longer changes
+  from run to run.
+- `Molecule::init_deposit_buffer` stores the trade rates on the buffer wallet and fills each atom's meta
+  from its wallet, so the debit atom carries the source wallet's `tokenUnits`. `AtomMeta::set_atom_wallet`
+  no longer emits `tradeRates` (JS never does: its trade rates are an object without `length`).
+  `Wallet::trade_rates` is a `BTreeMap`.
+- Helpers now return the JS values: `utils::strings::hex_to_base17` converts to base 17 (it returned its
+  input) and returns `Result`; `utils::strings::charset_base_convert` handles 256-bit input (it returned
+  `None` above 128 bits); `crypto::generate_bundle_hash_with_source` ignores `source`, like JS
+  `generateBundleHash`; `Wallet::init_batch_id` creates a 64-hex batch ID (it was 16);
+  `Wallet::set_key_from_secret` derives the key at the wallet's OTS version (it was always v1); the
+  `simd-optimized` path for secrets above 16384 characters returns one SHAKE256 stream (it rehashed per
+  chunk); `versions::Version4` holds `value` and `createdAt` as strings and serializes every field, so
+  `view()` equals the structure `Atom::hash_atoms` hashes.
+
 ### Security
 
 - **Replies to an encrypted request fail closed.** When `GraphQLClient::send` wrapped a request in the

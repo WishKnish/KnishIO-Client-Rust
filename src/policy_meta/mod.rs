@@ -5,7 +5,7 @@
 //! JavaScript PolicyMeta.js implementation.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use crate::error::{KnishIOError, Result};
 
 /// Represents access control policies for metadata
@@ -16,8 +16,8 @@ use crate::error::{KnishIOError, Result};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[derive(Default)]
 pub struct PolicyMeta {
-    /// The policy structure with read/write permissions
-    pub policy: HashMap<String, HashMap<String, Vec<String>>>,
+    /// The policy structure with read/write permissions (BTreeMap: hashed JSON needs a fixed key order)
+    pub policy: BTreeMap<String, BTreeMap<String, Vec<String>>>,
 }
 
 impl PolicyMeta {
@@ -95,15 +95,15 @@ impl PolicyMeta {
     /// assert!(normalized.contains_key("write"));
     /// assert!(!normalized.contains_key("invalid"));
     /// ```
-    pub fn normalize_policy(policy: serde_json::Value) -> HashMap<String, HashMap<String, Vec<String>>> {
-        let mut normalized = HashMap::new();
+    pub fn normalize_policy(policy: serde_json::Value) -> BTreeMap<String, BTreeMap<String, Vec<String>>> {
+        let mut normalized = BTreeMap::new();
 
         if let Some(policy_obj) = policy.as_object() {
             for (action, value) in policy_obj {
                 // Only process 'read' and 'write' actions
                 if action == "read" || action == "write" {
                     if let Some(action_obj) = value.as_object() {
-                        let mut action_map = HashMap::new();
+                        let mut action_map = BTreeMap::new();
                         
                         for (key, permissions) in action_obj {
                             if let Some(perms_array) = permissions.as_array() {
@@ -145,10 +145,10 @@ impl PolicyMeta {
     ///
     /// ```rust
     /// use knishio_client::policy_meta::PolicyMeta;
-    /// use std::collections::HashMap;
+    /// use std::collections::BTreeMap;
     ///
     /// let mut policy_meta = PolicyMeta {
-    ///     policy: HashMap::new()
+    ///     policy: BTreeMap::new()
     /// };
     ///
     /// let meta_keys = vec!["pubkey".to_string(), "balance".to_string()];
@@ -170,10 +170,10 @@ impl PolicyMeta {
 
         // Ensure read and write policy maps exist
         if !self.policy.contains_key("read") {
-            self.policy.insert("read".to_string(), HashMap::new());
+            self.policy.insert("read".to_string(), BTreeMap::new());
         }
         if !self.policy.contains_key("write") {
-            self.policy.insert("write".to_string(), HashMap::new());
+            self.policy.insert("write".to_string(), BTreeMap::new());
         }
 
         // Calculate missing keys using diff operation
@@ -225,7 +225,7 @@ impl PolicyMeta {
     ///
     /// # Returns
     ///
-    /// Reference to the policy HashMap
+    /// Reference to the policy map (sorted keys, so its JSON is deterministic)
     ///
     /// # Example
     ///
@@ -242,7 +242,7 @@ impl PolicyMeta {
     /// let policy_meta = PolicyMeta::new(policy, vec![]);
     /// let policy_ref = policy_meta.get();
     /// ```
-    pub fn get(&self) -> &HashMap<String, HashMap<String, Vec<String>>> {
+    pub fn get(&self) -> &BTreeMap<String, BTreeMap<String, Vec<String>>> {
         &self.policy
     }
 
@@ -427,7 +427,7 @@ impl std::fmt::Display for PolicyMeta {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_policy_meta_new() {
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn test_fill_default() {
         let mut policy_meta = PolicyMeta {
-            policy: HashMap::new(),
+            policy: BTreeMap::new(),
         };
 
         let meta_keys = vec![
@@ -505,8 +505,8 @@ mod tests {
     fn test_fill_default_preserves_existing() {
         let mut policy_meta = PolicyMeta {
             policy: {
-                let mut policy = HashMap::new();
-                let mut read_map = HashMap::new();
+                let mut policy = BTreeMap::new();
+                let mut read_map = BTreeMap::new();
                 read_map.insert("balance".to_string(), vec!["bundle123".to_string()]);
                 policy.insert("read".to_string(), read_map);
                 policy

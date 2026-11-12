@@ -39,6 +39,22 @@ fn token_units_meta(units: &[TokenUnit]) -> Result<Option<Vec<MetaItem>>> {
     Ok(Some(vec![MetaItem::new("tokenUnits", token_units_json(units)?)]))
 }
 
+/// The meta JS `Atom.create({ wallet })` gives an atom: the wallet's atom metas
+/// (`AtomMeta::set_atom_wallet`).
+fn wallet_meta(wallet: &Wallet) -> Vec<MetaItem> {
+    let mut meta = AtomMeta::new(None);
+    meta.set_atom_wallet(wallet);
+    meta.meta
+}
+
+/// A builder's policy argument, given as JSON text; `None` is JS's default `{}`.
+fn parse_policy(policy: Option<&str>) -> Result<serde_json::Value> {
+    match policy {
+        Some(text) => Ok(serde_json::from_str(text)?),
+        None => Ok(serde_json::Value::Object(serde_json::Map::new())),
+    }
+}
+
 #[cfg(test)]
 thread_local! {
     /// Test-only stub of a broken builder: when set, `add_continuid_atom` adds no I atom.
@@ -888,17 +904,21 @@ impl Molecule {
         Ok(())
     }
     
-    /// Initialize identifier creation molecule
+    /// Initialize identifier creation molecule (JS `initIdentifierCreation`)
+    ///
+    /// The C atom carries `code` and `hash` = the bundle hash of the trimmed contact; the contact
+    /// itself never leaves the client.
     /// # Arguments
     /// * `identifier_type` - Type of identifier
     /// * `contact` - Contact information
     /// * `code` - Verification code
     pub fn init_identifier_creation(&mut self, identifier_type: &str, contact: &str, code: &str) -> Result<()> {
-        if let Some(ref source_wallet) = self.source_wallet {
-            let mut meta = Vec::new();
-            meta.push(MetaItem::new("contact", contact));
-            meta.push(MetaItem::new("code", code));
-            
+        if let Some(source_wallet) = &self.source_wallet {
+            let meta = vec![
+                MetaItem::new("code", code),
+                MetaItem::new("hash", generate_bundle_hash(contact.trim())),
+            ];
+
             let params = AtomCreateParams {
                 isotope: Isotope::C,
                 wallet_info: Some(WalletInfo {
@@ -920,30 +940,33 @@ impl Molecule {
         Ok(())
     }
     
-    /// Initialize metadata molecule
+    /// Initialize metadata molecule (JS `initMeta`)
+    ///
+    /// Emits the M atom, then an R policy atom when `policy` is a non-empty JSON object (see
+    /// `add_policy_atom`), then the ContinuID I atom.
     /// # Arguments
     /// * `meta` - Metadata key-value pairs
     /// * `meta_type` - Type of metadata
     /// * `meta_id` - Metadata identifier
-    /// * `policy` - Access policy (optional)
-    pub fn init_meta(&mut self, meta: Vec<MetaItem>, meta_type: &str, meta_id: &str, _policy: Option<&str>) -> Result<()> {
-        if let Some(ref source_wallet) = self.source_wallet {
+    /// * `policy` - Access policy as a JSON object, e.g. `{"read":{"name":["all"]}}` (optional)
+    pub fn init_meta(&mut self, meta: Vec<MetaItem>, meta_type: &str, meta_id: &str, policy: Option<&str>) -> Result<()> {
+        let policy = parse_policy(policy)?;
+        if let Some(source_wallet) = &self.source_wallet {
             let params = AtomCreateParams {
                 isotope: Isotope::M,
-                wallet_info: Some(WalletInfo {
-                    position: source_wallet.position.clone().unwrap_or_default(),
-                    address: source_wallet.address.clone().unwrap_or_default(),
-                    token: source_wallet.token.clone(),
-                    batch_id: source_wallet.batch_id.clone(),
-                }),
+                wallet_info: Some(WalletInfo::from_wallet(source_wallet)),
                 meta_type: Some(meta_type.to_string()),
                 meta_id: Some(meta_id.to_string()),
                 meta: Some(meta.clone()),
                 ..Default::default()
             };
-            
+
             self.add_atom(Atom::create(params));
-            
+
+            if policy.as_object().is_some_and(|policy| !policy.is_empty()) {
+                self.push_policy_atom(meta_type, meta_id, meta, policy)?;
+            }
+
             // Add ContinuID atom (I isotope) to match JavaScript canonical behavior
             self.add_continuid_atom()?;
         }
@@ -1185,61 +1208,53 @@ impl Molecule {
         self.add_continuid_atom()
     }
     
-    /// Add a policy atom for rules and permissions (matches JS addPolicyAtom)
+    /// Add a policy atom (JS `addPolicyAtom`): an R atom signed by the molecule's source wallet
+    /// whose meta is `meta` plus `policy` (`AtomMeta::add_policy`).
     /// # Arguments
     /// * `meta_type` - Type of metadata
     /// * `meta_id` - Metadata identifier
     /// * `meta` - Metadata key-value pairs
-    /// * `policy` - Policy rules (optional)
+    /// * `policy` - Policy as a JSON object (`None` = `{}`, as in JS)
     pub fn add_policy_atom(
         &mut self,
         meta_type: &str,
         meta_id: &str,
         meta: Vec<MetaItem>,
-        _policy: Option<&str>,
+        policy: Option<&str>,
     ) -> Result<()> {
-        if let Some(ref secret) = self.secret {
-            if let Some(ref source_wallet) = self.source_wallet {
-                // Create policy wallet for USER token
-                let policy_wallet = Wallet::create_with_ots_version(
-                    Some(secret),
-                    source_wallet.bundle.as_deref(),
-                    "USER",
-                    None,
-                    None,
-                    Some(source_wallet.mlkem_parameter_set),
-                    source_wallet.ots_version,
-                )?;
-                
-                let final_meta = meta;
-                // TODO: Add policy to meta if provided
-                
-                let params = AtomCreateParams {
-                    isotope: Isotope::R,
-                    wallet_info: Some(WalletInfo {
-                        position: policy_wallet.position.clone().unwrap_or_default(),
-                        address: policy_wallet.address.clone().unwrap_or_default(),
-                        token: policy_wallet.token.clone(),
-                        batch_id: policy_wallet.batch_id.clone(),
-                    }),
-                    meta_type: Some(meta_type.to_string()),
-                    meta_id: Some(meta_id.to_string()),
-                    meta: Some(final_meta),
-                    ..Default::default()
-                };
-                
-                self.add_atom(Atom::create(params));
-            }
+        let policy = parse_policy(policy)?;
+        self.push_policy_atom(meta_type, meta_id, meta, policy)
+    }
+
+    /// The R atom of `add_policy_atom`, from an already parsed policy.
+    fn push_policy_atom(&mut self, meta_type: &str, meta_id: &str, meta: Vec<MetaItem>, policy: serde_json::Value) -> Result<()> {
+        if let Some(source_wallet) = &self.source_wallet {
+            let mut atom_meta = AtomMeta::new(Some(meta));
+            atom_meta.add_policy(policy)?;
+
+            let params = AtomCreateParams {
+                isotope: Isotope::R,
+                wallet_info: Some(WalletInfo::from_wallet(source_wallet)),
+                meta_type: Some(meta_type.to_string()),
+                meta_id: Some(meta_id.to_string()),
+                meta: Some(atom_meta.meta),
+                ..Default::default()
+            };
+
+            self.add_atom(Atom::create(params));
         }
-        
+
         Ok(())
     }
     
     /// Initialize deposit buffer molecule (matches JS initDepositBuffer)
+    ///
+    /// Each atom's meta comes from its wallet (`AtomMeta::set_atom_wallet`, JS `Atom.create`): the
+    /// source's `tokenUnits` ride on the debit atom; the buffer wallet holds `trade_rates`.
     /// # Arguments
     /// * `amount` - Amount to deposit
-    /// * `trade_rates` - Trading rates (not implemented in this version)
-    pub fn init_deposit_buffer(&mut self, amount: f64, _trade_rates: HashMap<String, f64>) -> Result<()> {
+    /// * `trade_rates` - Trade rates of the buffer wallet
+    pub fn init_deposit_buffer(&mut self, amount: f64, trade_rates: HashMap<String, f64>) -> Result<()> {
         let amount_i128 = amount as i128;
 
         // Extract all needed data from source_wallet first
@@ -1271,6 +1286,7 @@ impl Molecule {
                     self.successor_ots_version(),
                 )?;
                 buffer_wallet.batch_id = source_batch_id.clone();
+                buffer_wallet.trade_rates = trade_rates.into_iter().collect();
 
                 // Remove tokens from source (debit the FULL balance for UTXO
                 // conservation, matching the JS/PHP/TS reference; the change is
@@ -1284,6 +1300,7 @@ impl Molecule {
                         batch_id: source_batch_id.clone(),
                     }),
                     value: None, // set below with integer-string precision
+                    meta: Some(wallet_meta(source_wallet)),
                     ..Default::default()
                 };
                 let mut source_atom = Atom::create(source_params);
@@ -1302,6 +1319,7 @@ impl Molecule {
                     value: Some(amount),
                     meta_type: Some("walletBundle".to_string()),
                     meta_id: source_bundle.clone(),
+                    meta: Some(wallet_meta(&buffer_wallet)),
                     ..Default::default()
                 };
                 atoms.push(Atom::create(buffer_params));
@@ -1319,6 +1337,7 @@ impl Molecule {
                         value: None,  // Set below with String precision
                         meta_type: Some("walletBundle".to_string()),
                         meta_id: source_bundle,
+                        meta: Some(wallet_meta(remainder_wallet)),
                         ..Default::default()
                     };
                     let mut remainder_atom = Atom::create(remainder_params);
@@ -1419,39 +1438,35 @@ impl Molecule {
     }
     
     /// Create rule molecule (matches JS createRule)
+    ///
+    /// The R atom carries `rule`, then `policy` (`AtomMeta::add_policy`; JS adds it even when
+    /// empty), and is signed by the source wallet; the ContinuID I atom follows.
     /// # Arguments
     /// * `meta_type` - Rule metadata type
     /// * `meta_id` - Rule metadata ID
     /// * `rule` - Rule definition as JSON string
-    /// * `policy` - Policy definition (optional)
+    /// * `policy` - Policy as a JSON object (`None` = `{}`, as in JS)
     pub fn create_rule(
         &mut self,
         meta_type: &str,
         meta_id: &str,
         rule: &str,
-        _policy: Option<&str>,
+        policy: Option<&str>,
     ) -> Result<()> {
-        if let Some(ref source_wallet) = self.source_wallet {
-            // Create atom meta with rules
-            let mut rule_meta = Vec::new();
-            rule_meta.push(MetaItem::new("rule", rule));
-            
-            // TODO: Add policy to meta if provided
-            
+        let policy = parse_policy(policy)?;
+        if let Some(source_wallet) = &self.source_wallet {
+            let mut atom_meta = AtomMeta::new(Some(vec![MetaItem::new("rule", rule)]));
+            atom_meta.add_policy(policy)?;
+
             let params = AtomCreateParams {
                 isotope: Isotope::R,
-                wallet_info: Some(WalletInfo {
-                    position: source_wallet.position.clone().unwrap_or_default(),
-                    address: source_wallet.address.clone().unwrap_or_default(),
-                    token: source_wallet.token.clone(),
-                    batch_id: source_wallet.batch_id.clone(),
-                }),
+                wallet_info: Some(WalletInfo::from_wallet(source_wallet)),
                 meta_type: Some(meta_type.to_string()),
                 meta_id: Some(meta_id.to_string()),
-                meta: Some(rule_meta),
+                meta: Some(atom_meta.meta),
                 ..Default::default()
             };
-            
+
             self.add_atom(Atom::create(params));
             self.add_continuid_atom()?;
         }
@@ -1544,42 +1559,25 @@ impl Molecule {
         Ok(())
     }
     
-    /// Get the molecular hash for this molecule
-    /// Computes the molecular hash by sorting atoms and generating hash based on
-    /// their contents, following the SDK Implementation Guide requirements.
+    /// Get the molecular hash for this molecule: the base17 hash of its atoms, the form `sign`
+    /// stores in `molecular_hash` (JS `Atom.hashAtoms`).
     /// Result containing the molecular hash string
     pub fn get_molecular_hash(&self) -> Result<String> {
         if self.atoms.is_empty() {
             return Err(KnishIOError::AtomsMissing);
         }
-        
-        // Use the same hash algorithm as the existing implementation
-        let hash_result = Atom::hash_atoms(&self.atoms, "hex")?;
-        Ok(hash_result)
+
+        Atom::hash_atoms(&self.atoms, "base17")
     }
-    
-    /// Sign the molecule using the secret (simplified interface for type-safe builder)
-    /// This is a convenience method that wraps the existing sign method
-    /// with sensible defaults for the type-safe builder.
+
+    /// Sign the molecule with `secret` (the type-safe builder's entry point): non-anonymous,
+    /// compressed, like JS `sign({})`. `molecular_hash` is the one `sign` computes.
     /// # Arguments
     /// * `secret` - The cryptographic secret to use for signing
     /// Result indicating success or failure
     pub async fn sign_with_secret(&mut self, secret: &str) -> Result<()> {
-        // Store the secret for signing operations
         self.secret = Some(secret.to_string());
-        
-        // Use the existing sign method with default parameters
-        let result = self.sign(
-            self.bundle.clone(), // Use the existing bundle
-            false,               // Not anonymous
-            false,               // Not compressed
-        )?;
-        
-        // Update molecular hash based on the signing result
-        if result.is_some() {
-            self.molecular_hash = result;
-        }
-        
+        self.sign(self.bundle.clone(), false, true)?;
         Ok(())
     }
     
@@ -1868,10 +1866,6 @@ fn reconstruct_wallet_from_json(wallet_data: &serde_json::Value) -> crate::error
     // Initialize empty collections for missing fields to match JavaScript structure
     if wallet.token_units.is_empty() {
         wallet.token_units = Vec::new(); // Already initialized as Vec::new() by default
-    }
-    
-    if wallet.trade_rates.is_empty() {
-        wallet.trade_rates = HashMap::new(); // Already initialized as HashMap::new() by default
     }
     
     if wallet.molecules.is_empty() {

@@ -242,12 +242,13 @@ pub fn generate_secret(seed: &str) -> String {
 
 /// Generate a bundle hash from secret with optional source
 ///
-/// Equivalent to generateBundleHash() in JavaScript
+/// Equivalent to generateBundleHash() in JavaScript, which accepts a `source` label for its
+/// callers' logging and does not hash it: the bundle hash is SHAKE256-256 of the secret alone.
 ///
 /// # Arguments
 ///
 /// * `secret` - The wallet secret
-/// * `source` - Optional source identifier for context
+/// * `_source` - Caller label, ignored (as in JS)
 ///
 /// # Returns
 ///
@@ -260,15 +261,10 @@ pub fn generate_secret(seed: &str) -> String {
 ///
 /// let hash1 = generate_bundle_hash_with_source("secret", None);
 /// let hash2 = generate_bundle_hash_with_source("secret", Some("context"));
-/// assert_ne!(hash1, hash2); // Different source produces different hash
+/// assert_eq!(hash1, hash2); // the source label does not change the bundle hash
 /// ```
-pub fn generate_bundle_hash_with_source(secret: &str, source: Option<&str>) -> String {
-    let input = if let Some(src) = source {
-        format!("{}{}", secret, src)
-    } else {
-        secret.to_string()
-    };
-    shake256(&input, 256)
+pub fn generate_bundle_hash_with_source(secret: &str, _source: Option<&str>) -> String {
+    shake256(secret, 256)
 }
 
 /// Generate a bundle hash from secret (backward compatibility)
@@ -1295,14 +1291,11 @@ mod tests {
     fn test_generate_bundle_hash_with_source() {
         let hash1 = generate_bundle_hash_with_source("secret", None);
         let hash2 = generate_bundle_hash_with_source("secret", Some("context"));
-        
+
         assert_eq!(hash1.len(), 64);
-        assert_eq!(hash2.len(), 64);
-        assert_ne!(hash1, hash2); // Different source should produce different hash
-        
-        // Test consistency
-        let hash3 = generate_bundle_hash_with_source("secret", Some("context"));
-        assert_eq!(hash2, hash3); // Same inputs should produce same hash
+        // JS generateBundleHash(secret, source) hashes the secret only
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1, generate_bundle_hash("secret"));
     }
 
     #[test]

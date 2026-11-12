@@ -165,37 +165,32 @@ pub fn charset_base_convert(
         return Some("0".to_string());
     }
     
-    // Convert from source base to decimal using u128 for large numbers
-    let mut val: u128 = 0;
+    // Convert from the source base to an arbitrary-precision integer (JS uses BigInt), so a
+    // 256-bit hash converts instead of overflowing.
+    use num_bigint::BigUint;
+    use num_traits::{ToPrimitive, Zero};
+
     let src_chars: Vec<char> = src_table.chars().collect();
-    let from_base = from_base as u128;
-    
+    let mut val = BigUint::zero();
     for ch in src.chars() {
         // None = invalid character in source
         let digit_val = src_chars.iter().position(|&c| c == ch)?;
-        val = val.checked_mul(from_base)?
-                 .checked_add(digit_val as u128)?;
+        val = val * from_base + digit_val as u32;
     }
-    
-    // Convert from decimal to destination base
-    if val == 0 {
+
+    if val.is_zero() {
         return Some("0".to_string());
     }
-    
+
     let dest_chars: Vec<char> = dest_table.chars().collect();
-    let to_base = to_base as u128;
-    let mut result = String::new();
-    
-    while val > 0 {
-        let remainder = (val % to_base) as usize;
-        if remainder >= dest_chars.len() {
-            return None;
-        }
-        result = format!("{}{}", dest_chars[remainder], result);
+    let mut digits = Vec::new();
+    while !val.is_zero() {
+        let remainder = (&val % to_base).to_usize()?;
+        digits.push(*dest_chars.get(remainder)?);
         val /= to_base;
     }
-    
-    Some(result)
+
+    Some(digits.iter().rev().collect())
 }
 
 /// Convert a buffer (Vec<u8>) to a hexadecimal string
@@ -227,8 +222,9 @@ pub fn hex_string_to_buffer(hex_str: &str) -> Result<Vec<u8>> {
 
 /// Convert a hexadecimal string to base17 format
 ///
-/// Base17 uses characters 0-9 and a-g. This is used for molecular hash
-/// normalization in the one-time signature algorithm.
+/// Base17 uses characters 0-9 and a-g. This is the molecular hash form the one-time signature
+/// algorithm enumerates; it delegates to [`crate::crypto::hex_to_base17`] (JS
+/// `charsetBaseConvert(hash, 16, 17, …).padStart(64, '0')`).
 ///
 /// # Arguments
 ///
@@ -236,17 +232,9 @@ pub fn hex_string_to_buffer(hex_str: &str) -> Result<Vec<u8>> {
 ///
 /// # Returns
 ///
-/// The base17 representation
-pub fn hex_to_base17(hex_str: &str) -> String {
-    // Convert each hex nibble to base17
-    hex_str.chars().map(|c| {
-        match c.to_ascii_lowercase() {
-            '0'..='9' => c,
-            'a'..='f' => c,
-            // In case of invalid hex, map to 'g'
-            _ => 'g',
-        }
-    }).collect()
+/// The base17 representation, padded to 64 characters; an error for non-hex input
+pub fn hex_to_base17(hex_str: &str) -> Result<String> {
+    crate::crypto::hex_to_base17(hex_str)
 }
 
 /// Normalize metadata for consistent hashing
@@ -463,15 +451,11 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_to_base17() {
-        let hex = "0123456789abcdef";
-        let base17 = hex_to_base17(hex);
-        assert_eq!(base17, "0123456789abcdef");
-        
-        // Test that invalid hex maps to 'g'
-        let invalid = "xyz";
-        let base17 = hex_to_base17(invalid);
-        assert!(base17.contains('g'));
+    fn test_hex_to_base17() -> Result<()> {
+        // JS: charsetBaseConvert(hex, 16, 17, '0123456789abcdef', '0123456789abcdefg').padStart(64, '0')
+        assert_eq!(hex_to_base17("ff")?, format!("{:0>64}", "f0"));
+        assert!(hex_to_base17("xyz").is_err());
+        Ok(())
     }
 
     #[test]

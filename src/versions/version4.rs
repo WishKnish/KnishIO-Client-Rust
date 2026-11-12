@@ -10,61 +10,56 @@ use super::{HashAtom, AtomVersion};
 
 /// Version 4 atom implementation
 ///
-/// Equivalent to Version4 class in JavaScript SDK
+/// Equivalent to Version4 class in JavaScript SDK. Its fields carry the values JS hashes: every
+/// one serializes (absent = `null`), `value` and `createdAt` are strings and `index` a number, so
+/// `view()` equals the structure `Atom::hash_atoms` hashes for a versioned molecule.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Version4 {
     /// Wallet position
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub position: Option<String>,
-    
+
     /// Wallet address
     #[serde(rename = "walletAddress")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub wallet_address: Option<String>,
-    
+
     /// Atom isotope (transaction type)
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub isotope: Option<Isotope>,
-    
+
     /// Token slug
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
-    
-    /// Value (for value transfer atoms)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<f64>,
-    
+
+    /// Value (for value transfer atoms), as the integer string atoms carry
+    pub value: Option<String>,
+
     /// Batch ID
     #[serde(rename = "batchId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub batch_id: Option<String>,
-    
+
     /// Metadata type
     #[serde(rename = "metaType")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub meta_type: Option<String>,
-    
+
     /// Metadata ID
     #[serde(rename = "metaId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub meta_id: Option<String>,
-    
+
     /// Metadata items
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Vec<MetaItem>>,
-    
+
     /// Atom index within molecule
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub index: Option<i32>,
-    
-    /// Creation timestamp
+    pub index: Option<u32>,
+
+    /// Creation timestamp (milliseconds, as a string)
     #[serde(rename = "createdAt")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<i64>,
-    
+    pub created_at: Option<String>,
+
     /// Version identifier
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+}
+
+/// An atom's string field as JS holds it: an empty string is an unset (`null`) field.
+fn non_empty(field: &str) -> Option<String> {
+    (!field.is_empty()).then(|| field.to_string())
 }
 
 impl Version4 {
@@ -77,13 +72,13 @@ impl Version4 {
         wallet_address: Option<String>,
         isotope: Option<Isotope>,
         token: Option<String>,
-        value: Option<f64>,
+        value: Option<String>,
         batch_id: Option<String>,
         meta_type: Option<String>,
         meta_id: Option<String>,
         meta: Option<Vec<MetaItem>>,
-        index: Option<i32>,
-        created_at: Option<i64>,
+        index: Option<u32>,
+        created_at: Option<String>,
         version: Option<String>,
     ) -> Self {
         Self {
@@ -115,21 +110,17 @@ impl Version4 {
     /// A new Version4 instance with the atom's data
     pub fn from_atom(atom: &Atom) -> Self {
         Self {
-            position: Some(atom.position.clone()),
-            wallet_address: Some(atom.wallet_address.clone()),
+            position: non_empty(&atom.position),
+            wallet_address: non_empty(&atom.wallet_address),
             isotope: Some(atom.isotope),
-            token: Some(atom.token.clone()),
-            // Convert Option<String> to Option<f64>
-            value: atom.value.as_ref().and_then(|v| v.parse::<f64>().ok()),
+            token: non_empty(&atom.token),
+            value: atom.value.clone(),
             batch_id: atom.batch_id.clone(),
             meta_type: atom.meta_type.clone(),
             meta_id: atom.meta_id.clone(),
-            // Convert Vec<MetaItem> to Option<Vec<MetaItem>>
             meta: Some(atom.meta.clone()),
-            // Convert Option<u32> to Option<i32>
-            index: atom.index.map(|i| i as i32),
-            // Convert String to Option<i64> (parse timestamp)
-            created_at: atom.created_at.parse::<i64>().ok(),
+            index: atom.index,
+            created_at: non_empty(&atom.created_at),
             version: atom.version.clone(),
         }
     }
@@ -157,17 +148,13 @@ impl Version4 {
             self.token.as_deref().unwrap_or(""),
         );
 
-        // Convert Option<f64> to Option<String>
-        atom.value = self.value.map(|v| v.to_string());
+        atom.value = self.value.clone();
         atom.batch_id = self.batch_id.clone();
         atom.meta_type = self.meta_type.clone();
         atom.meta_id = self.meta_id.clone();
-        // Convert Option<Vec<MetaItem>> to Vec<MetaItem>
         atom.meta = self.meta.clone().unwrap_or_default();
-        // Convert Option<i32> to Option<u32>
-        atom.index = self.index.map(|i| i as u32);
-        // Convert Option<i64> to String
-        atom.created_at = self.created_at.map(|t| t.to_string()).unwrap_or_else(|| chrono::Utc::now().timestamp_millis().to_string());
+        atom.index = self.index;
+        atom.created_at = self.created_at.clone().unwrap_or_else(|| chrono::Utc::now().timestamp_millis().to_string());
         atom.version = self.version.clone();
 
         atom
@@ -200,8 +187,8 @@ impl Version4 {
         if let Some(ref token) = self.token {
             map.insert("token".to_string(), Value::String(token.clone()));
         }
-        if let Some(value) = self.value {
-            map.insert("value".to_string(), Value::Number(serde_json::Number::from_f64(value).unwrap_or_else(|| serde_json::Number::from(0))));
+        if let Some(value) = &self.value {
+            map.insert("value".to_string(), Value::String(value.clone()));
         }
         if let Some(ref batch_id) = self.batch_id {
             map.insert("batchId".to_string(), Value::String(batch_id.clone()));
@@ -218,8 +205,8 @@ impl Version4 {
         if let Some(index) = self.index {
             map.insert("index".to_string(), Value::Number(index.into()));
         }
-        if let Some(created_at) = self.created_at {
-            map.insert("createdAt".to_string(), Value::Number(created_at.into()));
+        if let Some(created_at) = &self.created_at {
+            map.insert("createdAt".to_string(), Value::String(created_at.clone()));
         }
         if let Some(ref version) = self.version {
             map.insert("version".to_string(), Value::String(version.clone()));
@@ -264,13 +251,13 @@ mod tests {
             Some("test-address".to_string()),
             Some(Isotope::V),
             Some("TEST".to_string()),
-            Some(100.0),
+            Some("100".to_string()),
             Some("batch123".to_string()),
             Some("user".to_string()),
             Some("id123".to_string()),
             None,
             Some(0),
-            Some(1234567890),
+            Some("1234567890".to_string()),
             Some("4".to_string()),
         );
 
@@ -278,12 +265,12 @@ mod tests {
         assert_eq!(version4.wallet_address, Some("test-address".to_string()));
         assert_eq!(version4.isotope, Some(Isotope::V));
         assert_eq!(version4.token, Some("TEST".to_string()));
-        assert_eq!(version4.value, Some(100.0));
+        assert_eq!(version4.value, Some("100".to_string()));
         assert_eq!(version4.batch_id, Some("batch123".to_string()));
         assert_eq!(version4.meta_type, Some("user".to_string()));
         assert_eq!(version4.meta_id, Some("id123".to_string()));
         assert_eq!(version4.index, Some(0));
-        assert_eq!(version4.created_at, Some(1234567890));
+        assert_eq!(version4.created_at, Some("1234567890".to_string()));
         assert_eq!(version4.version, Some("4".to_string()));
     }
 
@@ -309,12 +296,12 @@ mod tests {
         assert_eq!(version4.wallet_address, Some("test-address".to_string()));
         assert_eq!(version4.isotope, Some(Isotope::C));
         assert_eq!(version4.token, Some("TEST".to_string()));
-        assert_eq!(version4.value, Some(50.0));
+        assert_eq!(version4.value, Some("50".to_string()));
         assert_eq!(version4.batch_id, Some("batch456".to_string()));
         assert_eq!(version4.meta_type, Some("identity".to_string()));
         assert_eq!(version4.meta_id, Some("id456".to_string()));
         assert_eq!(version4.index, Some(1));
-        assert_eq!(version4.created_at, Some(9876543210));
+        assert_eq!(version4.created_at, Some("9876543210".to_string()));
         assert_eq!(version4.version, Some("4".to_string()));
     }
 
@@ -325,13 +312,13 @@ mod tests {
             Some("addr2".to_string()),
             Some(Isotope::M),
             Some("TOKEN2".to_string()),
-            Some(200.0),
+            Some("200".to_string()),
             None,
             None,
             None,
             None,
             Some(2),
-            Some(1111111111),
+            Some("1111111111".to_string()),
             Some("4".to_string()),
         );
 
@@ -341,7 +328,6 @@ mod tests {
         assert_eq!(atom.wallet_address, "addr2");
         assert_eq!(atom.isotope, Isotope::M);
         assert_eq!(atom.token, "TOKEN2");
-        // f64 200.0 -> "200" via to_string(), matching JS `String(200)` (Atom.js)
         assert_eq!(atom.value, Some("200".to_string()));
         assert_eq!(atom.batch_id, None);
         assert_eq!(atom.meta_type, None);
@@ -445,7 +431,7 @@ mod tests {
             Some("test-address".to_string()),
             Some(Isotope::V),
             Some("TEST".to_string()),
-            Some(100.0),
+            Some("100".to_string()),
             Some("batch123".to_string()),
             None, // Skip this field
             None, // Skip this field
@@ -483,13 +469,13 @@ mod tests {
             Some("test-address".to_string()),
             Some(Isotope::V),
             Some("TEST".to_string()),
-            Some(100.0),
+            Some("100".to_string()),
             None,
             None,
             None,
             None,
             Some(0),
-            Some(1234567890),
+            Some("1234567890".to_string()),
             Some("4".to_string()),
         );
 
@@ -521,13 +507,13 @@ mod tests {
             Some("walletAddress".to_string()),
             Some(Isotope::V),
             Some("TOKEN".to_string()),
-            Some(100.0),
+            Some("100".to_string()),
             Some("batchId".to_string()),
             Some("metaType".to_string()),
             Some("metaId".to_string()),
             None, // meta
             Some(0), // index
-            Some(1234567890), // createdAt
+            Some("1234567890".to_string()), // createdAt
             Some("4".to_string()), // version
         );
         
@@ -538,12 +524,12 @@ mod tests {
         assert_eq!(json_value["walletAddress"], "walletAddress"); // camelCase
         assert_eq!(json_value["isotope"], "V");
         assert_eq!(json_value["token"], "TOKEN");
-        assert_eq!(json_value["value"], 100.0);
+        assert_eq!(json_value["value"], "100");
         assert_eq!(json_value["batchId"], "batchId"); // camelCase
         assert_eq!(json_value["metaType"], "metaType"); // camelCase
         assert_eq!(json_value["metaId"], "metaId"); // camelCase
         assert_eq!(json_value["index"], 0);
-        assert_eq!(json_value["createdAt"], 1234567890); // camelCase
+        assert_eq!(json_value["createdAt"], "1234567890"); // camelCase
         assert_eq!(json_value["version"], "4");
         
         // Test create method (equivalent to JS Version4.create)
