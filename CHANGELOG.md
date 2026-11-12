@@ -68,6 +68,31 @@ old bytes. `tests/js_reference_digests.rs` pins every digest from the JS SDK wit
   chunk); `versions::Version4` holds `value` and `createdAt` as strings and serializes every field, so
   `view()` equals the structure `Atom::hash_atoms` hashes.
 
+The client operations below build their molecule through `KnishIOClient::create_molecule` and submit it
+through `execute_query`, as the JS client does through `createMolecule` and `executeQuery`. This changes the
+signed bytes of their molecules; no other SDK produced the old bytes. The tests are in `src/client/mod.rs`
+and run against a loopback stub validator.
+
+- `create_token`, `transfer_token`, `transfer_tokens`, `burn_tokens`, `replenish_token`, `fuse_token`,
+  `deposit_buffer_token`, `withdraw_buffer_token`, `create_policy` and the profile login now carry the
+  client's `cellSlug` and, at server SDK version 4, `version: "4"` on the molecule and its atoms. Before,
+  they sent neither, so a configured cell slug and Version 4 atom hashing were silently dropped.
+- `burn_tokens`, `replenish_token`, `fuse_token` and `create_policy` sign compressed, like JS `sign({})`.
+- When the signing wallet is not a USER wallet (a token or buffer wallet, or a fresh AUTH wallet at login),
+  the client reads the bundle's current USER ContinuID position before building the molecule and a
+  ContinuID atom names it as `previousPosition`, as JS `createMolecule` does. A login signed by a fresh
+  AUTH wallet therefore queries ContinuID twice, and its ContinuID atom no longer names the AUTH wallet's
+  own position.
+- After an accepted molecule, the next molecule this client builds without a source wallet is signed by
+  the previous molecule's USER remainder instead of querying the ContinuID head (JS `lastMoleculeQuery`
+  relay). The client never recorded an accepted molecule before, so this never happened. A login resets it.
+- `create_policy` sends its `policy` (it was ignored) and signs from the ContinuID head instead of the USER
+  wallet `Balance` returns.
+- With only a secret storage provider set (`set_secret_storage`, no `set_secret`), the operations above,
+  `create_wallet`, `claim_shadow_wallet`, `query_source_wallet` and `get_source_wallet` read the secret
+  from the provider for that call; they failed with `MissingSecret` or `Unauthenticated`. The secret is not
+  kept on the client.
+
 ### Security
 
 - `Debug` no longer prints secrets: `Molecule` (`secret`), `StorageOptions` (`passphrase`,
