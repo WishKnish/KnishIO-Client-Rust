@@ -38,6 +38,15 @@ detail, the entry says so instead of guessing.
   the monorepo masters) instead of `../shared-test-results/`. `build.rs` is gone: it compiled the three
   suites out, leaving one ignored stub each, in any checkout without the monorepo, which is every GitHub
   CI and publish run. A missing vector file now fails the build.
+- Crate keyword `xmss` is now `wots`: the SDK signs with position-based WOTS+ one-time keys, not XMSS.
+- Every Rust example in `README.md` compiles against the shipped API and is checked as a doctest
+  (`cargo test --doc`). Fixed: the `ClientBuilder` example (it passed arguments to `new()`, which takes
+  none), and the hand-built atom example (it passed `Option` values where `&str` is expected and wrapped
+  `Atom.meta` in `Some`). The README lists the JavaScript features with no Rust equivalent and the methods
+  that do nothing (`cancel_query`, `cancel_all_queries`, `GraphQLClient::unsubscribe_all`,
+  `StandardResponse::from_legacy_response`). `docs/GraphQL_Client.md` passes a `Wallet` to
+  `set_auth_data` and configures the client with `ClientConfig` and `RetryConfig` instead of the
+  nonexistent `PoolConfig` and builder methods.
 
 ### Fixed
 

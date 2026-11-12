@@ -20,20 +20,19 @@ The GraphQL client provides:
 ### Basic Client Setup
 
 ```rust
-use knishio_client::{
-    GraphQLClient, create_query_request, create_mutation_request
-};
+use knishio_client::GraphQLClient;
+use knishio_client::graphql::create_query_request;
 use serde_json::json;
 
 // Create a basic client
-let mut client = GraphQLClient::new("https://api.knish.io/graphql")
-    .with_debug(true);
+let mut client = GraphQLClient::new("https://api.knish.io/graphql");
 
-// Set authentication
+// Set authentication: the session token, the validator's ML-KEM public key, and the wallet
+// that signed the login (it decrypts encrypted replies). KnishIOClient does this after a login.
 client.set_auth_data(
     "your-auth-token".to_string(),
-    Some("your-public-key".to_string()),
-    Some("your-wallet-id".to_string()),
+    Some("validator-ml-kem-public-key".to_string()),
+    Some(auth_wallet), // knishio_client::Wallet
 );
 
 // Execute a query
@@ -48,34 +47,33 @@ let response = client.query(query).await?;
 ### Advanced Configuration
 
 ```rust
-use knishio_client::{
-    GraphQLClient, PoolConfig, RetryPolicy, RetryStrategy
-};
+use knishio_client::{ClientConfig, GraphQLClient};
+use knishio_client::graphql::RetryConfig;
 use std::time::Duration;
 
-// Configure connection pool
-let pool_config = PoolConfig {
+// HTTP client settings
+let client_config = ClientConfig {
     max_connections: 100,
     connect_timeout: Duration::from_secs(10),
-    request_timeout: Duration::from_secs(60),
+    request_timeout: Duration::from_secs(120),
     keep_alive_timeout: Duration::from_secs(90),
-    ..PoolConfig::default()
+    ..ClientConfig::default()
 };
 
-// Configure retry policy
-let retry_policy = RetryPolicy::network_optimized()
-    .with_max_attempts(5)
-    .with_initial_delay(Duration::from_millis(500))
-    .with_strategy(RetryStrategy::ExponentialBackoff { multiplier: 2.0 });
+// Retry settings
+let retry_config = RetryConfig {
+    max_attempts: 5,
+    initial_delay: Duration::from_millis(500),
+    backoff_multiplier: 2.0,
+    ..RetryConfig::default()
+};
 
 // Create client with advanced configuration
 let client = GraphQLClient::with_config(
     "https://api.knish.io/graphql",
-    pool_config,
-    retry_policy,
-)
-.with_debug(true)
-.with_timeout(Duration::from_secs(120));
+    client_config,
+    retry_config,
+);
 ```
 
 ## Core Features

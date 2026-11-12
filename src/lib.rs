@@ -50,6 +50,11 @@
 /// SDK Version constant
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// Compiles every Rust example in README.md as a doctest (`cargo test --doc`)
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;
+
 // Core modules
 pub mod atom;
 pub mod crypto;
