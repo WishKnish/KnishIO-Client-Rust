@@ -17,11 +17,11 @@ pub const XSDK_RECOVERY_PASSPHRASE: &str = "recovery-passphrase-restore-42";
 pub const XSDK_RECOVERY_PLAINTEXT: &str = "RECOVERY-SECRET-PROBE-MATRIX-BACKUP";
 pub const XSDK_REENROLLED_PRIMARY_PASSPHRASE: &str = "xsdk-reenrolled-primary-pass";
 
-/// Frozen copy of the Phase B vector sections of the master
-/// `sdks/shared-test-results/canonical-patent-vectors.json` (`token_replenish`,
-/// `stackable_fusion_conservation`, `buffer_withdraw_fresh_remainder`, `create_token_units`), so
-/// the Phase B vector tests in `tests/patent_vector_validation.rs` run in a standalone checkout.
-/// Its gated suite asserts that this copy equals the master sections — do not edit by hand.
+/// Frozen copy of the Phase B vector sections of the canonical patent vectors
+/// (`tests/fixtures/canonical-patent-vectors.json`: `token_replenish`,
+/// `stackable_fusion_conservation`, `buffer_withdraw_fresh_remainder`, `create_token_units`).
+/// `tests/patent_vector_validation.rs` asserts that this copy equals those sections — do not edit
+/// by hand.
 #[allow(dead_code)] // read only by tests/patent_vector_validation.rs; the other suites share this file
 pub const PHASE_B_VECTORS_JSON: &str = r#"{
   "token_replenish": {

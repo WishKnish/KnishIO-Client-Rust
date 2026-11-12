@@ -1,18 +1,11 @@
 //! OTS v2 cross-SDK vectors (docs/OTS_V2_SPECIFICATION.md in the monorepo).
 //!
-//! The master `sdks/shared-test-results/ots-v2-vectors.json` is produced by
+//! `tests/fixtures/ots-v2-vectors.json` is a vendored copy of the monorepo master, produced by
 //! `scripts/gen-ots-v2-vectors.mjs`: key derivation and signatures come from an independent
 //! node:crypto implementation of the specification, ML-KEM identities and molecules from the JS
-//! reference SDK. Matching both proves byte parity across three implementations.
+//! reference SDK. Matching both proves byte parity across three implementations. A missing copy
+//! fails the build.
 
-// The master lives in the monorepo; build.rs sets `has_ots_v2_vectors` when it exists, and a
-// standalone checkout reports the suite as ignored instead of running 0 tests.
-#[cfg(not(has_ots_v2_vectors))]
-#[test]
-#[ignore = "../shared-test-results/ots-v2-vectors.json absent: OTS v2 vector suite not compiled in a standalone checkout"]
-fn ots_v2_vectors_absent() {}
-
-#[cfg(has_ots_v2_vectors)]
 mod ots_v2 {
     use knishio_client::crypto::{
         generate_address, generate_key, generate_key_v2, generate_ots_signature, verify_ots_signature,
@@ -26,7 +19,7 @@ mod ots_v2 {
 
     type TestResult = Result<(), Box<dyn Error>>;
 
-    const VECTORS_JSON: &str = include_str!("../../../sdks/shared-test-results/ots-v2-vectors.json");
+    const VECTORS_JSON: &str = include_str!("fixtures/ots-v2-vectors.json");
 
     fn vectors() -> Result<Value, Box<dyn Error>> {
         let root: Value = serde_json::from_str(VECTORS_JSON)?;

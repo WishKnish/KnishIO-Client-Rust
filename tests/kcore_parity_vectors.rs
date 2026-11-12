@@ -1,8 +1,7 @@
 //! kcore parity vectors: full signed molecules, byte-identical with and without kcore.
 //!
-//! `tests/fixtures/kcore-parity-vectors.json` is a vendored copy of the monorepo master
-//! `sdks/shared-test-results/kcore-parity-vectors.json`, produced by
-//! `scripts/gen-kcore-parity-vectors.mjs` with the JS reference SDK (kcore off) and cross-checked
+//! `tests/fixtures/kcore-parity-vectors.json` is a vendored copy of the monorepo master, produced
+//! by `scripts/gen-kcore-parity-vectors.mjs` with the JS reference SDK (kcore off) and cross-checked
 //! by re-signing under JS kcore. Sixteen cases: metadata, value transfer, token creation and
 //! wallet creation, each under OTS v1 and v2, with unique or colliding `createdAt` values.
 //!

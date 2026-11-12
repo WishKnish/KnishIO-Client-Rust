@@ -5,22 +5,16 @@
 //!
 //! Run: cargo test --test patent_vector_validation
 
-// cycle 127: the suite below reads the monorepo shared fixtures (include_str!), which a
-// standalone checkout of this SDK lacks; build.rs sets `has_shared_fixtures` when they exist.
-// Without them the suite is not compiled, and the ignored test below says so in the report
-// instead of the binary silently running 0 tests.
-#[cfg(not(has_shared_fixtures))]
-#[test]
-#[ignore = "../shared-test-results absent: patent vector suite not compiled in a standalone checkout"]
-fn shared_fixtures_absent() {}
+// The suite reads the vendored copy `tests/fixtures/canonical-patent-vectors.json` (synced from
+// the monorepo master by scripts/sync-cross-sdk-fixtures.sh); a missing copy fails the build.
 
 #[allow(dead_code)] // this suite reads only PHASE_B_VECTORS_JSON of the shared fixture file
 #[path = "fixtures/mod.rs"]
 mod fixtures;
 
 /// Phase B vectors (contract 9.1 replenish, 9.2 stackable fusion, 9.6 buffer withdraw, create_token
-/// units), read from the frozen fixture mirror so they also run in a standalone checkout; the gated
-/// suite below pins the mirror to the master. Every built molecule must also pass the SDK's own check.
+/// units), read from the frozen fixture mirror; `patent_vectors` below pins the mirror to the
+/// vendored canonical vectors. Every built molecule must also pass the SDK's own check.
 mod phase_b_vectors {
     use super::fixtures::PHASE_B_VECTORS_JSON;
     use knishio_client::types::MoleculeFromJsonOptions;
@@ -374,7 +368,6 @@ mod phase_b_vectors {
     }
 }
 
-#[cfg(has_shared_fixtures)]
 mod patent_vectors {
     use serde::Deserialize;
     use knishio_client::crypto::{
@@ -525,7 +518,7 @@ mod patent_vectors {
     // ── Load canonical vectors ──────────────────────────────────────────────
 
     const PATENT_VECTORS_JSON: &str = include_str!(
-        "../../../sdks/shared-test-results/canonical-patent-vectors.json"
+        "fixtures/canonical-patent-vectors.json"
     );
 
     fn load_patent_vectors() -> PatentVectors {
