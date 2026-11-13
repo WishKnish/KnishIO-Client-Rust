@@ -2464,8 +2464,7 @@ impl KnishIOClient {
         molecule.sign(bundle, false, true)?;
 
         // Check molecule (matches JS line 1868). Pass the source wallet so CheckMolecule::isotope_v
-        // validates the 3-atom value molecule via its sender branch (remainder = balance + (-balance)
-        // = 0 == sum). With sender=None, isotope_v rejects any 3-atom V molecule (TransferRemainder).
+        // also checks the balance: remainder = balance + (-balance) = 0 == sum.
         molecule.check(Some(&source_wallet))?;
 
         // Create & execute a mutation (matches JS lines 1871-1875)

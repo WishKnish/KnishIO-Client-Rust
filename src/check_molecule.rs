@@ -555,7 +555,6 @@ impl<'a> CheckMolecule<'a> {
         }
 
         let mut sum = 0.0;
-        let mut value: f64 = 0.0;
 
         for (index, atom) in self.molecule.atoms.iter().enumerate() {
             // Not V? Next...
@@ -564,7 +563,7 @@ impl<'a> CheckMolecule<'a> {
             }
 
             // Making sure we're in number land
-            value = atom.value.as_ref()
+            let value: f64 = atom.value.as_ref()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0);
 
@@ -608,7 +607,7 @@ impl<'a> CheckMolecule<'a> {
 
         // If we're provided with a senderWallet argument, we can perform additional checks
         if let Some(sender) = sender_wallet {
-            value = first_atom.value.as_ref()
+            let value: f64 = first_atom.value.as_ref()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0);
 
@@ -628,10 +627,10 @@ impl<'a> CheckMolecule<'a> {
             if !has_cross_isotope && remainder != sum {
                 return Err(KnishIOError::TransferRemainder);
             }
-        } else if value != 0.0 {
-            // No senderWallet, but have a remainder?
-            return Err(KnishIOError::TransferRemainder);
         }
+        // Without a sender wallet only V-only conservation (above) applies: the validator and
+        // verify_from_server_data check served transfers this way, and a transfer's last V atom is
+        // its remainder, which is normally non-zero.
 
         Ok(true)
     }
@@ -1403,6 +1402,18 @@ mod tests {
             v_atom(10.0, "d2", 2),
         ]);
         let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(matches!(checker.isotope_v(None).unwrap_err(), KnishIOError::TransferUnbalanced));
+    }
+
+    /// Without a sender wallet only V-only conservation applies: the validator and served-molecule
+    /// checks verify transfers this way, and a transfer's last V atom is its non-zero remainder.
+    #[test]
+    fn test_isotope_v_without_sender_accepts_a_balanced_remainder() {
+        let molecule = checkable(vec![v_atom(-10.0, "src", 0), v_atom(4.0, "dst", 1), v_atom(6.0, "rem", 2)]);
+        let checker = CheckMolecule::new(&molecule).unwrap();
+        assert!(checker.isotope_v(None).is_ok());
+        let unbalanced = checkable(vec![v_atom(-10.0, "src", 0), v_atom(4.0, "dst", 1), v_atom(5.0, "rem", 2)]);
+        let checker = CheckMolecule::new(&unbalanced).unwrap();
         assert!(matches!(checker.isotope_v(None).unwrap_err(), KnishIOError::TransferUnbalanced));
     }
 }

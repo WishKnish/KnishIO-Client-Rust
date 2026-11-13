@@ -102,6 +102,13 @@ and run against a loopback stub validator.
   from the provider for that call; they failed with `MissingSecret` or `Unauthenticated`. The secret is not
   kept on the client.
 
+This one changes verification only; no signed or hashed bytes change.
+
+- `CheckMolecule` (and so `Molecule::check(None)`) no longer returns `TransferRemainder` for a V molecule
+  checked without a sender wallet whose last V atom is non-zero. That atom is a transfer's remainder, so
+  ordinary balanced transfers checked without a wallet were rejected; the validator does not apply the
+  rule and the JS SDK has dropped it too. Conservation is still enforced.
+
 ### Security
 
 - `Debug` no longer prints secrets: `Molecule` (`secret`), `StorageOptions` (`passphrase`,
