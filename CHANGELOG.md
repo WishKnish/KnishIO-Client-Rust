@@ -32,7 +32,7 @@ detail, the entry says so instead of guessing.
 
 ### Changed
 
-- Dependency updates (`Cargo.lock` only): tokio 1.54.1, serde_json 1.0.154, sha2 0.11.1, uuid 1.29.0, rayon 1.12.0.
+- Dependency updates (`Cargo.lock` only): tokio 1.54.1, serde_json 1.0.154, sha2 0.11.1, uuid 1.29.0, rayon 1.12.0, aes 0.9.4.
 - The cross-platform, canonical patent and OTS v2 vector suites read vendored copies in `tests/fixtures/`
   (`cross-platform-test-vectors.json`, `canonical-patent-vectors.json`, `ots-v2-vectors.json`, synced from
   the monorepo masters) instead of `../shared-test-results/`. `build.rs` is gone: it compiled the three
