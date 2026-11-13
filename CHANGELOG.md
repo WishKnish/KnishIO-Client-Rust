@@ -47,6 +47,10 @@ detail, the entry says so instead of guessing.
   `StandardResponse::from_legacy_response`). `docs/GraphQL_Client.md` passes a `Wallet` to
   `set_auth_data` and configures the client with `ClientConfig` and `RetryConfig` instead of the
   nonexistent `PoolConfig` and builder methods.
+- The `kcore` feature is documented and tested against KnishIO-Crypto-Core 0.2.1 (was 0.2.0), which
+  zeroes ML-KEM secrets, WOTS+ chain preimages and Keccak state on the stack before each call
+  returns. Outputs and the ABI are unchanged. The `knishio-kcore` binding crate is unchanged and
+  still accepts any 0.2.x package.
 
 ### Fixed
 

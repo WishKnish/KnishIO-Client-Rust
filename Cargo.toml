@@ -139,7 +139,7 @@ secure-enclave = ["dep:security-framework", "dep:security-framework-sys", "dep:c
 simd-optimized = ["sha3-asm"]    # Enable SIMD optimizations
 benchmark-mode = []              # Enable benchmarking-specific optimizations
 # WOTS+ chains and address through KnishIO-Crypto-Core (static libkcore.a). Build with
-# KNISHIO_KCORE_DIR=<extracted kcore 0.2.0 package root>. ML-KEM stays on libcrux.
+# KNISHIO_KCORE_DIR=<extracted kcore 0.2.1 package root>. ML-KEM stays on libcrux.
 kcore = ["dep:knishio-kcore"]
 # Batch verification across the rayon pool (CheckMolecule::verify_from_server_data_batch).
 parallel = ["dep:rayon"]
