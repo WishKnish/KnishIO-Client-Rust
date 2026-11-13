@@ -16,6 +16,15 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-11-12
+
+### Upgrade notes
+
+- `Molecule::sign_with_secret`, `Molecule::init_deposit_buffer` and helpers such as
+  `utils::strings::hex_to_base17` now return the JS values (see Fixed).
+- A reply to a request sent in the CipherHash envelope is accepted only as an encrypted envelope; a
+  plaintext reply now fails (see Security).
+
 ### Added
 
 - CI generates a CycloneDX SBOM of the committed `Cargo.lock` (default features, all targets) with
@@ -742,7 +751,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/2.2.0...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/2.3.0...HEAD
+[2.3.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.3.0
 [2.2.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.2.0
 [2.1.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.1.0
 [2.0.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.0.0
