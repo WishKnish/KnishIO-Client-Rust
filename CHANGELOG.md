@@ -16,6 +16,17 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+## [2.3.1] — 2026-11-13
+
+### Upgrade notes
+
+- Breaking API change in a patch release: `create_meta`, `create_token`, `request_tokens`,
+  `request_authorization`, `create_rule` and `create_policy` take ordered metas and policies, and
+  `TokenUnit.metas` and `PolicyMeta` are ordered maps, so signed bytes follow the caller's order as
+  in JS (see Changed).
+- `sign_sync` produces compressed signatures, and `create_token` no longer gives a non-stackable
+  token a batch id (see Fixed).
+
 ### Added
 
 - `OrderedValue`, `OrderedMap` and `PolicyMap` (`types::ordered`, re-exported at the crate root):
@@ -806,7 +817,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/2.3.0...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/2.3.1...HEAD
+[2.3.1]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.3.1
 [2.3.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.3.0
 [2.2.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.2.0
 [2.1.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.1.0
