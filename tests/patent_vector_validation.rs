@@ -18,7 +18,7 @@ mod fixtures;
 mod phase_b_vectors {
     use super::fixtures::PHASE_B_VECTORS_JSON;
     use knishio_client::types::MoleculeFromJsonOptions;
-    use knishio_client::{generate_bundle_hash, generate_secret, Atom, Isotope, KnishIOClient, KnishIOError, Molecule, TokenUnit, Wallet};
+    use knishio_client::{generate_bundle_hash, generate_secret, Atom, Isotope, KnishIOClient, KnishIOError, MetaItem, Molecule, TokenUnit, Wallet};
     use serde_json::{json, Value};
     use std::collections::HashMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -82,7 +82,7 @@ mod phase_b_vectors {
                     Ok(TokenUnit::new(
                         triple[0].as_str().ok_or("id")?.to_string(),
                         triple[1].as_str().ok_or("name")?.to_string(),
-                        triple[2].as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
+                        triple[2].as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone().into())).collect()),
                     ))
                 })
                 .collect::<TestResult<_>>()?;
@@ -340,8 +340,8 @@ mod phase_b_vectors {
             let (url, mut received) = loopback_validator().await?;
             let mut client = KnishIOClient::new(url.as_str(), Some("public".to_string()), None, None, None, Some(false));
             client.set_secret(secret.as_str());
-            let meta = HashMap::from([("fungibility".to_string(), Value::from("stackable"))]);
-            client.create_token(test["token"].as_str().ok_or("token")?, None, Some(meta), None, strings(&test["units"])?).await
+            let meta = vec![MetaItem::new("fungibility", "stackable")];
+            client.create_token(test["token"].as_str().ok_or("token")?, None, meta, None, strings(&test["units"])?).await
                 .map_err(|e| format!("[{name}] create_token: {e}"))?;
 
             let mut proposals = Vec::new();
@@ -363,6 +363,100 @@ mod phase_b_vectors {
             assert_eq!(molecule.atoms[0].isotope, Isotope::C, "[{name}] reconstructed C atom");
             assert_eq!(unit_ids(&molecule.atoms[0])?, strings(&test["expectedTokenUnitIds"])?, "[{name}] tokenUnits ids");
             molecule.check(None).map_err(|e| format!("[{name}] check: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// The C atom of the molecule the public `create_token` proposes for token `STK`.
+    async fn proposed_create_token(
+        secret: &str,
+        amount: Option<f64>,
+        meta: Vec<MetaItem>,
+        batch_id: Option<&str>,
+        units: Vec<String>,
+    ) -> TestResult<Value> {
+        let (url, mut received) = loopback_validator().await?;
+        let mut client = KnishIOClient::new(url.as_str(), Some("public".to_string()), None, None, None, Some(false));
+        client.set_secret(secret);
+        client.create_token("STK", amount, meta, batch_id, units).await?;
+        let mut proposals = Vec::new();
+        while let Ok(request) = received.try_recv() {
+            if request["query"].as_str().unwrap_or_default().contains("ProposeMolecule") {
+                proposals.push(request["variables"]["molecule"].clone());
+            }
+        }
+        Ok(proposals.last().ok_or("no molecule proposed")?["atoms"][0].clone())
+    }
+
+    fn wire_meta<'a>(atom: &'a Value, key: &str) -> Option<&'a str> {
+        atom["meta"].as_array()?.iter().find(|m| m["key"] == key)?["value"].as_str()
+    }
+
+    fn stackable() -> Vec<MetaItem> {
+        vec![MetaItem::new("fungibility", "stackable")]
+    }
+
+    fn unit_list() -> Vec<String> {
+        vec!["u1".to_string(), "u2".to_string()]
+    }
+
+    /// JS `createToken` gives only a stackable token a `batchId` meta (the given id, else a fresh
+    /// one) and builds the recipient wallet with the caller's batch id, not the generated one.
+    #[tokio::test]
+    async fn create_token_batch_ids_follow_js() -> TestResult {
+        let secret = generate_secret("create-token-batch-ids");
+
+        let c = proposed_create_token(&secret, None, stackable(), None, unit_list()).await?;
+        assert!(c["batchId"].is_null(), "stackable, no batch id: the C atom has none, got {}", c["batchId"]);
+        assert_eq!(wire_meta(&c, "walletBatchId"), None, "stackable, no batch id: the recipient wallet has none");
+        let generated = wire_meta(&c, "batchId").ok_or("stackable, no batch id: no batchId meta")?;
+        assert!(generated.len() == 64 && generated.chars().all(|ch| ch.is_ascii_hexdigit()), "a fresh batch id: {generated}");
+
+        let c = proposed_create_token(&secret, None, stackable(), Some("explicit-batch"), unit_list()).await?;
+        assert_eq!(c["batchId"], "explicit-batch", "stackable, explicit batch id: the C atom");
+        assert_eq!(wire_meta(&c, "walletBatchId"), Some("explicit-batch"), "stackable, explicit batch id: the wallet");
+        assert_eq!(wire_meta(&c, "batchId"), Some("explicit-batch"), "stackable, explicit batch id: the meta");
+
+        let c = proposed_create_token(&secret, Some(1000.0), Vec::new(), Some("explicit-batch"), vec![]).await?;
+        assert_eq!(c["batchId"], "explicit-batch", "fungible, explicit batch id: the C atom");
+        assert_eq!(wire_meta(&c, "walletBatchId"), Some("explicit-batch"), "fungible, explicit batch id: the wallet");
+        assert_eq!(wire_meta(&c, "batchId"), None, "fungible: no batchId meta, as JS");
+        Ok(())
+    }
+
+    /// The metas `create_token` builds for a stackable token with an explicit batch id and two
+    /// units, signed into the JS reference molecule: JS `createToken`'s meta object, then
+    /// `Molecule.initTokenCreation` with the USER wallets at `aa…`/`bb…`, the recipient at `cc…`
+    /// and `createdAt = '1700000000000'`, printed by the JS reference SDK (KNISHIO_KCORE=off).
+    #[tokio::test]
+    async fn create_token_metas_sign_the_js_molecule() -> TestResult {
+        use knishio_client::OtsVersion;
+        let secret = generate_secret("fleet-audit-2026-11");
+        for _ in 0..20 {
+            let c = proposed_create_token(&secret, None, stackable(), Some("explicit-batch"), unit_list()).await?;
+
+            // The metas create_token passed: every C meta before the recipient wallet's
+            let user_meta: Vec<MetaItem> = c["meta"].as_array().ok_or("C metas")?.iter()
+                .take_while(|m| m["key"] != "walletTokenSlug")
+                .map(|m| Ok(MetaItem::new(m["key"].as_str().ok_or("key")?, m["value"].as_str().ok_or("value")?)))
+                .collect::<TestResult<_>>()?;
+            assert_eq!(
+                serde_json::to_string(&user_meta)?,
+                r#"[{"key":"fungibility","value":"stackable"},{"key":"batchId","value":"explicit-batch"},{"key":"splittable","value":"1"},{"key":"decimals","value":"0"},{"key":"tokenUnits","value":"[[\"u1\",\"u1\",{}],[\"u2\",\"u2\",{}]]"}]"#
+            );
+
+            let wallet = |token: &str, at: &str, batch_id: Option<&str>| {
+                Wallet::new_with_ots_version(Some(&secret), None, Some(token), None, Some(&at.repeat(32)), batch_id, None, None, OtsVersion::V1)
+            };
+            let mut molecule = Molecule::new();
+            molecule.secret = Some(secret.clone());
+            molecule.source_wallet = Some(wallet("USER", "aa", None)?);
+            molecule.remainder_wallet = Some(wallet("USER", "bb", None)?);
+            molecule.init_token_creation(&wallet("STK", "cc", Some("explicit-batch"))?, 2.0, user_meta)?;
+            for atom in &mut molecule.atoms {
+                atom.created_at = "1700000000000".to_string();
+            }
+            assert_eq!(Atom::hash_atoms(&molecule.atoms, "base17")?, "04g5df2f94a1c19aaa4ac57d3d95ee278ea2037db233e6g1b051e5bgb020a70a");
         }
         Ok(())
     }

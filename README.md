@@ -147,25 +147,32 @@ This document will explain both ways.
   }
   ```
 
-- Writing new metadata for a **Meta Asset**:
+- Writing new metadata for a **Meta Asset** (the metas are signed in the order given; a policy
+  is a `PolicyMap`, kept in JS key order):
 
   ```rust,no_run
   async fn example(client: &mut knishio_client::KnishIOClient) -> knishio_client::Result<()> {
-      use std::collections::HashMap;
-      use serde_json::json;
+      use knishio_client::{MetaItem, OrderedMap, PolicyMap};
 
-      let mut metadata = HashMap::new();
-      metadata.insert("type".to_string(), json!("fire"));
-      metadata.insert("weaknesses".to_string(), json!("rock,water,electric"));
-      metadata.insert("immunities".to_string(), json!("ground"));
-      metadata.insert("hp".to_string(), json!("78"));
-      metadata.insert("attack".to_string(), json!("84"));
+      let metadata = vec![
+          MetaItem::new("type", "fire"),
+          MetaItem::new("weaknesses", "rock,water,electric"),
+          MetaItem::new("immunities", "ground"),
+          MetaItem::new("hp", "78"),
+          MetaItem::new("attack", "84"),
+      ];
+
+      // Only the owner may change `hp` (policy is optional)
+      let mut write = OrderedMap::new();
+      write.insert("hp".to_string(), vec!["self".to_string()]);
+      let mut policy = PolicyMap::new();
+      policy.insert("write".to_string(), write);
 
       let response = client.create_meta(
           "Pokemon",      // meta_type
           "Charizard",    // meta_id
           metadata,
-          None            // policy (optional)
+          Some(policy)    // policy (optional)
       ).await?;
 
       if response.success() {
@@ -213,19 +220,19 @@ This document will explain both ways.
 
   ```rust,no_run
   async fn example(client: &mut knishio_client::KnishIOClient) -> knishio_client::Result<()> {
-      use std::collections::HashMap;
-      use serde_json::json;
+      use knishio_client::MetaItem;
 
-      let mut token_meta = HashMap::new();
-      token_meta.insert("name".to_string(), json!("CrazyCoin"));
-      token_meta.insert("fungibility".to_string(), json!("fungible"));
-      token_meta.insert("supply".to_string(), json!("limited"));
-      token_meta.insert("decimals".to_string(), json!("2"));
+      let token_meta = vec![
+          MetaItem::new("name", "CrazyCoin"),
+          MetaItem::new("fungibility", "fungible"),
+          MetaItem::new("supply", "limited"),
+          MetaItem::new("decimals", "2"),
+      ];
 
       let response = client.create_token(
           "CRZY",                  // Token slug (ticker symbol)
           Some(100000000.0),       // Initial amount to issue
-          Some(token_meta),        // Token metadata
+          token_meta,              // Token metadata, signed in this order
           None,                    // batch_id (optional, for stackable tokens)
           vec![],                  // units (optional, for stackable tokens)
       ).await?;
@@ -265,11 +272,12 @@ This document will explain both ways.
 
   ```rust,no_run
   async fn example(client: &mut knishio_client::KnishIOClient) -> knishio_client::Result<()> {
-      use serde_json::json;
+      use knishio_client::OrderedValue;
 
-      let rule = vec![
-          json!({"key": "amount", "operator": "<=", "value": "1000"})
-      ];
+      // Rule objects keep their key order (parse JSON text, or convert a serde_json::Value)
+      let rule: Vec<OrderedValue> = serde_json::from_str(
+          r#"[{"condition":[{"key":"amount","value":"1000","comparison":"<="}],"callback":[{"action":"reject"}]}]"#
+      )?;
 
       let response = client.create_rule(
           "MyMetaType",  // meta_type

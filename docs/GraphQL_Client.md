@@ -174,6 +174,7 @@ let response = client.query(request).await?;
 use knishio_client::{
     GraphQLClient, SocketConfig, create_subscription_request
 };
+use serde_json::json;
 use std::time::Duration;
 
 // Configure WebSocket
@@ -187,18 +188,17 @@ let socket_config = SocketConfig {
 };
 
 // Create client with WebSocket support
-let ws_client = GraphQLClient::with_socket(
+let mut ws_client = GraphQLClient::with_socket(
     "https://api.knish.io/graphql",
     socket_config,
     false, // encrypt
-)
-.with_debug(true);
+);
 
-// Set authentication
+// Set authentication: token, validator ML-KEM public key, and the wallet that signed the login
 ws_client.set_auth_data(
     "your-auth-token".to_string(),
-    Some("your-public-key".to_string()),
-    Some("your-wallet-id".to_string()),
+    Some("validator-ml-kem-public-key".to_string()),
+    Some(auth_wallet), // knishio_client::Wallet
 );
 
 // Create subscription
@@ -219,8 +219,8 @@ let subscription = create_subscription_request(
     Some("WalletUpdates".to_string()),
 );
 
-// Subscribe with callback
-let handle = ws_client.subscribe(subscription, |response| {
+// Subscribe with a callback; the call returns Ok(()) when the subscription stream ends
+ws_client.subscribe(subscription, |response| {
     match response.data {
         Some(data) => println!("Wallet update: {}", data),
         None => {
@@ -232,10 +232,13 @@ let handle = ws_client.subscribe(subscription, |response| {
         }
     }
 }).await?;
-
-// Later, unsubscribe
-ws_client.unsubscribe(&handle.id).await;
 ```
+
+`GraphQLClient::subscribe` hands out no handle. To stop subscriptions one by one, subscribe
+through `KnishIOClient` (`subscribe_create_molecule`, `subscribe_wallet_status`,
+`subscribe_active_wallet`, `subscribe_active_session`) and stop them with
+`client.unsubscribe(operation_name).await` or `client.unsubscribe_all().await`, or use
+`WebSocketManager::unsubscribe(id).await`.
 
 ### 3. Retry Policies
 
@@ -259,6 +262,11 @@ let graphql_policy = RetryPolicy::graphql_optimized();
 #### Custom Retry Policy
 
 ```rust
+use knishio_client::{ClientConfig, GraphQLClient, RetryCondition, RetryPolicy, RetryStrategy};
+use knishio_client::graphql::RetryConfig;
+use std::time::Duration;
+
+// A RetryPolicy drives execute_with_retry (below)
 let custom_policy = RetryPolicy::new()
     .with_strategy(RetryStrategy::ExponentialBackoff { multiplier: 1.5 })
     .with_max_attempts(5)
@@ -274,14 +282,24 @@ let custom_policy = RetryPolicy::new()
         },
     ]);
 
-let client = GraphQLClient::new("https://api.knish.io/graphql")
-    .with_retry_config(custom_policy);
+// The client's own request retries take a RetryConfig
+let client = GraphQLClient::with_config(
+    "https://api.knish.io/graphql",
+    ClientConfig::default(),
+    RetryConfig {
+        max_attempts: 5,
+        initial_delay: Duration::from_millis(1000),
+        max_delay: Duration::from_secs(30),
+        backoff_multiplier: 1.5,
+        ..RetryConfig::default()
+    },
+);
 ```
 
 #### Manual Retry Execution
 
 ```rust
-use knishio_client::{execute_with_retry};
+use knishio_client::{execute_with_retry, RetryPolicy};
 
 let policy = RetryPolicy::network_optimized();
 
@@ -296,23 +314,27 @@ let result = execute_with_retry(policy, true, || async {
 The client automatically manages HTTP connections for optimal performance.
 
 ```rust
-use knishio_client::{PoolConfig, global_pool};
+use knishio_client::{ConnectionPoolConfig, global_pool};
+use knishio_client::graphql::ConnectionPool;
+use std::time::Duration;
 
 // Configure pool settings
-let pool_config = PoolConfig {
-    max_connections: 200,
+let pool_config = ConnectionPoolConfig {
+    max_clients_per_endpoint: 20,
+    idle_timeout: Duration::from_secs(300),
     connect_timeout: Duration::from_secs(5),
     request_timeout: Duration::from_secs(30),
     keep_alive_timeout: Duration::from_secs(60),
     cleanup_interval: Duration::from_secs(30),
     user_agent: "MyApp/1.0".to_string(),
+    insecure_tls: false,
 };
+let pool = ConnectionPool::with_config(pool_config);
 
-// Use global pool for efficiency across multiple clients
-let pool = global_pool();
-let stats = pool.get_stats().await;
+// Or use the global pool for efficiency across multiple clients
+let stats = global_pool().get_stats().await;
 
-println!("Pool stats: {} active connections", stats.total_clients);
+println!("Pool stats: {} pooled clients", stats.total_clients);
 ```
 
 ### 5. Health Checks and Monitoring
@@ -332,9 +354,9 @@ println!("  Authenticated: {}", stats.is_authenticated);
 println!("  Encryption: {}", stats.encryption_enabled);
 println!("  Active Subscriptions: {}", stats.active_subscriptions);
 
-// Active subscriptions
-let subscription_count = client.subscription_count().await;
-let active_subs = client.get_active_subscriptions().await;
+// On a KnishIOClient: the subscriptions it manages
+let subscription_count = knishio_client.active_subscription_count().await;
+let active_subs = knishio_client.list_active_subscriptions().await;
 println!("Active subscriptions: {} ({:?})", subscription_count, active_subs);
 ```
 
@@ -372,38 +394,36 @@ match client.query(query).await {
 
 ## Integration with KnishIOClient
 
-The GraphQL client integrates seamlessly with the main KnishIOClient:
+`KnishIOClient` takes a `GraphQLClient` as its fourth constructor argument and runs query objects
+through `execute_query`; health checks and connection statistics live on the `GraphQLClient`:
 
 ```rust
-use knishio_client::{KnishIOClient, GraphQLRequest};
+use knishio_client::{GraphQLClient, KnishIOClient};
+use knishio_client::query::QueryBalance;
+use serde_json::json;
+
+let graphql = GraphQLClient::new("https://api.knish.io/graphql");
 
 // Create main client
 let mut client = KnishIOClient::new(
     "https://api.knish.io/graphql",
     None, // cell_slug
     None, // socket config
-    None, // custom GraphQL client
+    Some(graphql.clone()), // custom GraphQL client
     Some(3), // server SDK version
     Some(true), // logging
 );
 
-// The client automatically uses the enhanced GraphQL client
-let query = create_query_request(
-    "query { Balance(bundleHash: $hash) { amount } }",
-    Some(json!({"hash": "bundle-hash"})),
-);
+// Execute a query object through the main client
+let response = client.execute_query(
+    &QueryBalance::new(),
+    Some(json!({"bundleHash": "bundle-hash", "token": "KNISH"})),
+).await?;
 
-// Execute through the main client
-let response = client.execute_graphql_query(query).await?;
-
-// Health check through main client
-let is_healthy = client.health_check().await?;
-
-// Get connection statistics
-let stats = client.get_connection_stats().await;
-if let Some(stats) = stats {
-    println!("Connection stats: {:?}", stats);
-}
+// Health check and connection statistics through the GraphQL client
+let is_healthy = graphql.health_check().await?;
+let stats = graphql.get_stats().await;
+println!("Connection stats: {:?}", stats);
 ```
 
 ## Performance Optimizations
@@ -454,8 +474,9 @@ for result in responses {
     // ... use client
 } // Client and all subscriptions are cleaned up here
 
-// Manual cleanup for long-lived clients
-client.unsubscribe_all().await;
+// Manual cleanup for long-lived clients (GraphQLClient::unsubscribe_all is synchronous;
+// KnishIOClient::unsubscribe_all is async)
+client.unsubscribe_all();
 ```
 
 ## Debugging and Logging
@@ -463,39 +484,46 @@ client.unsubscribe_all().await;
 Enable detailed logging for troubleshooting:
 
 ```rust
-// Initialize tracing
-tracing_subscriber::init();
+use knishio_client::ClientBuilder;
 
-// Create client with debug enabled
-let client = GraphQLClient::new("https://api.knish.io/graphql")
-    .with_debug(true);
+// Initialize tracing
+tracing_subscriber::fmt::init();
+
+// Create a client with logging enabled
+let client = ClientBuilder::new()
+    .uri("https://api.knish.io/graphql")
+    .logging(true)
+    .build()?;
 
 // Logs will include:
 // - Request/response details
 // - Retry attempts and backoff
 // - WebSocket connection events
-// - Connection pool statistics
 // - Authentication events
 ```
 
 ## Configuration Reference
 
-### PoolConfig
+### ConnectionPoolConfig
 
 ```rust
-pub struct PoolConfig {
-    /// Maximum number of connections per endpoint
-    pub max_connections: usize,
-    /// Connection timeout for new connections  
+pub struct PoolConfig { // re-exported as knishio_client::ConnectionPoolConfig
+    /// Maximum number of clients per endpoint
+    pub max_clients_per_endpoint: usize,
+    /// Client idle timeout
+    pub idle_timeout: Duration,
+    /// Connection timeout for new clients
     pub connect_timeout: Duration,
-    /// Request timeout for individual requests
+    /// Request timeout
     pub request_timeout: Duration,
-    /// Keep-alive timeout for idle connections
+    /// Keep-alive settings
     pub keep_alive_timeout: Duration,
     /// Pool cleanup interval
     pub cleanup_interval: Duration,
-    /// User agent string for requests
+    /// User agent string
     pub user_agent: String,
+    /// Accept invalid TLS certificates (for self-signed certs in dev)
+    pub insecure_tls: bool,
 }
 ```
 
@@ -540,7 +568,7 @@ pub struct SocketConfig {
 ## Best Practices
 
 1. **Reuse Clients**: Create one client instance and reuse it across your application
-2. **Enable Debug Logging**: Use `.with_debug(true)` during development
+2. **Enable Logging**: Use `ClientBuilder::logging(true)` (or the `logging` argument of `KnishIOClient::new`) during development
 3. **Configure Timeouts**: Set appropriate timeouts based on your use case
 4. **Handle Errors Properly**: Use error categorization for appropriate handling
 5. **Clean Up Subscriptions**: Always unsubscribe when no longer needed
@@ -557,7 +585,7 @@ The Rust GraphQL client maintains API compatibility with the JavaScript SDK:
 | `client.query(request)` | `client.query(request).await` |
 | `client.mutate(request)` | `client.mutate(request).await` |
 | `client.subscribe(request, callback)` | `client.subscribe(request, callback).await` |
-| `client.unsubscribe(operationName)` | `client.unsubscribe(subscription_id).await` |
+| `client.unsubscribe(operationName)` | `knishio_client.unsubscribe(operation_name).await` (on `KnishIOClient`) |
 | `client.setAuthData(token, pubkey, wallet)` | `client.set_auth_data(token, pubkey, wallet)` |
 | `client.setUri(uri)` | `client.set_uri(uri)` |
 | `client.setEncryption(encrypt)` | `client.set_encryption(encrypt)` |
@@ -584,7 +612,7 @@ GraphQLResponse {
 
 ### Common Issues
 
-1. **Connection Timeouts**: Increase `connect_timeout` in `PoolConfig`
+1. **Connection Timeouts**: Increase `connect_timeout` in `ClientConfig` or `ConnectionPoolConfig`
 2. **Request Timeouts**: Increase `request_timeout` or use custom timeout per request
 3. **WebSocket Connection Issues**: Check `socket_uri` and authentication
 4. **Retry Not Working**: Verify error matches retry conditions
@@ -592,10 +620,10 @@ GraphQLResponse {
 
 ### Debug Checklist
 
-1. Enable debug logging: `.with_debug(true)`
+1. Enable logging: `ClientBuilder::logging(true)`
 2. Check health endpoint: `client.health_check().await`
 3. Verify authentication: Check `is_authenticated` in stats
-4. Monitor connection pool: Use `get_stats().await`
-5. Check active subscriptions: Use `get_active_subscriptions().await`
+4. Monitor connection pool: Use `global_pool().get_stats().await`
+5. Check active subscriptions: `client.get_stats().await.active_subscriptions`, or `list_active_subscriptions().await` on a `KnishIOClient`
 
 For more examples, see the [examples directory](../examples/) in the repository.

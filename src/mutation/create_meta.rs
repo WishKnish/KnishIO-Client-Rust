@@ -9,9 +9,8 @@ use crate::response::{Response, ResponseCreateMeta};
 use crate::molecule::Molecule;
 use crate::graphql::GraphQLClient;
 use crate::client::KnishIOClient;
-use crate::types::MetaItem;
+use crate::types::{MetaItem, PolicyMap};
 use serde_json::Value;
-use std::collections::HashMap;
 
 /// Parameters for fillMolecule (matches JS MutationCreateMeta fillMolecule parameters)
 /// JS: fillMolecule({ metaType, metaId, meta, policy })
@@ -21,10 +20,10 @@ pub struct CreateMetaParams {
     pub meta_type: String,
     /// The meta ID
     pub meta_id: String,
-    /// The metadata (array|object in JS)
-    pub meta: HashMap<String, Value>,
-    /// The policy object
-    pub policy: HashMap<String, Value>,
+    /// The metadata, signed in this order (JS `initMeta` with a meta list)
+    pub meta: Vec<MetaItem>,
+    /// The policy (`None` or empty: no policy atom, as JS `{}`)
+    pub policy: Option<PolicyMap>,
 }
 
 /// Mutation for creating metadata
@@ -54,20 +53,14 @@ impl MutationCreateMeta {
     pub fn fill_molecule(&mut self, params: CreateMetaParams) -> crate::error::Result<()> {
         // Call molecule's initMeta method (matches JS: this.$__molecule.initMeta({meta, metaType, metaId, policy}))
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
-            // Convert HashMap to Vec<MetaItem>
-            let meta_items: Vec<MetaItem> = params.meta.iter()
-                .map(|(k, v)| MetaItem::from_json(k, v))
-                .collect();
-            
-            // Convert policy HashMap to JSON string or None
-            let policy_str = if params.policy.is_empty() {
-                None
-            } else {
-                Some(serde_json::to_string(&params.policy).unwrap_or_default())
+            // The policy as JSON text in its key order; an empty policy adds no policy atom
+            let policy_str = match params.policy.filter(|policy| !policy.is_empty()) {
+                Some(policy) => Some(serde_json::to_string(&policy)?),
+                None => None,
             };
             
             molecule.init_meta(
-                meta_items,
+                params.meta,
                 &params.meta_type,
                 &params.meta_id,
                 policy_str.as_deref()
@@ -125,7 +118,6 @@ impl MutationCreateMeta {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
     use super::*;
     
     #[test]
@@ -139,23 +131,21 @@ mod tests {
     
     #[test]
     fn test_create_meta_params() {
-        let mut meta = HashMap::new();
-        meta.insert("name".to_string(), json!("Test User"));
-        meta.insert("email".to_string(), json!("test@example.com"));
+        let meta = vec![MetaItem::new("name", "Test User"), MetaItem::new("email", "test@example.com")];
         
-        let mut policy = HashMap::new();
-        policy.insert("access".to_string(), json!("public"));
+        let mut policy = PolicyMap::new();
+        policy.insert("read".to_string(), [("name".to_string(), vec!["all".to_string()])].into_iter().collect());
         
         let params = CreateMetaParams {
             meta_type: "user".to_string(),
             meta_id: "user123".to_string(),
             meta,
-            policy,
+            policy: Some(policy),
         };
         
         assert_eq!(params.meta_type, "user");
         assert_eq!(params.meta_id, "user123");
         assert_eq!(params.meta.len(), 2);
-        assert_eq!(params.policy.len(), 1);
+        assert_eq!(params.policy.map(|policy| policy.len()), Some(1));
     }
 }

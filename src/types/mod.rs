@@ -6,6 +6,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod ordered;
+pub use ordered::{OrderedMap, OrderedValue, PolicyMap};
+
 /// Isotope types for atomic operations
 ///
 /// Each isotope represents a different type of operation that can be
@@ -112,6 +115,21 @@ impl MetaItem {
             }),
         }
     }
+}
+
+/// Sets `key` in a meta list the way a JS property assignment sets it on a meta object: an
+/// existing item keeps its place and takes the new value, a new key is appended.
+pub(crate) fn assign_meta(meta: &mut Vec<MetaItem>, key: &str, value: impl Into<String>) {
+    let value = value.into();
+    match meta.iter_mut().find(|item| item.key == key) {
+        Some(item) => item.value = Some(value),
+        None => meta.push(MetaItem::new(key, value)),
+    }
+}
+
+/// The value of `key` in a meta list (JS `Dot.get(meta, key)` on a meta object).
+pub(crate) fn meta_value<'a>(meta: &'a [MetaItem], key: &str) -> Option<&'a str> {
+    meta.iter().find(|item| item.key == key).and_then(|item| item.value.as_deref())
 }
 
 // Re-export TokenUnit from the dedicated token_unit module

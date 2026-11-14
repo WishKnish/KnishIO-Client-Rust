@@ -5,8 +5,6 @@
 //! The test is `#[ignore]`d, so a default `cargo test` reports it as ignored. Run it live with:
 //!   OTS_MIGRATION_TEST_URL=http://localhost:8081/graphql cargo test --test ots_migration_live -- --ignored
 
-use std::collections::HashMap;
-
 use knishio_client::crypto::{generate_bundle_hash, generate_secret_with_params};
 use knishio_client::response::Response;
 use knishio_client::wallet::{OtsVersion, Wallet};
@@ -61,7 +59,7 @@ async fn a_client_set_to_ots_v2_moves_a_v1_identity_to_v2() {
     // The version 2 head signs a molecule
     let meta_id = format!("ots-migration-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_millis());
     let meta = second
-        .create_meta("ots-migration", &meta_id, HashMap::from([("k".to_string(), serde_json::json!("v"))]), None)
+        .create_meta("ots-migration", &meta_id, vec![knishio_client::MetaItem::new("k", "v")], None)
         .await
         .expect("createMeta");
     assert!(meta.success(), "createMeta accepted: {:?}", meta.reason());

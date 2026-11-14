@@ -11,7 +11,6 @@ use crate::graphql::GraphQLClient;
 use crate::client::KnishIOClient;
 use crate::types::MetaItem;
 use serde_json::Value;
-use std::collections::HashMap;
 
 /// Parameters for fillMolecule (matches JS MutationRequestTokens fillMolecule parameters)
 /// JS: fillMolecule({ token, amount, metaType, metaId, meta = null, batchId = null })
@@ -25,8 +24,8 @@ pub struct RequestTokensParams {
     pub meta_type: String,
     /// The meta ID
     pub meta_id: String,
-    /// Optional metadata (defaults to empty object in JS - meta = null)
-    pub meta: Option<HashMap<String, Value>>,
+    /// The metadata, signed in this order (JS `meta || {}`)
+    pub meta: Vec<MetaItem>,
     /// Optional batch ID (defaults to null in JS - batchId = null)
     pub batch_id: Option<String>,
 }
@@ -56,15 +55,6 @@ impl MutationRequestTokens {
     /// Fill the molecule with token request data (matches JS fillMolecule exactly)
     /// JS: fillMolecule({ token, amount, metaType, metaId, meta = null, batchId = null })
     pub fn fill_molecule(&mut self, params: RequestTokensParams) -> crate::error::Result<()> {
-        // Convert HashMap to Vec<MetaItem>
-        let meta_items: Vec<MetaItem> = if let Some(meta_map) = params.meta {
-            meta_map.iter()
-                .map(|(k, v)| MetaItem::from_json(k, v))
-                .collect()
-        } else {
-            Vec::new()
-        };
-        
         // Call molecule's initTokenRequest method (matches JS: this.$__molecule.initTokenRequest({token, amount, metaType, metaId, meta: meta || {}, batchId}))
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
             molecule.init_token_request(
@@ -72,7 +62,7 @@ impl MutationRequestTokens {
                 params.amount,
                 &params.meta_type,
                 &params.meta_id,
-                meta_items,
+                params.meta,
                 params.batch_id
             )?;
             
@@ -138,7 +128,7 @@ mod tests {
             amount: 1000.0,
             meta_type: "TestMeta".to_string(),
             meta_id: "test123".to_string(),
-            meta: None,
+            meta: Vec::new(),
             batch_id: None,
         };
         

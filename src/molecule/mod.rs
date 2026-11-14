@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::atom::{Atom, AtomCreateParams, WalletInfo};
 use crate::wallet::{OtsVersion, Wallet};
 use crate::crypto::{shake256, generate_bundle_hash};
-use crate::types::{Isotope, MetaItem};
+use crate::types::{Isotope, MetaItem, OrderedMap, OrderedValue};
 use crate::meta::AtomMeta;
 use crate::error::{KnishIOError, Result};
 use crate::token_unit::TokenUnit;
@@ -24,9 +24,9 @@ pub use builder::{TypeSafeMoleculeBuilder, ValueAtomParams, MetaAtomParams, Iden
 const ZERO_BUNDLE: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 /// A `tokenUnits` meta value: the compact triples `[[id, name, metas], …]` (JS `TokenUnit.toData`
-/// under `JSON.stringify`), the form every unit operation sends.
+/// under `JSON.stringify`, metas in JS key order), the form every unit operation sends.
 pub(crate) fn token_units_json(units: &[TokenUnit]) -> Result<String> {
-    let triples: Vec<Vec<serde_json::Value>> = units.iter().map(TokenUnit::to_data).collect();
+    let triples: Vec<Vec<OrderedValue>> = units.iter().map(TokenUnit::to_data).collect();
     Ok(serde_json::to_string(&triples)?)
 }
 
@@ -47,11 +47,11 @@ fn wallet_meta(wallet: &Wallet) -> Vec<MetaItem> {
     meta.meta
 }
 
-/// A builder's policy argument, given as JSON text; `None` is JS's default `{}`.
-fn parse_policy(policy: Option<&str>) -> Result<serde_json::Value> {
+/// A builder's policy argument, given as JSON text in document order; `None` is JS's default `{}`.
+fn parse_policy(policy: Option<&str>) -> Result<OrderedValue> {
     match policy {
         Some(text) => Ok(serde_json::from_str(text)?),
-        None => Ok(serde_json::Value::Object(serde_json::Map::new())),
+        None => Ok(OrderedValue::Object(OrderedMap::new())),
     }
 }
 
@@ -1206,8 +1206,7 @@ impl Molecule {
             }
         }
         if !units.is_empty() {
-            let triples: Vec<Vec<serde_json::Value>> = units.iter().map(TokenUnit::to_data).collect();
-            meta.push(MetaItem::new("tokenUnits", serde_json::to_string(&triples)?));
+            meta.push(MetaItem::new("tokenUnits", token_units_json(&units)?));
         }
 
         let mut atom = Atom::create(AtomCreateParams {
@@ -1249,10 +1248,10 @@ impl Molecule {
     }
 
     /// The R atom of `add_policy_atom`, from an already parsed policy.
-    fn push_policy_atom(&mut self, meta_type: &str, meta_id: &str, meta: Vec<MetaItem>, policy: serde_json::Value) -> Result<()> {
+    fn push_policy_atom(&mut self, meta_type: &str, meta_id: &str, meta: Vec<MetaItem>, policy: OrderedValue) -> Result<()> {
         if let Some(source_wallet) = &self.source_wallet {
             let mut atom_meta = AtomMeta::new(Some(meta));
-            atom_meta.add_policy(policy)?;
+            atom_meta.add_policy(crate::policy_meta::PolicyMeta::normalize_policy(&policy))?;
 
             let params = AtomCreateParams {
                 isotope: Isotope::R,
@@ -1478,7 +1477,7 @@ impl Molecule {
         let policy = parse_policy(policy)?;
         if let Some(source_wallet) = &self.source_wallet {
             let mut atom_meta = AtomMeta::new(Some(vec![MetaItem::new("rule", rule)]));
-            atom_meta.add_policy(policy)?;
+            atom_meta.add_policy(crate::policy_meta::PolicyMeta::normalize_policy(&policy))?;
 
             let params = AtomCreateParams {
                 isotope: Isotope::R,
@@ -1545,9 +1544,9 @@ impl Molecule {
             return Err(KnishIOError::BalanceInsufficient);
         }
 
-        let fused_triples: Vec<Vec<serde_json::Value>> = fused.iter().map(|unit| unit.to_data()).collect();
+        let fused_triples: Vec<OrderedValue> = fused.iter().map(|unit| OrderedValue::Array(unit.to_data())).collect();
         let mut fused_unit = new_unit.clone();
-        fused_unit.set_meta("fusedTokenUnits", serde_json::Value::from(fused_triples));
+        fused_unit.set_meta("fusedTokenUnits", OrderedValue::Array(fused_triples));
         let burned: Vec<TokenUnit> = fused[..fused.len() - 1].iter().map(|unit| (*unit).clone()).collect();
 
         let atom = |isotope: Isotope, wallet_info: WalletInfo, value: i128, meta_id: Option<String>, units: &[TokenUnit]| -> Result<Atom> {

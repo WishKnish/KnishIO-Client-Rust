@@ -4,7 +4,7 @@
 //! Each example shows the complete workflow from setup to execution.
 
 use knishio_client::{
-    KnishIOClient, GraphQLClient, Wallet, Molecule,
+    KnishIOClient, GraphQLClient, Wallet, Molecule, MetaItem,
     mutation::{
         Mutation,
         MutationProposeMolecule, MutationCreateWallet, MutationCreateToken,
@@ -15,7 +15,6 @@ use knishio_client::{
     },
 };
 use serde_json::json;
-use std::collections::HashMap;
 
 /// Example: Basic setup for all mutations
 #[tokio::main]
@@ -135,18 +134,19 @@ async fn example_create_token(
         None,
     )?;
 
-    // Prepare metadata
-    let mut meta = HashMap::new();
-    meta.insert("name".to_string(), json!("Test Token"));
-    meta.insert("symbol".to_string(), json!("TST"));
-    meta.insert("decimals".to_string(), json!(8));
-    meta.insert("totalSupply".to_string(), json!(1000000));
+    // Prepare metadata, signed in this order
+    let meta = vec![
+        MetaItem::new("name", "Test Token"),
+        MetaItem::new("symbol", "TST"),
+        MetaItem::new("decimals", "8"),
+        MetaItem::new("totalSupply", "1000000"),
+    ];
 
     // Create parameters
     let params = CreateTokenParams {
         recipient_wallet: recipient_wallet.clone(),
         amount: 1000.0,
-        meta: Some(meta),
+        meta,
     };
 
     // Create a molecule for token creation
@@ -253,10 +253,11 @@ async fn example_request_tokens(
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== RequestTokens Example ===");
 
-    // Prepare metadata for the request
-    let mut meta = HashMap::new();
-    meta.insert("reason".to_string(), json!("Testing token request"));
-    meta.insert("requestedBy".to_string(), json!("test-user"));
+    // Prepare metadata for the request, signed in this order
+    let meta = vec![
+        MetaItem::new("reason", "Testing token request"),
+        MetaItem::new("requestedBy", "test-user"),
+    ];
 
     // Create parameters
     let params = RequestTokensParams {
@@ -264,7 +265,7 @@ async fn example_request_tokens(
         amount: 500.0,
         meta_type: "tokenRequest".to_string(),
         meta_id: "req-123".to_string(),
-        meta: Some(meta),
+        meta,
         batch_id: Some("batch-456".to_string()),
     };
 
@@ -362,11 +363,12 @@ async fn example_request_authorization(
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== RequestAuthorization Example ===");
 
-    // Prepare metadata for the authorization request
-    let mut meta = HashMap::new();
-    meta.insert("purpose".to_string(), json!("API access"));
-    meta.insert("permissions".to_string(), json!(["read", "write"]));
-    meta.insert("duration".to_string(), json!("1h"));
+    // Prepare metadata for the authorization request, signed in this order
+    let meta = vec![
+        MetaItem::new("purpose", "API access"),
+        MetaItem::from_json("permissions", &json!(["read", "write"])),
+        MetaItem::new("duration", "1h"),
+    ];
 
     // Create parameters
     let params = RequestAuthorizationParams {
@@ -525,14 +527,13 @@ async fn example_helper_functions() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Use helper to create token creation
-    let mut metadata = HashMap::new();
-    metadata.insert("name".to_string(), json!("Helper Token"));
+    let metadata = vec![MetaItem::new("name", "Helper Token")];
 
     match helpers::create_token_creation(
         "creator-secret",
         &recipient_wallet,
         1000.0,
-        Some(metadata),
+        metadata,
     ) {
         Ok(_mutation) => {
             println!("Created token creation mutation using helper");

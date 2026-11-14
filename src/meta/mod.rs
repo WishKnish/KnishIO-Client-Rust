@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use crate::types::MetaItem;
+use crate::types::{MetaItem, PolicyMap};
 use crate::error::Result;
 
 // Re-export PolicyMeta from the dedicated policy_meta module
@@ -221,21 +221,18 @@ impl AtomMeta {
     ///
     /// Equivalent to AtomMeta.addPolicy() in JavaScript, including its default keys: JS passes
     /// `Object.keys(this.meta)` of the meta ARRAY, i.e. the indices `"0"`, `"1"`, …, so those
-    /// (not the meta key names) get the default read/write permissions.
+    /// (not the meta key names) get the default read/write permissions. The `policy` item is
+    /// appended with `merge`, its JSON in JS key order.
     ///
     /// # Arguments
     ///
     /// * `policy` - Policy data to add
-    pub fn add_policy(&mut self, policy: serde_json::Value) -> Result<&mut Self> {
+    pub fn add_policy(&mut self, policy: PolicyMap) -> Result<&mut Self> {
         let meta_keys: Vec<String> = (0..self.meta.len()).map(|index| index.to_string()).collect();
 
-        let policy_meta = PolicyMeta::new(policy, meta_keys);
-        let policy_json = policy_meta.to_json()?;
-        let mut policy_map = HashMap::new();
-        policy_map.insert("policy".to_string(), policy_json);
-        
-        self.merge_map(policy_map);
-        
+        let policy_json = PolicyMeta::new(policy, meta_keys).to_json()?;
+        self.merge(vec![MetaItem::new("policy", policy_json)]);
+
         Ok(self)
     }
 

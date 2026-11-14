@@ -311,12 +311,12 @@ pub mod helpers {
     /// * `secret` - User's secret key
     /// * `recipient_wallet` - Wallet to receive new tokens
     /// * `amount` - Amount of tokens to create
-    /// * `meta` - Optional metadata
+    /// * `meta` - Token metadata, signed in this order
     pub fn create_token_creation(
         secret: &str,
         recipient_wallet: &Wallet,
         amount: f64,
-        meta: Option<HashMap<String, serde_json::Value>>,
+        meta: Vec<crate::types::MetaItem>,
     ) -> Result<MutationCreateToken> {
         let mut molecule = Molecule::with_params(
             Some(secret.to_string()),
@@ -327,13 +327,8 @@ pub mod helpers {
             None,
         );
         
-        // Convert meta HashMap to Vec<MetaItem>
-        let meta_items = meta.unwrap_or_default().into_iter()
-            .map(|(k, v)| crate::types::MetaItem::from_json(&k, &v))
-            .collect();
-        
         // Initialize token creation in molecule
-        molecule.init_token_creation(recipient_wallet, amount, meta_items)?;
+        molecule.init_token_creation(recipient_wallet, amount, meta)?;
         let bundle = recipient_wallet.bundle.as_deref().unwrap_or("").to_string();
         molecule.sign(Some(bundle), false, true)?;
         molecule.check(None)?;

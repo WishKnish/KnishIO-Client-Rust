@@ -9,6 +9,7 @@ use crate::response::{Response, ResponseCreateRule};
 use crate::molecule::Molecule;
 use crate::graphql::GraphQLClient;
 use crate::client::KnishIOClient;
+use crate::types::{OrderedValue, PolicyMap};
 use serde_json::Value;
 
 /// Parameters for fillMolecule (matches JS MutationCreateRule fillMolecule parameters)
@@ -19,10 +20,10 @@ pub struct CreateRuleParams {
     pub meta_type: String,
     /// The meta ID
     pub meta_id: String,
-    /// The rule definition
-    pub rule: Vec<Value>,
-    /// The policy definition
-    pub policy: Value,
+    /// The rule definition, its objects signed in JS key order
+    pub rule: Vec<OrderedValue>,
+    /// The policy definition (`None` = JS's default `{}`)
+    pub policy: Option<PolicyMap>,
 }
 
 /// Mutation for creating new Meta attached to some MetaType
@@ -51,16 +52,18 @@ impl MutationCreateRule {
     pub fn fill_molecule(&mut self, params: CreateRuleParams) -> crate::error::Result<()> {
         // Call molecule's createRule method (matches JS: this.$__molecule.createRule({metaType, metaId, rule, policy}))
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
-            // Convert rule Vec<Value> to JSON string
-            let rule_str = serde_json::to_string(&params.rule).unwrap_or_default();
-            // Convert policy Value to Option<String>
-            let policy_str = params.policy.to_string();
+            // The rule and the policy as JSON text in their key order
+            let rule_str = serde_json::to_string(&params.rule)?;
+            let policy_str = match &params.policy {
+                Some(policy) => Some(serde_json::to_string(policy)?),
+                None => None,
+            };
             
             molecule.create_rule(
                 &params.meta_type,
                 &params.meta_id,
                 &rule_str,
-                Some(&policy_str)
+                policy_str.as_deref()
             )?;
             
             // Sign with empty params (matches JS: this.$__molecule.sign({}))
@@ -157,8 +160,8 @@ mod tests {
         let params = CreateRuleParams {
             meta_type: "user".to_string(),
             meta_id: "user123".to_string(),
-            rule: vec![json!({"condition": "email_verified"})],
-            policy: json!({"enforce": true}),
+            rule: vec![OrderedValue::from(json!({"condition": "email_verified"}))],
+            policy: None,
         };
         
         assert_eq!(params.meta_type, "user");

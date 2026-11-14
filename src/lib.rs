@@ -93,7 +93,7 @@ pub mod check_molecule;
 pub use atom::Atom;
 pub use error::{KnishIOError, Result};
 pub use molecule::{Molecule, TypeSafeMoleculeBuilder, ValueAtomParams, MetaAtomParams, IdentityAtomParams, TokenRequestAtomParams, BufferDepositAtomParams, BufferWithdrawAtomParams, FusionAtomParams, StackableTransferParams};
-pub use types::{Isotope, MetaItem};
+pub use types::{Isotope, MetaItem, OrderedMap, OrderedValue, PolicyMap};
 pub use wallet::{Wallet, MlKemParameterSet, OtsVersion};
 pub use client::{KnishIOClient, TransferRecipient, builder::ClientBuilder};
 pub use check_molecule::{CheckMolecule, IntegrityReport, MoleculeIntegrityResult};

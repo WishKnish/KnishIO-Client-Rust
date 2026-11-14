@@ -5,8 +5,8 @@
 //! TokenUnit.js implementation.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use crate::error::{KnishIOError, Result};
+use crate::types::ordered::{serialize_js_object, OrderedMap, OrderedValue};
 
 /// Represents a token unit with its metadata
 ///
@@ -22,8 +22,10 @@ pub struct TokenUnit {
     /// Human-readable name of the token unit
     pub name: String,
     
-    /// Metadata associated with this token unit
-    pub metas: HashMap<String, serde_json::Value>,
+    /// Metadata associated with this token unit, in insertion order; it serializes as a JS
+    /// object (array-index keys first), the order JS signs it in
+    #[serde(serialize_with = "serialize_js_object")]
+    pub metas: OrderedMap<OrderedValue>,
 }
 
 impl TokenUnit {
@@ -33,7 +35,7 @@ impl TokenUnit {
     ///
     /// * `id` - Unique identifier for the token unit
     /// * `name` - Human-readable name
-    /// * `metas` - Optional metadata map
+    /// * `metas` - Optional metadata map, in insertion order
     ///
     /// # Returns
     ///
@@ -43,15 +45,15 @@ impl TokenUnit {
     ///
     /// ```rust
     /// use knishio_client::token_unit::TokenUnit;
-    /// use std::collections::HashMap;
+    /// use knishio_client::OrderedMap;
     ///
     /// let token_unit = TokenUnit::new(
     ///     "token123".to_string(),
     ///     "My Token".to_string(),
-    ///     Some(HashMap::new())
+    ///     Some(OrderedMap::new())
     /// );
     /// ```
-    pub fn new(id: String, name: String, metas: Option<HashMap<String, serde_json::Value>>) -> Self {
+    pub fn new(id: String, name: String, metas: Option<OrderedMap<OrderedValue>>) -> Self {
         Self {
             id,
             name,
@@ -61,7 +63,8 @@ impl TokenUnit {
 
     /// Create a TokenUnit from GraphQL response data
     ///
-    /// Equivalent to TokenUnit.createFromGraphQL() in JavaScript SDK
+    /// Equivalent to TokenUnit.createFromGraphQL() in JavaScript SDK. The ledger sends `metas`
+    /// as JSON text; it is parsed in document order (JS `JSON.parse`).
     ///
     /// # Arguments
     ///
@@ -96,25 +99,17 @@ impl TokenUnit {
             .ok_or_else(|| KnishIOError::custom("Missing 'name' field in GraphQL data"))?
             .to_string();
 
-        let metas = if let Some(metas_value) = data.get("metas") {
-            if let Some(metas_str) = metas_value.as_str() {
-                // Parse JSON string if it's a string
-                if !metas_str.is_empty() {
-                    // parse failure → empty map (clippy::manual_unwrap_or_default)
-                    serde_json::from_str::<HashMap<String, serde_json::Value>>(metas_str).unwrap_or_default()
-                } else {
-                    HashMap::new()
-                }
-            } else if let Some(metas_obj) = metas_value.as_object() {
-                // Convert serde_json::Map to HashMap
-                metas_obj.iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect()
-            } else {
-                HashMap::new()
-            }
-        } else {
-            HashMap::new()
+        let metas = match data.get("metas") {
+            // JSON text in document order; empty, unparsable or not an object → no metas
+            Some(serde_json::Value::String(metas_str)) => match serde_json::from_str::<OrderedValue>(metas_str) {
+                Ok(OrderedValue::Object(map)) => map,
+                _ => OrderedMap::new(),
+            },
+            Some(metas_value @ serde_json::Value::Object(_)) => match OrderedValue::from(metas_value.clone()) {
+                OrderedValue::Object(map) => map,
+                _ => OrderedMap::new(),
+            },
+            _ => OrderedMap::new(),
         };
 
         Ok(Self { id, name, metas })
@@ -135,13 +130,13 @@ impl TokenUnit {
     /// # Example
     ///
     /// ```rust
-    /// use serde_json::json;
     /// use knishio_client::token_unit::TokenUnit;
+    /// use knishio_client::OrderedValue;
     ///
-    /// let data = json!(["token123", "My Token", {"fragmentZone": "zone1"}]);
+    /// let data: OrderedValue = serde_json::from_str(r#"["token123", "My Token", {"fragmentZone": "zone1"}]"#).unwrap();
     /// let token_unit = TokenUnit::create_from_db(&data).unwrap();
     /// ```
-    pub fn create_from_db(data: &serde_json::Value) -> Result<Self> {
+    pub fn create_from_db(data: &OrderedValue) -> Result<Self> {
         let array = data.as_array()
             .ok_or_else(|| KnishIOError::custom("Expected array data for TokenUnit"))?;
 
@@ -157,17 +152,7 @@ impl TokenUnit {
             .ok_or_else(|| KnishIOError::custom("Second element (name) must be a string"))?
             .to_string();
 
-        let metas = if array.len() > 2 {
-            if let Some(metas_obj) = array[2].as_object() {
-                metas_obj.iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect()
-            } else {
-                HashMap::new()
-            }
-        } else {
-            HashMap::new()
-        };
+        let metas = array.get(2).and_then(OrderedValue::as_object).cloned().unwrap_or_default();
 
         Ok(Self { id, name, metas })
     }
@@ -184,17 +169,9 @@ impl TokenUnit {
     ///
     /// ```rust
     /// use knishio_client::token_unit::TokenUnit;
-    /// use std::collections::HashMap;
-    /// use serde_json::json;
     ///
-    /// let mut metas = HashMap::new();
-    /// metas.insert("fragmentZone".to_string(), json!("zone1"));
-    ///
-    /// let token_unit = TokenUnit::new(
-    ///     "token123".to_string(),
-    ///     "My Token".to_string(),
-    ///     Some(metas)
-    /// );
+    /// let mut token_unit = TokenUnit::new("token123".to_string(), "My Token".to_string(), None);
+    /// token_unit.set_meta("fragmentZone", "zone1");
     ///
     /// assert_eq!(token_unit.get_fragment_zone(), Some("zone1".to_string()));
     /// ```
@@ -216,28 +193,21 @@ impl TokenUnit {
     ///
     /// ```rust
     /// use knishio_client::token_unit::TokenUnit;
-    /// use std::collections::HashMap;
     /// use serde_json::json;
     ///
-    /// let mut metas = HashMap::new();
-    /// metas.insert("fusedTokenUnits".to_string(), json!(["unit1", "unit2"]));
-    ///
-    /// let token_unit = TokenUnit::new(
-    ///     "token123".to_string(),
-    ///     "My Token".to_string(),
-    ///     Some(metas)
-    /// );
+    /// let mut token_unit = TokenUnit::new("token123".to_string(), "My Token".to_string(), None);
+    /// token_unit.set_meta("fusedTokenUnits", json!(["unit1", "unit2"]));
     ///
     /// let fused_units = token_unit.get_fused_token_units().unwrap();
-    /// assert_eq!(fused_units, json!(["unit1", "unit2"]));
+    /// assert_eq!(serde_json::Value::from(fused_units), json!(["unit1", "unit2"]));
     /// ```
-    pub fn get_fused_token_units(&self) -> Option<serde_json::Value> {
+    pub fn get_fused_token_units(&self) -> Option<OrderedValue> {
         self.metas.get("fusedTokenUnits").cloned()
     }
 
     /// Convert TokenUnit to array data format
     ///
-    /// Equivalent to toData() in JavaScript SDK
+    /// Equivalent to toData() in JavaScript SDK; the metas serialize in JS key order
     ///
     /// # Returns
     ///
@@ -247,7 +217,6 @@ impl TokenUnit {
     ///
     /// ```rust
     /// use knishio_client::token_unit::TokenUnit;
-    /// use serde_json::json;
     ///
     /// let token_unit = TokenUnit::new(
     ///     "token123".to_string(),
@@ -256,14 +225,14 @@ impl TokenUnit {
     /// );
     ///
     /// let data = token_unit.to_data();
-    /// assert_eq!(data[0], json!("token123"));
-    /// assert_eq!(data[1], json!("My Token"));
+    /// assert_eq!(data[0].as_str(), Some("token123"));
+    /// assert_eq!(data[1].as_str(), Some("My Token"));
     /// ```
-    pub fn to_data(&self) -> Vec<serde_json::Value> {
+    pub fn to_data(&self) -> Vec<OrderedValue> {
         vec![
-            serde_json::Value::String(self.id.clone()),
-            serde_json::Value::String(self.name.clone()),
-            serde_json::to_value(&self.metas).unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
+            OrderedValue::String(self.id.clone()),
+            OrderedValue::String(self.name.clone()),
+            OrderedValue::Object(self.metas.clone()),
         ]
     }
 
@@ -273,7 +242,7 @@ impl TokenUnit {
     ///
     /// # Returns
     ///
-    /// GraphQL-compatible response object
+    /// GraphQL-compatible response object (`metas` as JSON text in JS key order)
     ///
     /// # Example
     ///
@@ -295,11 +264,11 @@ impl TokenUnit {
         serde_json::json!({
             "id": self.id,
             "name": self.name,
-            "metas": serde_json::to_string(&self.metas).unwrap_or_else(|_| "{}".to_string())
+            "metas": OrderedValue::Object(self.metas.clone()).to_json_string()
         })
     }
 
-    /// Set a metadata value
+    /// Set a metadata value (a JS property assignment: an existing key keeps its place)
     ///
     /// # Arguments
     ///
@@ -310,7 +279,6 @@ impl TokenUnit {
     ///
     /// ```rust
     /// use knishio_client::token_unit::TokenUnit;
-    /// use serde_json::json;
     ///
     /// let mut token_unit = TokenUnit::new(
     ///     "token123".to_string(),
@@ -318,11 +286,11 @@ impl TokenUnit {
     ///     None
     /// );
     ///
-    /// token_unit.set_meta("fragmentZone", json!("zone1"));
+    /// token_unit.set_meta("fragmentZone", "zone1");
     /// assert_eq!(token_unit.get_fragment_zone(), Some("zone1".to_string()));
     /// ```
-    pub fn set_meta(&mut self, key: &str, value: serde_json::Value) {
-        self.metas.insert(key.to_string(), value);
+    pub fn set_meta(&mut self, key: &str, value: impl Into<OrderedValue>) {
+        self.metas.insert(key.to_string(), value.into());
     }
 
     /// Get a metadata value
@@ -339,7 +307,7 @@ impl TokenUnit {
     ///
     /// ```rust
     /// use knishio_client::token_unit::TokenUnit;
-    /// use serde_json::json;
+    /// use knishio_client::OrderedValue;
     ///
     /// let mut token_unit = TokenUnit::new(
     ///     "token123".to_string(),
@@ -347,14 +315,14 @@ impl TokenUnit {
     ///     None
     /// );
     ///
-    /// token_unit.set_meta("fragmentZone", json!("zone1"));
-    /// assert_eq!(token_unit.get_meta("fragmentZone"), Some(&json!("zone1")));
+    /// token_unit.set_meta("fragmentZone", "zone1");
+    /// assert_eq!(token_unit.get_meta("fragmentZone"), Some(&OrderedValue::from("zone1")));
     /// ```
-    pub fn get_meta(&self, key: &str) -> Option<&serde_json::Value> {
+    pub fn get_meta(&self, key: &str) -> Option<&OrderedValue> {
         self.metas.get(key)
     }
 
-    /// Remove a metadata value
+    /// Remove a metadata value; the other keys keep their order
     ///
     /// # Arguments
     ///
@@ -368,7 +336,7 @@ impl TokenUnit {
     ///
     /// ```rust
     /// use knishio_client::token_unit::TokenUnit;
-    /// use serde_json::json;
+    /// use knishio_client::OrderedValue;
     ///
     /// let mut token_unit = TokenUnit::new(
     ///     "token123".to_string(),
@@ -376,13 +344,13 @@ impl TokenUnit {
     ///     None
     /// );
     ///
-    /// token_unit.set_meta("fragmentZone", json!("zone1"));
+    /// token_unit.set_meta("fragmentZone", "zone1");
     /// let removed = token_unit.remove_meta("fragmentZone");
-    /// assert_eq!(removed, Some(json!("zone1")));
+    /// assert_eq!(removed, Some(OrderedValue::from("zone1")));
     /// assert_eq!(token_unit.get_fragment_zone(), None);
     /// ```
-    pub fn remove_meta(&mut self, key: &str) -> Option<serde_json::Value> {
-        self.metas.remove(key)
+    pub fn remove_meta(&mut self, key: &str) -> Option<OrderedValue> {
+        self.metas.shift_remove(key)
     }
 
     /// Check if this token unit has any metadata
@@ -398,7 +366,7 @@ impl TokenUnit {
     ///
     /// # Returns
     ///
-    /// Vector of all metadata keys
+    /// Vector of all metadata keys, in insertion order
     pub fn metadata_keys(&self) -> Vec<String> {
         self.metas.keys().cloned().collect()
     }
@@ -420,7 +388,14 @@ impl std::fmt::Display for TokenUnit {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::collections::HashMap;
+
+    fn ov(value: serde_json::Value) -> OrderedValue {
+        OrderedValue::from(value)
+    }
+
+    fn metas(entries: &[(&str, serde_json::Value)]) -> OrderedMap<OrderedValue> {
+        entries.iter().map(|(k, v)| (k.to_string(), ov(v.clone()))).collect()
+    }
 
     #[test]
     fn test_token_unit_new() {
@@ -437,9 +412,7 @@ mod tests {
 
     #[test]
     fn test_token_unit_new_with_metas() {
-        let mut metas = HashMap::new();
-        metas.insert("fragmentZone".to_string(), json!("zone1"));
-        metas.insert("fusedTokenUnits".to_string(), json!(["unit1", "unit2"]));
+        let metas = metas(&[("fragmentZone", json!("zone1")), ("fusedTokenUnits", json!(["unit1", "unit2"]))]);
 
         let token_unit = TokenUnit::new(
             "token123".to_string(),
@@ -466,7 +439,28 @@ mod tests {
         assert_eq!(token_unit.id, "token123");
         assert_eq!(token_unit.name, "My Token");
         assert_eq!(token_unit.get_fragment_zone(), Some("zone1".to_string()));
-        assert_eq!(token_unit.get_fused_token_units(), Some(json!(["unit1", "unit2"])));
+        assert_eq!(token_unit.get_fused_token_units(), Some(ov(json!(["unit1", "unit2"]))));
+    }
+
+    /// The ledger's metas text keeps its document order; `to_data` writes it in JS key order.
+    #[test]
+    fn test_create_from_graphql_keeps_document_order() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let data = json!({ "id": "u1", "name": "U1", "metas": r#"{"zone":"Z","10":1,"2":2,"attr":{"b":1,"a":2}}"# });
+        let token_unit = TokenUnit::create_from_graphql(&data)?;
+        assert_eq!(token_unit.metadata_keys(), ["zone", "10", "2", "attr"]);
+        assert_eq!(
+            serde_json::to_string(&token_unit.to_data())?,
+            r#"["u1","U1",{"2":2,"10":1,"zone":"Z","attr":{"b":1,"a":2}}]"#
+        );
+        assert_eq!(
+            token_unit.to_graphql_response()["metas"],
+            json!(r#"{"2":2,"10":1,"zone":"Z","attr":{"b":1,"a":2}}"#)
+        );
+        assert_eq!(
+            serde_json::to_string(&token_unit)?,
+            r#"{"id":"u1","name":"U1","metas":{"2":2,"10":1,"zone":"Z","attr":{"b":1,"a":2}}}"#
+        );
+        Ok(())
     }
 
     #[test]
@@ -500,31 +494,31 @@ mod tests {
         assert_eq!(token_unit.id, "token123");
         assert_eq!(token_unit.name, "My Token");
         assert_eq!(token_unit.get_fragment_zone(), Some("zone1".to_string()));
-        assert_eq!(token_unit.get_fused_token_units(), Some(json!(["unit1", "unit2"])));
+        assert_eq!(token_unit.get_fused_token_units(), Some(ov(json!(["unit1", "unit2"]))));
     }
 
     #[test]
     fn test_create_from_db() {
-        let data = json!([
+        let data = ov(json!([
             "token123",
             "My Token",
             {
                 "fragmentZone": "zone1",
                 "fusedTokenUnits": ["unit1", "unit2"]
             }
-        ]);
+        ]));
 
         let token_unit = TokenUnit::create_from_db(&data).unwrap();
 
         assert_eq!(token_unit.id, "token123");
         assert_eq!(token_unit.name, "My Token");
         assert_eq!(token_unit.get_fragment_zone(), Some("zone1".to_string()));
-        assert_eq!(token_unit.get_fused_token_units(), Some(json!(["unit1", "unit2"])));
+        assert_eq!(token_unit.get_fused_token_units(), Some(ov(json!(["unit1", "unit2"]))));
     }
 
     #[test]
     fn test_create_from_db_minimal() {
-        let data = json!(["token123", "My Token"]);
+        let data = ov(json!(["token123", "My Token"]));
 
         let token_unit = TokenUnit::create_from_db(&data).unwrap();
 
@@ -535,13 +529,10 @@ mod tests {
 
     #[test]
     fn test_get_fragment_zone() {
-        let mut metas = HashMap::new();
-        metas.insert("fragmentZone".to_string(), json!("zone1"));
-
         let token_unit = TokenUnit::new(
             "token123".to_string(),
             "My Token".to_string(),
-            Some(metas),
+            Some(metas(&[("fragmentZone", json!("zone1"))])),
         );
 
         assert_eq!(token_unit.get_fragment_zone(), Some("zone1".to_string()));
@@ -557,16 +548,13 @@ mod tests {
 
     #[test]
     fn test_get_fused_token_units() {
-        let mut metas = HashMap::new();
-        metas.insert("fusedTokenUnits".to_string(), json!(["unit1", "unit2"]));
-
         let token_unit = TokenUnit::new(
             "token123".to_string(),
             "My Token".to_string(),
-            Some(metas),
+            Some(metas(&[("fusedTokenUnits", json!(["unit1", "unit2"]))])),
         );
 
-        assert_eq!(token_unit.get_fused_token_units(), Some(json!(["unit1", "unit2"])));
+        assert_eq!(token_unit.get_fused_token_units(), Some(ov(json!(["unit1", "unit2"]))));
 
         let token_unit_empty = TokenUnit::new(
             "token456".to_string(),
@@ -579,36 +567,28 @@ mod tests {
 
     #[test]
     fn test_to_data() {
-        let mut metas = HashMap::new();
-        metas.insert("fragmentZone".to_string(), json!("zone1"));
-
         let token_unit = TokenUnit::new(
             "token123".to_string(),
             "My Token".to_string(),
-            Some(metas),
+            Some(metas(&[("fragmentZone", json!("zone1"))])),
         );
 
         let data = token_unit.to_data();
 
         assert_eq!(data.len(), 3);
-        assert_eq!(data[0], json!("token123"));
-        assert_eq!(data[1], json!("My Token"));
+        assert_eq!(data[0], ov(json!("token123")));
+        assert_eq!(data[1], ov(json!("My Token")));
         
         // Check that metas is properly serialized
-        let metas_value = &data[2];
-        assert!(metas_value.is_object());
-        assert_eq!(metas_value["fragmentZone"], json!("zone1"));
+        assert_eq!(data[2].as_object().and_then(|metas| metas.get("fragmentZone")), Some(&ov(json!("zone1"))));
     }
 
     #[test]
     fn test_to_graphql_response() {
-        let mut metas = HashMap::new();
-        metas.insert("fragmentZone".to_string(), json!("zone1"));
-
         let token_unit = TokenUnit::new(
             "token123".to_string(),
             "My Token".to_string(),
-            Some(metas),
+            Some(metas(&[("fragmentZone", json!("zone1"))])),
         );
 
         let response = token_unit.to_graphql_response();
@@ -618,9 +598,7 @@ mod tests {
         
         // Check that metas is properly JSON-encoded
         let metas_str = response["metas"].as_str().unwrap();
-        let parsed_metas: HashMap<String, serde_json::Value> = 
-            serde_json::from_str(metas_str).unwrap();
-        assert_eq!(parsed_metas["fragmentZone"], json!("zone1"));
+        assert_eq!(metas_str, r#"{"fragmentZone":"zone1"}"#);
     }
 
     #[test]
@@ -639,18 +617,16 @@ mod tests {
         token_unit.set_meta("key2", json!(42));
 
         assert!(token_unit.has_metadata());
-        assert_eq!(token_unit.metadata_keys().len(), 2);
-        assert!(token_unit.metadata_keys().contains(&"key1".to_string()));
-        assert!(token_unit.metadata_keys().contains(&"key2".to_string()));
+        assert_eq!(token_unit.metadata_keys(), ["key1", "key2"]);
 
         // Get metadata
-        assert_eq!(token_unit.get_meta("key1"), Some(&json!("value1")));
-        assert_eq!(token_unit.get_meta("key2"), Some(&json!(42)));
+        assert_eq!(token_unit.get_meta("key1"), Some(&ov(json!("value1"))));
+        assert_eq!(token_unit.get_meta("key2"), Some(&ov(json!(42))));
         assert_eq!(token_unit.get_meta("nonexistent"), None);
 
         // Remove metadata
         let removed = token_unit.remove_meta("key1");
-        assert_eq!(removed, Some(json!("value1")));
+        assert_eq!(removed, Some(ov(json!("value1"))));
         assert_eq!(token_unit.get_meta("key1"), None);
         assert_eq!(token_unit.metadata_keys().len(), 1);
 
@@ -672,25 +648,22 @@ mod tests {
         assert!(result.is_err());
 
         // Test invalid array data
-        let invalid_array = json!(["only_one_element"]);
+        let invalid_array = ov(json!(["only_one_element"]));
         let result = TokenUnit::create_from_db(&invalid_array);
         assert!(result.is_err());
 
         // Test non-array data
-        let invalid_data = json!({"not": "array"});
+        let invalid_data = ov(json!({"not": "array"}));
         let result = TokenUnit::create_from_db(&invalid_data);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_serialization() {
-        let mut metas = HashMap::new();
-        metas.insert("fragmentZone".to_string(), json!("zone1"));
-
         let token_unit = TokenUnit::new(
             "token123".to_string(),
             "My Token".to_string(),
-            Some(metas),
+            Some(metas(&[("fragmentZone", json!("zone1"))])),
         );
 
         // Test JSON serialization
@@ -737,14 +710,14 @@ mod tests {
         assert!(token_unit.metas.is_empty());
 
         // Test createFromDB with optional third element (JavaScript line 90-96)
-        let minimal_data = json!(["token123", "My Token"]);
+        let minimal_data = ov(json!(["token123", "My Token"]));
         let token_unit = TokenUnit::create_from_db(&minimal_data).unwrap();
         assert!(token_unit.metas.is_empty());
 
-        let full_data = json!(["token123", "My Token", {"key": "value"}]);
+        let full_data = ov(json!(["token123", "My Token", {"key": "value"}]));
         let token_unit = TokenUnit::create_from_db(&full_data).unwrap();
         assert_eq!(token_unit.metas.len(), 1);
-        assert_eq!(token_unit.get_meta("key"), Some(&json!("value")));
+        assert_eq!(token_unit.get_meta("key"), Some(&ov(json!("value"))));
 
         // Test null handling for getFragmentZone (JavaScript line 103)
         let token_unit_no_zone = TokenUnit::new("test".to_string(), "test".to_string(), None);

@@ -8,7 +8,7 @@
 
 use knishio_client::crypto::{generate_bundle_hash_with_source, generate_secret, generate_secret_with_params, shake256};
 use knishio_client::utils::strings::{charset_base_convert, hex_to_base17};
-use knishio_client::{Atom, Isotope, MetaItem, Molecule, OtsVersion, TokenUnit, Version4, Wallet};
+use knishio_client::{Atom, Isotope, MetaItem, Molecule, OrderedMap, OrderedValue, OtsVersion, TokenUnit, Version4, Wallet};
 use std::collections::HashMap;
 use std::error::Error;
 
@@ -142,7 +142,7 @@ fn deposit_buffer_carries_wallet_metas_like_js() -> TestResult {
     source.batch_id = Some(batch.clone());
     source.token_units = vec![
         TokenUnit::new("u1".to_string(), "Unit 1".to_string(), None),
-        TokenUnit::new("u2".to_string(), "Unit 2".to_string(), Some(HashMap::from([("color".to_string(), serde_json::json!("red"))]))),
+        TokenUnit::new("u2".to_string(), "Unit 2".to_string(), Some(OrderedMap::from([("color".to_string(), OrderedValue::from("red"))]))),
     ];
     let mut remainder = wallet(&secret, "TEST", "cc")?;
     remainder.batch_id = Some(batch);
@@ -238,5 +238,88 @@ fn version4_view_matches_the_hashed_structure() -> TestResult {
     assert_eq!(Atom::hash_atoms(&atoms, "hex")?, expected);
     let views: Vec<serde_json::Value> = atoms.iter().map(|a| Version4::from_atom(a).view()).collect();
     assert_eq!(shake256(&serde_json::to_string(&views)?, 256), expected);
+    Ok(())
+}
+
+// ── JS key order (RS-1, RS-2): a meta list keeps its order; an object (token-unit metas, policy)
+// lists its canonical array-index keys ascending, then the rest in insertion order. ──────────────
+
+#[test]
+fn init_meta_keeps_the_meta_list_order_like_js() -> TestResult {
+    let secret = secret();
+    let meta = || vec![MetaItem::new("z", "1"), MetaItem::new("10", "2"), MetaItem::new("2", "3"), MetaItem::new("a", "4")];
+    for _ in 0..20 {
+        let mut molecule = user_molecule(&secret)?;
+        molecule.init_meta(meta(), "probeType", "probe-1", None)?;
+        assert_eq!(
+            meta_json(&molecule.atoms[0])?,
+            r#"[{"key":"z","value":"1"},{"key":"10","value":"2"},{"key":"2","value":"3"},{"key":"a","value":"4"}]"#
+        );
+        assert_eq!(digest(&mut molecule)?, "05cf6300a55ec618f849816bf9616108204c7061f34dcg31da698bd49223e878");
+    }
+    Ok(())
+}
+
+#[test]
+fn token_unit_metas_serialize_in_js_key_order() -> TestResult {
+    for _ in 0..20 {
+        let mut unit = TokenUnit::new("u1".to_string(), "U1".to_string(), None);
+        unit.set_meta("z", serde_json::json!(1));
+        unit.set_meta("10", serde_json::json!(2));
+        unit.set_meta("2", serde_json::json!(3));
+        unit.set_meta("a", serde_json::json!(4));
+        assert_eq!(serde_json::to_string(&unit.to_data())?, r#"["u1","U1",{"2":3,"10":2,"z":1,"a":4}]"#);
+    }
+    Ok(())
+}
+
+#[test]
+fn fused_ledger_unit_metas_keep_the_js_key_order() -> TestResult {
+    let secret = secret();
+    for _ in 0..20 {
+        let u1 = TokenUnit::create_from_graphql(&serde_json::json!({
+            "id": "u1", "name": "U1", "metas": r#"{"zone":"Z","10":1,"2":2,"attr":{"b":1,"a":2}}"#,
+        }))?;
+        let u2 = TokenUnit::create_from_graphql(&serde_json::json!({ "id": "u2", "name": "U2", "metas": r#"{"fragmentZone":"F"}"# }))?;
+        let mut source = wallet(&secret, "STK", "aa")?;
+        source.balance = "3".to_string();
+        source.token_units = vec![u1, u2, TokenUnit::new("u3".to_string(), "U3".to_string(), None)];
+        let mut recipient = wallet(&secret, "STK", "bb")?;
+        recipient.token_units = vec![TokenUnit::new("n1".to_string(), "n1".to_string(), None)];
+        let mut molecule = Molecule::new();
+        molecule.secret = Some(secret.clone());
+        molecule.source_wallet = Some(source);
+        molecule.remainder_wallet = Some(wallet(&secret, "STK", "cc")?);
+        molecule.fuse_token(vec!["u1".to_string(), "u2".to_string()], &recipient)?;
+
+        let isotopes: String = molecule.atoms.iter().map(|a| a.isotope.as_str()).collect();
+        assert_eq!(isotopes, "VVFV");
+        let fused = molecule.atoms[2].meta.iter().find(|m| m.key == "tokenUnits").and_then(|m| m.value.as_deref()).ok_or("no F tokenUnits")?;
+        assert_eq!(
+            fused,
+            r#"[["n1","n1",{"fusedTokenUnits":[["u1","U1",{"2":2,"10":1,"zone":"Z","attr":{"b":1,"a":2}}],["u2","U2",{"fragmentZone":"F"}]]}]]"#
+        );
+        assert_eq!(digest(&mut molecule)?, "054187618g161b9185548g18fc3g391ca8d69445520a0fa88f01d9dc8730451a");
+    }
+    Ok(())
+}
+
+#[test]
+fn policy_keys_follow_the_js_object_order() -> TestResult {
+    let secret = secret();
+    let meta: Vec<MetaItem> = (0..12).map(|i| MetaItem::new(format!("k{i}"), format!("v{i}"))).collect();
+    let expected_policy = concat!(
+        r#"{"write":{"0":["self"],"1":["self"],"2":["self"],"3":["self"],"4":["self"],"5":["self"],"6":["self"],"7":["self"],"8":["self"],"9":["self"],"10":["self"],"11":["self"],"z":["self"],"a":["self"]},"#,
+        r#""read":{"0":["all"],"1":["all"],"2":["all"],"3":["all"],"4":["all"],"5":["all"],"6":["all"],"7":["all"],"8":["all"],"9":["all"],"10":["all"],"11":["all"]}}"#
+    );
+    for _ in 0..20 {
+        let mut molecule = user_molecule(&secret)?;
+        molecule.init_meta(meta.clone(), "probeType", "probe-1", Some(r#"{"write":{"z":["self"],"a":["self"]}}"#))?;
+        let isotopes: String = molecule.atoms.iter().map(|a| a.isotope.as_str()).collect();
+        assert_eq!(isotopes, "MRI");
+        let policy = molecule.atoms[1].meta.iter().find(|m| m.key == "policy").and_then(|m| m.value.as_deref()).ok_or("no policy meta")?;
+        assert_eq!(policy, expected_policy);
+        assert_eq!(digest(&mut molecule)?, "01cd91ad98e73ce1gc8g6681c8c353e67cag88e10e602528a783591f8437bge4");
+    }
     Ok(())
 }

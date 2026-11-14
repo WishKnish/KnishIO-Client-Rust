@@ -5,7 +5,7 @@
 
 use crate::crypto::{generate_address, generate_bundle_hash, generate_key, generate_key_v2};
 use crate::error::{KnishIOError, Result};
-use crate::types::TokenUnit;
+use crate::types::{OrderedValue, TokenUnit};
 use base64::Engine as _;
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -456,12 +456,13 @@ impl Wallet {
                                 return None;
                             }
                             let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            // `metas` is a JSON-encoded String scalar on the wire; accept an object too.
+                            // `metas` is a JSON-encoded String scalar on the wire, parsed in its
+                            // document order (JS JSON.parse); accept an object too.
                             let meta = match obj.get("metas") {
-                                Some(serde_json::Value::String(encoded)) => serde_json::from_str::<serde_json::Value>(encoded).ok(),
-                                other => other.cloned(),
+                                Some(serde_json::Value::String(encoded)) => serde_json::from_str::<OrderedValue>(encoded).ok(),
+                                other => other.cloned().map(OrderedValue::from),
                             }
-                            .and_then(|v| v.as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()));
+                            .and_then(|v| v.as_object().cloned());
                             Some(TokenUnit::new(id, name, meta))
                         } else if let Some(unit_array) = unit_data.as_array() {
                             if unit_array.len() < 2 {
@@ -469,10 +470,10 @@ impl Wallet {
                             }
                             let id = unit_array[0].as_str().unwrap_or("").to_string();
                             let name = unit_array[1].as_str().map(|s| s.to_string()).unwrap_or_default();
-                            let meta = (unit_array.len() > 2)
-                                .then(|| unit_array[2].as_object())
-                                .flatten()
-                                .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                            let meta = unit_array
+                                .get(2)
+                                .filter(|metas| metas.is_object())
+                                .and_then(|metas| OrderedValue::from(metas.clone()).as_object().cloned());
                             Some(TokenUnit::new(id, name, meta))
                         } else {
                             None
@@ -620,20 +621,15 @@ impl Wallet {
     /// # Returns
     ///
     /// Vector of TokenUnit objects
-    pub fn get_token_units(units_data: &[Vec<serde_json::Value>]) -> Vec<TokenUnit> {
+    pub fn get_token_units(units_data: &[Vec<OrderedValue>]) -> Vec<TokenUnit> {
         units_data
             .iter()
             .filter(|unit_data| unit_data.len() >= 2)
             .map(|unit_data| {
                 let id = unit_data[0].as_str().unwrap_or("").to_string();
                 let name = unit_data[1].as_str().map(|s| s.to_string()).unwrap_or_default();
-                
-                // Use conditional then() for cleaner meta parsing
-                let meta = (unit_data.len() > 2)
-                    .then(|| unit_data[2].as_object())
-                    .flatten()
-                    .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
-                
+                let meta = unit_data.get(2).and_then(OrderedValue::as_object).cloned();
+
                 TokenUnit::new(id, name, meta)
             })
             .collect()
@@ -643,8 +639,8 @@ impl Wallet {
     ///
     /// # Returns
     ///
-    /// Vector of token unit data arrays
-    pub fn get_token_units_data(&self) -> Vec<Vec<serde_json::Value>> {
+    /// Vector of token unit data arrays `[id, name, metas]` (JS `TokenUnit.toData`)
+    pub fn get_token_units_data(&self) -> Vec<Vec<OrderedValue>> {
         self.token_units.iter().map(|unit| {
             unit.to_data()
         }).collect()

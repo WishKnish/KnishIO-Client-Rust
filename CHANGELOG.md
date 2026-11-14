@@ -16,6 +16,61 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Added
+
+- `OrderedValue`, `OrderedMap` and `PolicyMap` (`types::ordered`, re-exported at the crate root):
+  insertion-ordered JSON whose objects serialize in JS key order (array-index keys ascending, then
+  insertion order). New dependency `indexmap` 2. `serde_json`'s `preserve_order` feature stays off.
+
+### Changed
+
+- Breaking: client metas and policies are ordered, so the signed bytes follow the order the caller
+  gives, as in JS. Before, they passed through `HashMap`/`BTreeMap`, so molecules with two or more
+  metas, token-unit metas or policy keys hashed differently from JS (and `create_meta` metas came out
+  in a different order on each run). Signatures, old → new:
+  - `KnishIOClient::create_meta(&mut self, meta_type, meta_id, meta: HashMap<String, Value>, policy: Option<HashMap<String, Value>>)`
+    → `create_meta(&mut self, meta_type, meta_id, meta: Vec<MetaItem>, policy: Option<PolicyMap>)`;
+  - `create_token(…, meta: Option<HashMap<String, Value>>, …)` → `create_token(…, meta: Vec<MetaItem>, …)`;
+  - `request_tokens(…, meta: Option<HashMap<String, Value>>, …)` → `request_tokens(…, meta: Vec<MetaItem>, …)`;
+  - `request_authorization(&mut self, meta: Option<HashMap<String, Value>>)` → `request_authorization(&mut self, meta: Vec<MetaItem>)`;
+  - `create_rule(…, rule: Vec<Value>, policy: Option<HashMap<String, Value>>)` → `create_rule(…, rule: Vec<OrderedValue>, policy: Option<PolicyMap>)`;
+  - `create_policy(…, policy: HashMap<String, Value>)` → `create_policy(…, policy: PolicyMap)`;
+  - `CreateMetaParams { meta: HashMap<String, Value>, policy: HashMap<String, Value> }` → `{ meta: Vec<MetaItem>, policy: Option<PolicyMap> }`;
+    `CreateTokenParams.meta`, `RequestTokensParams.meta`: `Option<HashMap<String, Value>>` → `Vec<MetaItem>`;
+    `RequestAuthorizationParams.meta`: `HashMap<String, Value>` → `Vec<MetaItem>`;
+    `CreateRuleParams { rule: Vec<Value>, policy: Value }` → `{ rule: Vec<OrderedValue>, policy: Option<PolicyMap> }`;
+    `mutation::helpers::create_token_creation(…, meta: Option<HashMap<String, Value>>)` → `(…, meta: Vec<MetaItem>)`;
+  - `TokenUnit.metas`: `HashMap<String, Value>` → `OrderedMap<OrderedValue>`; `TokenUnit::new(…, metas: Option<HashMap<String, Value>>)`
+    → `new(…, metas: Option<OrderedMap<OrderedValue>>)`; `to_data() -> Vec<Value>` → `Vec<OrderedValue>`;
+    `create_from_db(&Value)` → `create_from_db(&OrderedValue)`; `set_meta(&str, Value)` → `set_meta(&str, impl Into<OrderedValue>)`;
+    `get_meta`, `remove_meta`, `get_fused_token_units` return `OrderedValue`. `create_from_graphql` keeps the ledger's
+    `metas` text in document order;
+  - `Wallet::get_token_units(&[Vec<Value>])` → `get_token_units(&[Vec<OrderedValue>])`; `Wallet::get_token_units_data() -> Vec<Vec<Value>>`
+    → `Vec<Vec<OrderedValue>>`;
+  - `PolicyMeta.policy`: `BTreeMap<String, BTreeMap<String, Vec<String>>>` → `PolicyMap`; `PolicyMeta::new(policy: Value, …)`
+    → `new(policy: PolicyMap, …)`; `normalize_policy(Value)` → `normalize_policy(&OrderedValue)`; `get()` returns `&PolicyMap`;
+    `AtomMeta::add_policy(Value)` → `add_policy(PolicyMap)`.
+  The policy JSON now lists `write` before `read` when the policy gives `write` first, and `"2"` before `"10"`
+  (JS `PolicyMeta`); `Molecule::{init_meta, add_policy_atom, create_rule}` keep their JSON-text policy
+  argument and now keep its key order.
+
+### Fixed
+
+- `TypeSafeMoleculeBuilder::sign_sync` signed uncompressed (hex) OTS fragments; it now signs compressed
+  (base64), as JS `sign()` and the async `sign()` do.
+- `KnishIOClient::request_authorization` failed with `MissingSecret` when the client held its secret only
+  in a secret storage provider; it now reads the secret from the provider and does not cache it.
+- `execute_query` started a second login when the token had expired while a login was already running; it
+  now skips the refresh while authentication is in process, and the guest and profile logins hold that flag
+  while they run and restore the caller's value afterwards, as JS does.
+- `create_token` gave a non-stackable token a `batchId` meta when a batch id was passed, and built the
+  recipient wallet with the generated batch id; only a stackable token now gets a `batchId` meta (the given
+  one, else a fresh one), and the recipient wallet carries the caller's batch id, as in JS.
+- `docs/GraphQL_Client.md` showed calls that do not exist (`with_debug`, `with_retry_config`, `PoolConfig`
+  with `max_connections`, a subscription handle and `unsubscribe` on `GraphQLClient`, `subscription_count`,
+  `get_active_subscriptions`, `KnishIOClient::execute_graphql_query` / `health_check` /
+  `get_connection_stats`, an async `GraphQLClient::unsubscribe_all`); it now shows the real API.
+
 ## [2.3.0] — 2026-11-12
 
 ### Upgrade notes

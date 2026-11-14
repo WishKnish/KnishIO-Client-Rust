@@ -777,11 +777,12 @@ impl TypeSafeMoleculeBuilder<states::ReadyToSign> {
             self.molecule.bundle = Some(crate::crypto::generate_bundle_hash(secret));
         }
 
-        // Call the synchronous sign method directly
+        // Call the synchronous sign method directly; compressed (base64) as JS sign() and
+        // the async sign() do
         self.molecule.sign(
             self.molecule.bundle.clone(),
             false,
-            false,
+            true,
         )?;
 
         Ok(TypeSafeMoleculeBuilder {
@@ -1282,6 +1283,61 @@ mod tests {
         // Verify the hash is a proper base17 string (non-empty)
         let hash = molecule.molecular_hash.as_ref().unwrap();
         assert!(!hash.is_empty(), "Molecular hash should not be empty");
+        // The fragments are compressed (base64), as JS sign() writes them
+        assert!(
+            molecule.atoms[0].ots_fragment.as_deref().is_some_and(|f| !f.chars().all(|c| c.is_ascii_hexdigit())),
+            "sign_sync() must compress the OTS"
+        );
+    }
+
+    /// A single T atom from a pinned wallet (`aa`×32, OTS v1) and `createdAt`, ready to sign.
+    fn rs3_ready_to_sign() -> Result<TypeSafeMoleculeBuilder<states::ReadyToSign>> {
+        let secret = crate::crypto::generate_secret("fleet-audit-2026-11");
+        let wallet = Wallet::new_with_ots_version(
+            Some(&secret), None, Some("MYTOKEN"), None, Some(&"aa".repeat(32)),
+            None, None, None, crate::wallet::OtsVersion::V1,
+        )?;
+        let mut builder = TypeSafeMoleculeBuilder::new(secret)
+            .with_source_wallet(wallet.clone())
+            .add_token_request_atom(TokenRequestAtomParams {
+                position: wallet.position.clone().unwrap_or_default(),
+                wallet_address: wallet.address.clone().unwrap_or_default(),
+                token: "MYTOKEN".to_string(),
+                meta: vec![
+                    MetaItem::new("name", "My Token"),
+                    MetaItem::new("fungibility", "stackable"),
+                ],
+                batch_id: None,
+            })?
+            .ready_to_sign()?;
+        for atom in &mut builder.molecule.atoms {
+            atom.created_at = "1700000000000".to_string();
+        }
+        Ok(builder)
+    }
+
+    fn fragments(molecule: &Molecule) -> String {
+        molecule.atoms.iter().filter_map(|a| a.ots_fragment.clone()).collect()
+    }
+
+    #[tokio::test]
+    async fn test_sign_sync_compresses_like_js_and_async_sign() -> Result<()> {
+        use sha2::{Digest, Sha256};
+
+        let sync_signed = rs3_ready_to_sign()?.sign_sync()?.build();
+        let async_signed = rs3_ready_to_sign()?.sign().await?.build();
+        let sync_fragments = fragments(&sync_signed);
+
+        // Printed by the JS reference `Molecule.signSync()` for the same atom (KNISHIO_KCORE=off).
+        assert_eq!(sync_signed.molecular_hash.as_deref(), Some("0570gc78bgd4d2a89f76e2ec9e1714f230ec766a3dc7edc13aabg5fd59246dga"));
+        assert!(!sync_fragments.chars().all(|c| c.is_ascii_hexdigit()), "sign_sync() compresses (base64) as JS does");
+        assert_eq!(sync_fragments.len(), 1368);
+        assert_eq!(
+            hex::encode(Sha256::digest(sync_fragments.as_bytes())),
+            "bfd8559954f9f50666151a2990d2ac1abfc8e5429618d56372207171ad3cf0c2"
+        );
+        assert_eq!(sync_fragments, fragments(&async_signed), "sign_sync() and sign().await sign the same bytes");
+        Ok(())
     }
 
     #[test]

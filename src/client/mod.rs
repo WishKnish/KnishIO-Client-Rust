@@ -10,6 +10,7 @@ use crate::wallet::Wallet;
 use crate::auth::AuthToken;
 use crate::molecule::Molecule;
 use crate::response::{Response};
+use crate::types::{assign_meta, meta_value, MetaItem, OrderedValue, PolicyMap};
 use crate::graphql::{
     GraphQLClient, SocketConfig
 };
@@ -904,19 +905,18 @@ impl KnishIOClient {
     ///
     /// # Arguments
     ///
-    /// * `meta` - Optional metadata for the authorization request
+    /// * `meta` - Metadata for the authorization request, signed in this order
     ///
     /// # Returns
     ///
     /// Result indicating success of authorization request
-    pub async fn request_authorization(&mut self, meta: Option<HashMap<String, serde_json::Value>>) -> Result<bool> {
+    pub async fn request_authorization(&mut self, meta: Vec<MetaItem>) -> Result<bool> {
         use crate::mutation::request_authorization::MutationRequestAuthorization;
         use crate::mutation::Mutation;
-        use crate::types::MetaItem;
 
-        // Check if we have a secret (before setting flag — no cleanup needed on this error)
-        let secret = self.secret.clone()
-            .ok_or(KnishIOError::MissingSecret)?;
+        // The secret: the client's, or the storage provider's (JS retrieveSecret), never cached
+        // on the client (before setting flag — no cleanup needed on this error)
+        let secret = self.operation_secret().await?;
 
         // Set authentication in process — must be reset on ALL exit paths below
         self.auth_in_process = true;
@@ -941,14 +941,8 @@ impl KnishIOClient {
             molecule.secret = Some(secret.clone());
             molecule.source_wallet = Some(auth_wallet.clone());
 
-            // Convert meta HashMap to Vec<MetaItem> if provided
-            let meta_items: Vec<MetaItem> = meta.unwrap_or_default()
-                .iter()
-                .map(|(k, v)| MetaItem::from_json(k, v))
-                .collect();
-
             // Initialize authorization on molecule
-            molecule.init_authorization(meta_items)?;
+            molecule.init_authorization(meta)?;
 
             // Sign the molecule
             molecule.sign(None, false, true)?;
@@ -1282,7 +1276,7 @@ impl KnishIOClient {
     ) -> Result<Box<dyn Response>> {
         // Check and refresh authorization token if needed (matches TS lines 476-483)
         if let Some(ref auth_token) = self.auth_token {
-            if auth_token.is_expired() {
+            if auth_token.is_expired() && !self.auth_in_process {
                 self.log("info", "KnishIOClient::execute_query() - Access token is expired. Getting new one...");
 
                 // Refresh the token (matches TS line 478)
@@ -1970,7 +1964,8 @@ impl KnishIOClient {
     /// # Parameters
     /// - `token`: Token identifier
     /// - `amount`: Amount of tokens to create (optional)
-    /// - `meta`: Metadata for the token (optional)
+    /// - `meta`: Metadata for the token, signed in this order; `batchId`, `splittable`,
+    ///   `decimals` and `tokenUnits` are set as JS sets them on its meta object
     /// - `batch_id`: Batch ID for stackable tokens (optional)
     /// - `units`: Unit IDs for nonfungible/stackable tokens
     ///
@@ -1980,7 +1975,7 @@ impl KnishIOClient {
         &mut self,
         token: &str,
         mut amount: Option<f64>,
-        mut meta: Option<HashMap<String, Value>>,
+        mut meta: Vec<MetaItem>,
         batch_id: Option<&str>,
         units: Vec<String>
     ) -> Result<Box<dyn Response>> {
@@ -1991,64 +1986,45 @@ impl KnishIOClient {
         // Ensure we have authentication
         self.ensure_authentication(None).await?;
 
-        // Get fungibility mode from meta (matches JS line 1160)
-        let fungibility = meta.as_ref()
-            .and_then(|m| m.get("fungibility"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        // Get fungibility mode from meta (matches JS line 1436)
+        let fungibility = meta_value(&meta, "fungibility").unwrap_or("").to_string();
 
-        // For stackable tokens - create a batch ID (matches JS lines 1163-1165)
-        let final_batch_id = if fungibility == "stackable" {
-            if let Some(bid) = batch_id {
-                Some(bid.to_string())
-            } else {
-                // Generate batch ID using crypto utility
-                Some(generate_batch_id())
-            }
-        } else {
-            batch_id.map(|s| s.to_string())
-        };
+        // For stackable tokens - the batchId meta: the given batch ID, else a fresh one (matches
+        // JS lines 1439-1441). Other tokens get no batchId meta.
+        if fungibility == "stackable" {
+            assign_meta(&mut meta, "batchId", batch_id.map_or_else(generate_batch_id, str::to_string));
+        }
 
-        // Special logic for token unit initialization (nonfungible || stackable) (matches JS lines 1168-1184)
+        // Special logic for token unit initialization (nonfungible || stackable) (matches JS lines 1444-1464)
         if (fungibility == "nonfungible" || fungibility == "stackable") && !units.is_empty() {
-            // Stackable tokens with Unit IDs must not use decimals (matches JS lines 1170-1172)
-            let decimals = meta.as_ref()
-                .and_then(|m| m.get("decimals"))
-                .and_then(|v| v.as_f64())
+            // Stackable tokens with Unit IDs must not use decimals (matches JS lines 1446-1448)
+            let decimals = meta_value(&meta, "decimals")
+                .and_then(|v| v.trim().parse::<f64>().ok())
                 .unwrap_or(0.0);
 
             if decimals > 0.0 {
                 return Err(KnishIOError::StackableUnitDecimals);
             }
 
-            // Can't create stackable units AND provide amount (matches JS lines 1175-1177)
+            // Can't create stackable units AND provide amount (matches JS lines 1451-1453)
             if amount.unwrap_or(0.0) > 0.0 {
                 return Err(KnishIOError::StackableUnitAmount);
             }
 
-            // Calculating amount based on Unit IDs (matches JS lines 1180-1183)
+            // Calculating amount based on Unit IDs (matches JS lines 1456-1463)
             amount = Some(units.len() as f64);
 
             // Update meta. tokenUnits carries each id as the [id, id, {}] triple every other unit
             // operation sends (a bare id reaches the validator with no name or metas).
             let token_units: Vec<TokenUnit> = units.iter().map(|id| TokenUnit::new(id.clone(), id.clone(), None)).collect();
-            let mut meta_map = meta.unwrap_or_default();
-            meta_map.insert("splittable".to_string(), Value::from(1));
-            meta_map.insert("decimals".to_string(), Value::from(0));
-            meta_map.insert("tokenUnits".to_string(), Value::String(crate::molecule::token_units_json(&token_units)?));
-            meta = Some(meta_map);
+            assign_meta(&mut meta, "splittable", "1");
+            assign_meta(&mut meta, "decimals", "0");
+            assign_meta(&mut meta, "tokenUnits", crate::molecule::token_units_json(&token_units)?);
         }
 
-        // Add batchId to meta if it was set (matches JS line 1164)
-        if let Some(ref bid) = final_batch_id {
-            let mut meta_map = meta.unwrap_or_default();
-            meta_map.insert("batchId".to_string(), Value::String(bid.clone()));
-            meta = Some(meta_map);
-        }
-
-        // Creating the wallet that will receive the new tokens (matches JS lines 1187-1192).
-        // Wallet::new args: (secret, bundle, token, address, position, batch_id, characters) —
-        // final_batch_id belongs in the batch_id (6th) slot, NOT the address slot.
+        // Creating the wallet that will receive the new tokens with the caller's batch ID, not
+        // the generated one (matches JS lines 1467-1474).
+        // Wallet::new args: (secret, bundle, token, address, position, batch_id, characters).
         let secret = self.operation_secret().await?;
         let recipient_wallet = Wallet::new_with_ots_version(
             Some(&secret),
@@ -2056,7 +2032,7 @@ impl KnishIOClient {
             Some(token),
             None,                       // address (derived from the key)
             None,                       // position (auto-generated)
-            final_batch_id.as_deref(),  // batch_id
+            batch_id,                   // batch_id
             None,                       // characters
             Some(self.mlkem_parameter_set),
             self.ots_version,
@@ -2281,7 +2257,8 @@ impl KnishIOClient {
     /// - `to`: Recipient (BundleHash, Secret, Wallet, or None for self)
     /// - `amount`: Amount to request (optional if units provided)
     /// - `units`: Token units (optional)
-    /// - `meta`: Metadata (optional)
+    /// - `meta`: Metadata, signed in this order; `tokenUnits`, `position` and `bundle` are set
+    ///   as JS sets them on its meta object
     /// - `batch_id`: Batch ID for stackable tokens (optional)
     ///
     /// # Returns
@@ -2292,7 +2269,7 @@ impl KnishIOClient {
         to: Option<RecipientType>,
         mut amount: Option<f64>,
         units: Vec<String>,
-        meta: Option<HashMap<String, Value>>,
+        mut meta: Vec<MetaItem>,
         batch_id: Option<&str>
     ) -> Result<Box<dyn Response>> {
         use crate::mutation::request_tokens::{MutationRequestTokens, RequestTokensParams};
@@ -2300,9 +2277,6 @@ impl KnishIOClient {
 
         // Ensure we have authentication
         self.ensure_authentication(None).await?;
-
-        // Initialize meta (matches JS line 1482)
-        let mut meta_map = meta.unwrap_or_default();
 
         // Get token & check fungibility (matches JS lines 1485-1489)
         let token_response = self.query_token(token).await?;
@@ -2335,7 +2309,7 @@ impl KnishIOClient {
 
             // Calculating amount based on Unit IDs
             amount = Some(units.len() as f64);
-            meta_map.insert("tokenUnits".to_string(), Value::String(serde_json::to_string(&units)?));
+            assign_meta(&mut meta, "tokenUnits", serde_json::to_string(&units)?);
         }
 
         // Recipient routing logic (matches JS lines 1512-1539)
@@ -2358,16 +2332,16 @@ impl KnishIOClient {
                         self.ots_version,
                     )?;
 
-                    meta_map.insert("position".to_string(), Value::String(wallet.position.clone().unwrap_or_default()));
-                    meta_map.insert("bundle".to_string(), Value::String(wallet.bundle.clone().unwrap_or_default()));
+                    assign_meta(&mut meta, "position", wallet.position.clone().unwrap_or_default());
+                    assign_meta(&mut meta, "bundle", wallet.bundle.clone().unwrap_or_default());
 
                     ("wallet".to_string(), wallet.address.unwrap_or_default())
                 }
 
                 // Wallet instance → wallet with position/bundle
                 RecipientType::Wallet(wallet) => {
-                    meta_map.insert("position".to_string(), Value::String(wallet.position.clone().unwrap_or_default()));
-                    meta_map.insert("bundle".to_string(), Value::String(wallet.bundle.clone().unwrap_or_default()));
+                    assign_meta(&mut meta, "position", wallet.position.clone().unwrap_or_default());
+                    assign_meta(&mut meta, "bundle", wallet.bundle.clone().unwrap_or_default());
 
                     ("wallet".to_string(), wallet.address.unwrap_or_default())
                 }
@@ -2388,7 +2362,7 @@ impl KnishIOClient {
             amount: amount.unwrap_or(0.0),
             meta_type,
             meta_id,
-            meta: Some(meta_map),
+            meta,
             batch_id: final_batch_id,
         })?;
 
@@ -2813,8 +2787,8 @@ impl KnishIOClient {
     /// # Parameters
     /// - `meta_type`: Type of metadata for the rule
     /// - `meta_id`: ID of metadata for the rule
-    /// - `rule`: Rule definition as JSON array (Vec<Value>)
-    /// - `policy`: Optional policy as JSON object (HashMap)
+    /// - `rule`: Rule definition, its objects signed in JS key order
+    /// - `policy`: Optional policy (`None` = JS's default `{}`)
     ///
     /// # Returns
     /// Created rule response
@@ -2822,8 +2796,8 @@ impl KnishIOClient {
         &mut self,
         meta_type: &str,
         meta_id: &str,
-        rule: Vec<Value>,
-        policy: Option<HashMap<String, Value>>
+        rule: Vec<OrderedValue>,
+        policy: Option<PolicyMap>
     ) -> Result<Box<dyn Response>> {
         use crate::mutation::create_rule::{MutationCreateRule, CreateRuleParams};
 
@@ -2839,11 +2813,7 @@ impl KnishIOClient {
             meta_type: meta_type.to_string(),
             meta_id: meta_id.to_string(),
             rule,
-            policy: if let Some(p) = policy {
-                serde_json::to_value(p).unwrap_or(Value::Object(serde_json::Map::new()))
-            } else {
-                Value::Object(serde_json::Map::new())
-            },
+            policy,
         })?;
 
         // Execute mutation (matches JS line 1244)
@@ -2857,8 +2827,8 @@ impl KnishIOClient {
     /// # Parameters
     /// - `meta_type`: Type of metadata
     /// - `meta_id`: ID of metadata
-    /// - `meta`: Metadata HashMap
-    /// - `policy`: Optional policy HashMap
+    /// - `meta`: Metadata, signed in this order (JS `initMeta` with a meta list)
+    /// - `policy`: Optional policy (`None` or empty: no policy atom)
     ///
     /// # Returns
     /// Created metadata response
@@ -2866,8 +2836,8 @@ impl KnishIOClient {
         &mut self,
         meta_type: &str,
         meta_id: &str,
-        meta: HashMap<String, Value>,
-        policy: Option<HashMap<String, Value>>
+        meta: Vec<MetaItem>,
+        policy: Option<PolicyMap>
     ) -> Result<Box<dyn Response>> {
         use crate::mutation::create_meta::{MutationCreateMeta, CreateMetaParams};
 
@@ -2883,7 +2853,7 @@ impl KnishIOClient {
             meta_type: meta_type.to_string(),
             meta_id: meta_id.to_string(),
             meta,
-            policy: policy.unwrap_or_default(),
+            policy,
         })?;
 
         // Execute mutation (matches JS line 1283)
@@ -3042,7 +3012,7 @@ impl KnishIOClient {
         &mut self,
         meta_type: &str,
         meta_id: &str,
-        policy: HashMap<String, Value>
+        policy: PolicyMap
     ) -> Result<Box<dyn Response>> {
         use crate::mutation::propose_molecule::MutationProposeMolecule;
 
@@ -3074,12 +3044,23 @@ impl KnishIOClient {
 
     /// Request guest auth token
     ///
+    /// Holds the auth-in-process flag while it runs, so `execute_query` does not start a second
+    /// login, and restores the caller's value afterwards (JS `requestGuestAuthToken`).
+    ///
     /// # Parameters
     /// - `cell_slug`: Optional cell slug
     ///
     /// # Returns
     /// Guest authentication token
     pub async fn request_guest_auth_token(&mut self, cell_slug: Option<&str>, encrypt: Option<bool>) -> Result<AuthToken> {
+        let previous = self.auth_in_process;
+        self.auth_in_process = true;
+        let result = self.guest_auth_token(cell_slug, encrypt).await;
+        self.auth_in_process = previous;
+        result
+    }
+
+    async fn guest_auth_token(&mut self, cell_slug: Option<&str>, encrypt: Option<bool>) -> Result<AuthToken> {
         use crate::mutation::request_authorization_guest::MutationRequestAuthorizationGuest;
         use crate::mutation::Mutation;
         use crate::auth::AuthToken;
@@ -3184,6 +3165,9 @@ impl KnishIOClient {
     /// pointer-signed login falls back to the AUTH login once, so one call sends at most two
     /// authorization molecules (testnet allows 3 auths/min/IP).
     ///
+    /// Holds the auth-in-process flag while it runs and restores the caller's value afterwards
+    /// (JS `requestProfileAuthToken`).
+    ///
     /// # Parameters
     /// - `secret`: User secret for authentication
     /// - `encrypt`: Whether to encrypt the auth token
@@ -3191,6 +3175,14 @@ impl KnishIOClient {
     /// # Returns
     /// Profile authentication token
     pub async fn request_profile_auth_token(&mut self, secret: &str, encrypt: Option<bool>) -> Result<AuthToken> {
+        let previous = self.auth_in_process;
+        self.auth_in_process = true;
+        let result = self.profile_auth_token(secret, encrypt).await;
+        self.auth_in_process = previous;
+        result
+    }
+
+    async fn profile_auth_token(&mut self, secret: &str, encrypt: Option<bool>) -> Result<AuthToken> {
         // Set secret and bundle in client
         let bundle = crate::crypto::generate_bundle_hash(secret);
         self.secret = Some(secret.to_string());
@@ -3307,12 +3299,9 @@ impl KnishIOClient {
         if let Some(ref client) = self.client.clone() {
             let mut mutation = MutationRequestAuthorization::from_molecule(molecule);
 
-            // Fill molecule with encrypt meta (matches JS: fillMolecule({ meta: { encrypt: 'true' } }))
-            let mut meta_map = HashMap::new();
-            meta_map.insert(
-                "encrypt".to_string(),
-                serde_json::json!(encrypt.unwrap_or(false).to_string())
-            );
+            // Fill molecule with encrypt meta, then walletPubkey (matches JS: authMeta =
+            // { encrypt }, then authMeta.walletPubkey)
+            let mut auth_meta = vec![MetaItem::new("encrypt", encrypt.unwrap_or(false).to_string())];
 
             // PQ-transport: convey the source wallet's ML-KEM public key as a
             // SIGNED `walletPubkey` meta on the U-atom, so the validator can encrypt
@@ -3320,11 +3309,11 @@ impl KnishIOClient {
             // key that decrypts them). Signed → tamper-proof. Matches the JS reference
             // and the validator's `extract_enc_pubkey`. Only when present.
             if let Some(pk) = wallet.pubkey.as_ref() {
-                meta_map.insert("walletPubkey".to_string(), serde_json::json!(pk));
+                auth_meta.push(MetaItem::new("walletPubkey", pk));
             }
 
             mutation.fill_molecule(crate::mutation::request_authorization::RequestAuthorizationParams {
-                meta: meta_map
+                meta: auth_meta
             })?;
 
             // Execute mutation (JS calls query.execute directly here, not executeQuery). The
@@ -3594,6 +3583,7 @@ impl std::fmt::Debug for KnishIOClient {
 #[cfg(test)]
 mod tests {
     use super::KnishIOClient;
+    use crate::types::PolicyMap;
     use std::collections::HashMap;
 
     /// `set_encrypt` must reach the GraphQL transport, not just the client's own flag:
@@ -4250,7 +4240,7 @@ mod tests {
         let mut client = v2_client(&stub);
         client.set_secret(secret.as_str());
 
-        client.create_meta("ots", "migrate", HashMap::from([("k".to_string(), json!("v"))]), None).await?;
+        client.create_meta("ots", "migrate", vec![MetaItem::new("k", "v")], None).await?;
 
         let proposals = stub.proposals();
         assert_eq!(proposals.len(), 1);
@@ -4269,7 +4259,7 @@ mod tests {
         let mut client = v1_client_for(&stub);
         client.set_secret(secret.as_str());
 
-        client.create_meta("ots", "keep", HashMap::from([("k".to_string(), json!("v"))]), None).await?;
+        client.create_meta("ots", "keep", vec![MetaItem::new("k", "v")], None).await?;
 
         let proposals = stub.proposals();
         assert_eq!(proposals.len(), 1);
@@ -4287,7 +4277,7 @@ mod tests {
         let mut client = client_for(&stub);
         client.set_secret(secret.as_str());
 
-        client.create_meta("parity", "default", HashMap::from([("k".to_string(), json!("v"))]), None).await?;
+        client.create_meta("parity", "default", vec![MetaItem::new("k", "v")], None).await?;
 
         let proposals = stub.proposals();
         assert_eq!(proposals.len(), 1);
@@ -4309,7 +4299,7 @@ mod tests {
         let mut client = KnishIOClient::new(stub.url.as_str(), Some("public".to_string()), None, None, Some(4), Some(false));
         client.set_secret(secret.as_str());
 
-        client.create_meta("parity", "v4", HashMap::from([("k".to_string(), json!("v"))]), None).await?;
+        client.create_meta("parity", "v4", vec![MetaItem::new("k", "v")], None).await?;
 
         let proposals = stub.proposals();
         assert_eq!(proposals.len(), 1);
@@ -4362,7 +4352,7 @@ mod tests {
             "condition": [{ "key": "status", "value": "active", "comparison": "==" }],
             "callback": [{ "action": "reject" }],
         });
-        client.create_rule("ots", "rule", vec![rule], None).await?;
+        client.create_rule("ots", "rule", vec![rule.into()], None).await?;
         assert_last_proposal_signed_from_head(&mut stub, &secret, signer.as_deref(), 1)
     }
 
@@ -4371,7 +4361,7 @@ mod tests {
     async fn request_tokens_signs_from_the_continuid_head() -> TestResult {
         let (mut stub, mut client, secret, signer) = signed_op_fixture("signed-request-tokens", vec![true, true, true]).await?;
         client.request_profile_auth_token(&secret, Some(false)).await?;
-        client.request_tokens("TKN", None, Some(10.0), vec![], None, None).await?;
+        client.request_tokens("TKN", None, Some(10.0), vec![], vec![], None).await?;
         assert_last_proposal_signed_from_head(&mut stub, &secret, signer.as_deref(), 2)
     }
 
@@ -4564,7 +4554,7 @@ mod tests {
             }
         };
 
-        let result = client.create_token("NEWTKN", Some(1000.0), None, None, vec![]).await.map(drop);
+        let result = client.create_token("NEWTKN", Some(1000.0), vec![], None, vec![]).await.map(drop);
         record("create_token", result, &mut stub);
         let result = client.transfer_token(&recipient, "TKN", Some(10.0), vec![], None, Some(token.clone())).await.map(drop);
         record("transfer_token", result, &mut stub);
@@ -4582,7 +4572,7 @@ mod tests {
         record("deposit_buffer_token", result, &mut stub);
         let result = client.withdraw_buffer_token("TKN", 5.0, Some(buffer.clone())).await.map(drop);
         record("withdraw_buffer_token", result, &mut stub);
-        let result = client.create_policy("wallet", "policy-id", HashMap::new()).await.map(drop);
+        let result = client.create_policy("wallet", "policy-id", PolicyMap::new()).await.map(drop);
         record("create_policy", result, &mut stub);
         let result = client.request_profile_auth_token(&secret, Some(false)).await.map(drop);
         record("request_profile_auth_token", result, &mut stub);
@@ -4616,7 +4606,7 @@ mod tests {
     /// ContinuID query; after a rejected one the head is queried again (JS lastMoleculeQuery).
     #[tokio::test]
     async fn an_accepted_molecule_relays_its_remainder_to_the_next() -> TestResult {
-        let meta = || HashMap::from([("k".to_string(), json!("v"))]);
+        let meta = || vec![MetaItem::new("k", "v")];
         for (accepted, queries) in [(true, 1), (false, 2)] {
             let (mut stub, mut client, _secret, _signer) = signed_op_fixture("relay-remainder", vec![accepted, true]).await?;
             client.create_meta("relay", "one", meta(), None).await?;
@@ -4626,6 +4616,88 @@ mod tests {
             assert_eq!(stub.continu_id_queries().len(), queries, "first molecule accepted: {accepted}");
             let second = &stub.proposals()[1]["atoms"][0];
             assert_eq!(second["position"].as_str() == remainder.position.as_deref(), accepted, "first molecule accepted: {accepted}");
+        }
+        Ok(())
+    }
+
+    /// `request_authorization` reads the secret from the storage provider when the client holds
+    /// none (JS `retrieveSecret`), proposes one U molecule and keeps the secret out of the client.
+    #[tokio::test]
+    async fn request_authorization_with_secret_storage_only() -> TestResult {
+        let secret = generate_secret("request-authorization-storage-only");
+        let bundle = generate_bundle_hash(&secret);
+        let mut stub = stub_validator(Value::Null, vec![true]).await?;
+        let mut client = v1_client_for(&stub);
+        let storage = std::sync::Arc::new(crate::storage::MemorySecretStorageProvider::new());
+        storage.store_secret_sync(&bundle, &secret, Default::default())?;
+        client.set_secret_storage(storage, Some(bundle));
+        assert!(client.secret.is_none());
+
+        let accepted = client.request_authorization(Vec::new()).await?;
+
+        assert!(accepted);
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1, "one authorization molecule");
+        assert_eq!(proposals[0]["atoms"][0]["isotope"], "U");
+        assert!(client.secret.is_none(), "the secret read from storage was cached on the client");
+        Ok(())
+    }
+
+    /// An expired token does not start a second login while one is in process (JS
+    /// `executeQuery` checks `$__authInProcess`): the query goes out alone.
+    #[tokio::test]
+    async fn an_expired_token_is_not_refreshed_while_auth_is_in_process() -> TestResult {
+        let secret = generate_secret("expired-token-auth-in-process");
+        let mut stub = stub_validator(Value::Null, vec![true, true, true]).await?;
+        let mut client = v1_client_for(&stub);
+        let wallet = Wallet::new(Some(&secret), None, Some("AUTH"), None, None, None, None, None)?;
+        client.set_auth_token(crate::auth::AuthToken::create("stale-jwt".to_string(), Some(1), Some(false), None, wallet));
+        client.auth_in_process = true;
+
+        let _ = client.execute_query(&crate::query::balance::QueryBalance::new(), None).await;
+
+        let queries: Vec<String> = stub.requests().iter().map(|r| r["query"].as_str().unwrap_or("").to_string()).collect();
+        assert_eq!(queries.len(), 1, "only the Balance query is sent: {queries:#?}");
+        assert!(queries[0].contains("Balance"), "{queries:#?}");
+        Ok(())
+    }
+
+    /// The guest and profile logins hold the in-process flag while they run and restore the
+    /// caller's value afterwards (JS `requestGuestAuthToken` / `requestProfileAuthToken`).
+    #[tokio::test]
+    async fn logins_restore_the_auth_in_process_flag() -> TestResult {
+        let secret = generate_secret("auth-in-process-restore");
+        for in_process in [false, true] {
+            let stub = stub_validator(Value::Null, vec![true]).await?;
+            let mut client = client_for(&stub);
+            client.auth_in_process = in_process;
+            client.request_profile_auth_token(&secret, Some(false)).await?;
+            assert_eq!(client.auth_in_process, in_process, "profile login");
+
+            let stub = stub_validator(Value::Null, vec![true]).await?;
+            let mut client = client_for(&stub);
+            client.auth_in_process = in_process;
+            let _ = client.request_guest_auth_token(Some("guest-cell"), Some(false)).await;
+            assert_eq!(client.auth_in_process, in_process, "guest login");
+        }
+        Ok(())
+    }
+
+    /// `create_meta` signs the caller's metas in the caller's order (JS `initMeta` with a list).
+    #[tokio::test]
+    async fn create_meta_signs_the_metas_in_caller_order() -> TestResult {
+        let (mut stub, mut client, _secret, _signer) = signed_op_fixture("create-meta-order", vec![true; 20]).await?;
+        for round in 0..20 {
+            let meta = vec![MetaItem::new("z", "1"), MetaItem::new("10", "2"), MetaItem::new("2", "3"), MetaItem::new("a", "4")];
+            client.create_meta("probeType", "probe-1", meta, None).await?;
+            let proposals = stub.proposals();
+            let keys: Vec<String> = proposals[round]["atoms"][0]["meta"]
+                .as_array()
+                .ok_or("M atom metas")?
+                .iter()
+                .map(|m| m["key"].as_str().unwrap_or("").to_string())
+                .collect();
+            assert_eq!(keys, ["z", "10", "2", "a"], "round {round}");
         }
         Ok(())
     }

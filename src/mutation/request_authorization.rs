@@ -11,13 +11,12 @@ use crate::graphql::GraphQLClient;
 use crate::client::KnishIOClient;
 use crate::types::MetaItem;
 use serde_json::Value;
-use std::collections::HashMap;
 
 /// Parameters for requesting authorization (matches JS fillMolecule parameters)
 /// JS: fillMolecule({ meta })
 pub struct RequestAuthorizationParams {
-    /// Metadata for the authorization request
-    pub meta: HashMap<String, Value>,
+    /// Metadata for the authorization request, signed in this order
+    pub meta: Vec<MetaItem>,
 }
 
 /// Mutation for requesting an authorization token from the node
@@ -46,12 +45,7 @@ impl MutationRequestAuthorization {
     pub fn fill_molecule(&mut self, params: RequestAuthorizationParams) -> crate::error::Result<()> {
         // Call molecule's initAuthorization method (matches JS: this.$__molecule.initAuthorization({ meta }))
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
-            // Convert HashMap to Vec<MetaItem>
-            let meta_items: Vec<MetaItem> = params.meta.iter()
-                .map(|(k, v)| MetaItem::from_json(k, v))
-                .collect();
-            
-            molecule.init_authorization(meta_items)?;
+            molecule.init_authorization(params.meta)?;
             
             // Sign with empty params (matches JS: this.$__molecule.sign({}))
             molecule.sign(None, false, true)?;
@@ -69,14 +63,8 @@ impl MutationRequestAuthorization {
         
         // Apply JavaScript authorization parameters
         if !params.meta.is_empty() {
-            let meta = &params.meta;
-            // Convert HashMap to Vec<MetaItem> for JavaScript compatibility
-            let meta_items: Vec<crate::types::MetaItem> = meta.iter()
-                .map(|(k, v)| crate::types::MetaItem::from_json(k, v))
-                .collect();
-                
             // Initialize authorization metadata like JavaScript SDK
-            if let Err(_e) = molecule.init_meta(meta_items, "authorization", "auth_request", None) {
+            if let Err(_e) = molecule.init_meta(params.meta, "authorization", "auth_request", None) {
                 // Handle initialization error gracefully
             }
         }
@@ -122,7 +110,6 @@ impl MutationRequestAuthorization {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     
     #[test]
     fn test_mutation_request_authorization_creation() {
@@ -146,9 +133,10 @@ mod tests {
     
     #[test]
     fn test_request_authorization_params() {
-        let mut meta = HashMap::new();
-        meta.insert("purpose".to_string(), json!("api_access"));
-        meta.insert("permissions".to_string(), json!(["read", "write"]));
+        let meta = vec![
+            MetaItem::new("purpose", "api_access"),
+            MetaItem::from_json("permissions", &serde_json::json!(["read", "write"])),
+        ];
         
         let params = RequestAuthorizationParams {
             meta,
@@ -174,9 +162,7 @@ mod tests {
         molecule.remainder_wallet =
             Some(Wallet::create(Some(&secret), None, "USER", None, None, None).unwrap());
 
-        let mut meta = HashMap::new();
-        meta.insert("encrypt".to_string(), json!(true.to_string()));
-        meta.insert("walletPubkey".to_string(), json!(pubkey.clone()));
+        let meta = vec![MetaItem::new("encrypt", true.to_string()), MetaItem::new("walletPubkey", pubkey.clone())];
 
         let mut mutation = MutationRequestAuthorization::from_molecule(molecule);
         mutation.fill_molecule(RequestAuthorizationParams { meta }).unwrap();

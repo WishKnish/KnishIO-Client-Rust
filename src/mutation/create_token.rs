@@ -12,19 +12,6 @@ use crate::graphql::GraphQLClient;
 use crate::client::KnishIOClient;
 use crate::types::MetaItem;
 use serde_json::Value;
-use std::collections::HashMap;
-
-/// Serialize a meta value to its wire string. A JSON string yields its inner content (NOT a
-/// re-quoted `"..."`); other types (numbers, arrays) use their JSON representation. Mirrors JS,
-/// where meta string values are passed bare and the validator's `MetaItemInput.value` is a plain
-/// String. Without this, `fungibility="stackable"` reached the validator double-quoted as
-/// `"stackable"` (rejected per patent ¶0066) and `tokenUnits` was double-encoded.
-fn meta_value_to_string(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
 
 /// Parameters for fillMolecule (matches JS MutationCreateToken fillMolecule parameters)
 /// JS: fillMolecule({ recipientWallet, amount, meta = null })
@@ -34,8 +21,8 @@ pub struct CreateTokenParams {
     pub recipient_wallet: Wallet,
     /// Amount of tokens to create  
     pub amount: f64,
-    /// Optional metadata (defaults to empty object in JS - meta = null)
-    pub meta: Option<HashMap<String, Value>>,
+    /// The token metadata, signed in this order (JS `meta || {}`)
+    pub meta: Vec<MetaItem>,
 }
 
 /// Mutation for creating new tokens
@@ -69,12 +56,7 @@ impl MutationCreateToken {
     pub fn fill_molecule(&mut self, params: CreateTokenParams) -> crate::error::Result<()> {
         // Call molecule's initTokenCreation method (matches JS: this.$__molecule.initTokenCreation({recipientWallet, amount, meta: meta || {}}))
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
-            // Convert meta HashMap to Vec<MetaItem>
-            let meta_items = params.meta.unwrap_or_default().into_iter()
-                .map(|(k, v)| MetaItem::new(&k, meta_value_to_string(&v)))
-                .collect();
-            
-            molecule.init_token_creation(&params.recipient_wallet, params.amount, meta_items)?;
+            molecule.init_token_creation(&params.recipient_wallet, params.amount, params.meta)?;
             
             // Sign with recipient wallet bundle (matches JS: this.$__molecule.sign({bundle: recipientWallet.bundle}))
             let bundle = params.recipient_wallet.bundle.as_deref().unwrap_or("").to_string();
@@ -98,13 +80,8 @@ impl MutationCreateToken {
             None,
         );
         
-        // Convert meta HashMap to Vec<MetaItem>
-        let meta_items = params.meta.clone().unwrap_or_default().into_iter()
-            .map(|(k, v)| MetaItem::from_json(&k, &v))
-            .collect();
-        
         // Initialize token creation in molecule
-        molecule.init_token_creation(&params.recipient_wallet, params.amount, meta_items)?;
+        molecule.init_token_creation(&params.recipient_wallet, params.amount, params.meta)?;
         let bundle = params.recipient_wallet.bundle.as_deref().unwrap_or("").to_string();
         molecule.sign(Some(bundle), false, true)?;
         molecule.check(None)?;
@@ -156,7 +133,6 @@ impl MutationCreateToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     
     #[test]
     fn test_mutation_create_token_creation() {
@@ -188,19 +164,16 @@ mod tests {
             None,
         ).unwrap();
         
-        let mut meta = HashMap::new();
-        meta.insert("name".to_string(), json!("TestToken"));
-        meta.insert("symbol".to_string(), json!("TST"));
+        let meta = vec![MetaItem::new("name", "TestToken"), MetaItem::new("symbol", "TST")];
         
         let params = CreateTokenParams {
             recipient_wallet,
             amount: 1000.0,
-            meta: Some(meta),
+            meta,
         };
         
         assert_eq!(params.amount, 1000.0);
-        assert!(params.meta.is_some());
-        assert_eq!(params.meta.as_ref().unwrap().len(), 2);
+        assert_eq!(params.meta.len(), 2);
     }
     
     #[test]
@@ -217,7 +190,7 @@ mod tests {
         let params = CreateTokenParams {
             recipient_wallet,
             amount: 500.0,
-            meta: None,
+            meta: Vec::new(),
         };
         
         // This should fail without proper molecule initialization methods implemented

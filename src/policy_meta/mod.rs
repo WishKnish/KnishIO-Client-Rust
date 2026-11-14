@@ -5,8 +5,9 @@
 //! JavaScript PolicyMeta.js implementation.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use crate::error::{KnishIOError, Result};
+use crate::types::ordered::{sort_js_keys, OrderedValue, PolicyMap};
 
 /// Represents access control policies for metadata
 ///
@@ -16,8 +17,9 @@ use crate::error::{KnishIOError, Result};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[derive(Default)]
 pub struct PolicyMeta {
-    /// The policy structure with read/write permissions (BTreeMap: hashed JSON needs a fixed key order)
-    pub policy: BTreeMap<String, BTreeMap<String, Vec<String>>>,
+    /// The policy: action → meta key → permissions, in JS object key order (array-index keys
+    /// ascending, then insertion order), the order JS signs it in
+    pub policy: PolicyMap,
 }
 
 impl PolicyMeta {
@@ -27,8 +29,8 @@ impl PolicyMeta {
     ///
     /// # Arguments
     ///
-    /// * `policy` - Initial policy structure
-    /// * `meta_keys` - Metadata keys for default policy generation
+    /// * `policy` - Initial policy structure (actions other than `read` and `write` are dropped)
+    /// * `meta_keys` - Metadata keys for default policy generation, in order
     ///
     /// # Returns
     ///
@@ -38,25 +40,17 @@ impl PolicyMeta {
     ///
     /// ```rust
     /// use knishio_client::policy_meta::PolicyMeta;
-    /// use serde_json::json;
+    /// use knishio_client::OrderedValue;
     ///
-    /// let policy = json!({
-    ///     "read": {
-    ///         "pubkey": ["all"]
-    ///     },
-    ///     "write": {
-    ///         "characters": ["all"]
-    ///     }
-    /// });
-    ///
+    /// let policy: OrderedValue = serde_json::from_str(r#"{"read":{"pubkey":["all"]},"write":{"characters":["all"]}}"#).unwrap();
     /// let meta_keys = vec!["pubkey".to_string(), "characters".to_string()];
-    /// let policy_meta = PolicyMeta::new(policy, meta_keys);
+    /// let policy_meta = PolicyMeta::new(PolicyMeta::normalize_policy(&policy), meta_keys);
     /// ```
-    pub fn new(policy: serde_json::Value, meta_keys: Vec<String>) -> Self {
+    pub fn new(policy: PolicyMap, meta_keys: Vec<String>) -> Self {
         let mut policy_meta = PolicyMeta {
-            policy: Self::normalize_policy(policy),
+            policy: Self::normalize_map(policy),
         };
-        
+
         policy_meta.fill_default(meta_keys);
         policy_meta
     }
@@ -64,7 +58,8 @@ impl PolicyMeta {
     /// Normalize policy structure
     ///
     /// Equivalent to PolicyMeta.normalizePolicy() in JavaScript SDK
-    /// Filters policy structure to only include 'read' and 'write' keys
+    /// Filters policy structure to only include 'read' and 'write' keys, in the given order,
+    /// each action's keys in JS object order
     ///
     /// # Arguments
     ///
@@ -78,33 +73,27 @@ impl PolicyMeta {
     ///
     /// ```rust
     /// use knishio_client::policy_meta::PolicyMeta;
-    /// use serde_json::json;
+    /// use knishio_client::OrderedValue;
     ///
-    /// let policy = json!({
-    ///     "read": {
-    ///         "pubkey": ["all"]
-    ///     },
-    ///     "write": {
-    ///         "characters": ["all"]
-    ///     },
+    /// let policy: OrderedValue = serde_json::from_str(r#"{
+    ///     "write": { "characters": ["all"] },
+    ///     "read": { "pubkey": ["all"] },
     ///     "invalid": "this will be filtered out"
-    /// });
+    /// }"#).unwrap();
     ///
-    /// let normalized = PolicyMeta::normalize_policy(policy);
-    /// assert!(normalized.contains_key("read"));
-    /// assert!(normalized.contains_key("write"));
-    /// assert!(!normalized.contains_key("invalid"));
+    /// let normalized = PolicyMeta::normalize_policy(&policy);
+    /// assert_eq!(normalized.keys().collect::<Vec<_>>(), ["write", "read"]);
     /// ```
-    pub fn normalize_policy(policy: serde_json::Value) -> BTreeMap<String, BTreeMap<String, Vec<String>>> {
-        let mut normalized = BTreeMap::new();
+    pub fn normalize_policy(policy: &OrderedValue) -> PolicyMap {
+        let mut normalized = PolicyMap::new();
 
         if let Some(policy_obj) = policy.as_object() {
             for (action, value) in policy_obj {
                 // Only process 'read' and 'write' actions
                 if action == "read" || action == "write" {
                     if let Some(action_obj) = value.as_object() {
-                        let mut action_map = BTreeMap::new();
-                        
+                        let mut action_map = crate::types::OrderedMap::new();
+
                         for (key, permissions) in action_obj {
                             if let Some(perms_array) = permissions.as_array() {
                                 let perms: Vec<String> = perms_array
@@ -115,7 +104,8 @@ impl PolicyMeta {
                                 action_map.insert(key.clone(), perms);
                             }
                         }
-                        
+
+                        sort_js_keys(&mut action_map);
                         normalized.insert(action.clone(), action_map);
                     }
                 }
@@ -125,10 +115,25 @@ impl PolicyMeta {
         normalized
     }
 
+    /// Normalize a typed policy: keep the `read` and `write` actions in their order, each
+    /// action's keys in JS object order
+    pub fn normalize_map(policy: PolicyMap) -> PolicyMap {
+        policy
+            .into_iter()
+            .filter(|(action, _)| action == "read" || action == "write")
+            .map(|(action, mut action_map)| {
+                sort_js_keys(&mut action_map);
+                (action, action_map)
+            })
+            .collect()
+    }
+
     /// Fill default policy values for metadata keys
     ///
     /// Equivalent to fillDefault(metaKeys) in JavaScript SDK
-    /// Applies default read/write permissions for keys not explicitly defined
+    /// Applies default read/write permissions for keys not explicitly defined: a missing
+    /// action is appended (`read`, then `write`), missing keys follow `meta_keys` order, and
+    /// each action ends in JS object key order
     ///
     /// # Arguments
     ///
@@ -145,11 +150,8 @@ impl PolicyMeta {
     ///
     /// ```rust
     /// use knishio_client::policy_meta::PolicyMeta;
-    /// use std::collections::BTreeMap;
     ///
-    /// let mut policy_meta = PolicyMeta {
-    ///     policy: BTreeMap::new()
-    /// };
+    /// let mut policy_meta = PolicyMeta::default();
     ///
     /// let meta_keys = vec!["pubkey".to_string(), "balance".to_string()];
     /// policy_meta.fill_default(meta_keys);
@@ -157,66 +159,20 @@ impl PolicyMeta {
     /// // pubkey gets write: ["all"], balance gets write: ["self"]
     /// ```
     pub fn fill_default(&mut self, meta_keys: Vec<String>) {
-        // Get existing policy keys for read and write
-        let read_policy_keys: HashSet<String> = self.policy
-            .get("read")
-            .map(|read_map| read_map.keys().cloned().collect())
-            .unwrap_or_default();
-            
-        let write_policy_keys: HashSet<String> = self.policy
-            .get("write")
-            .map(|write_map| write_map.keys().cloned().collect())
-            .unwrap_or_default();
-
-        // Ensure read and write policy maps exist
-        if !self.policy.contains_key("read") {
-            self.policy.insert("read".to_string(), BTreeMap::new());
-        }
-        if !self.policy.contains_key("write") {
-            self.policy.insert("write".to_string(), BTreeMap::new());
-        }
-
-        // Calculate missing keys using diff operation
-        let meta_keys_set: HashSet<String> = meta_keys.into_iter().collect();
-        let read_missing: Vec<String> = Self::diff(&meta_keys_set, &read_policy_keys);
-        let write_missing: Vec<String> = Self::diff(&meta_keys_set, &write_policy_keys);
-
-        // Fill default read permissions (all keys get ["all"])
-        if let Some(read_map) = self.policy.get_mut("read") {
-            for key in read_missing {
-                if !read_map.contains_key(&key) {
-                    read_map.insert(key, vec!["all".to_string()]);
-                }
-            }
-        }
-
-        // Fill default write permissions (characters/pubkey get ["all"], others get ["self"])
-        if let Some(write_map) = self.policy.get_mut("write") {
-            for key in write_missing {
-                if !write_map.contains_key(&key) {
-                    let default_permission = if key == "characters" || key == "pubkey" {
-                        vec!["all".to_string()]
+        for action in ["read", "write"] {
+            let action_map = self.policy.entry(action.to_string()).or_default();
+            for key in &meta_keys {
+                if !action_map.contains_key(key) {
+                    let default_permission = if action == "write" && key != "characters" && key != "pubkey" {
+                        "self"
                     } else {
-                        vec!["self".to_string()]
+                        "all"
                     };
-                    write_map.insert(key, default_permission);
+                    action_map.insert(key.clone(), vec![default_permission.to_string()]);
                 }
             }
+            sort_js_keys(action_map);
         }
-    }
-
-    /// Calculate the difference between two sets (equivalent to JavaScript diff function)
-    ///
-    /// # Arguments
-    ///
-    /// * `set_a` - First set
-    /// * `set_b` - Second set to subtract from first
-    ///
-    /// # Returns
-    ///
-    /// Vector of elements in set_a but not in set_b
-    fn diff(set_a: &HashSet<String>, set_b: &HashSet<String>) -> Vec<String> {
-        set_a.difference(set_b).cloned().collect()
     }
 
     /// Get the policy structure
@@ -225,30 +181,24 @@ impl PolicyMeta {
     ///
     /// # Returns
     ///
-    /// Reference to the policy map (sorted keys, so its JSON is deterministic)
+    /// Reference to the policy map, in JS key order
     ///
     /// # Example
     ///
     /// ```rust
     /// use knishio_client::policy_meta::PolicyMeta;
-    /// use serde_json::json;
     ///
-    /// let policy = json!({
-    ///     "read": {
-    ///         "pubkey": ["all"]
-    ///     }
-    /// });
-    ///
-    /// let policy_meta = PolicyMeta::new(policy, vec![]);
+    /// let policy_meta = PolicyMeta::new(Default::default(), vec!["name".to_string()]);
     /// let policy_ref = policy_meta.get();
+    /// assert_eq!(policy_ref["write"]["name"], vec!["self"]);
     /// ```
-    pub fn get(&self) -> &BTreeMap<String, BTreeMap<String, Vec<String>>> {
+    pub fn get(&self) -> &PolicyMap {
         &self.policy
     }
 
     /// Convert policy to JSON string
     ///
-    /// Equivalent to toJson() in JavaScript SDK
+    /// Equivalent to toJson() in JavaScript SDK: `JSON.stringify`, every object in JS key order
     ///
     /// # Returns
     ///
@@ -258,19 +208,18 @@ impl PolicyMeta {
     ///
     /// ```rust
     /// use knishio_client::policy_meta::PolicyMeta;
-    /// use serde_json::json;
     ///
-    /// let policy = json!({
-    ///     "read": {
-    ///         "pubkey": ["all"]
-    ///     }
-    /// });
-    ///
-    /// let policy_meta = PolicyMeta::new(policy, vec![]);
+    /// let policy_meta = PolicyMeta::new(Default::default(), vec!["name".to_string()]);
     /// let json_str = policy_meta.to_json().unwrap();
+    /// assert_eq!(json_str, r#"{"read":{"name":["all"]},"write":{"name":["self"]}}"#);
     /// ```
     pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string(&self.policy)
+        let mut policy = self.policy.clone();
+        sort_js_keys(&mut policy);
+        for action_map in policy.values_mut() {
+            sort_js_keys(action_map);
+        }
+        serde_json::to_string(&policy)
             .map_err(|e| KnishIOError::Serialization(e.to_string()))
     }
 
@@ -287,9 +236,10 @@ impl PolicyMeta {
     pub fn create_from_graphql(data: &serde_json::Value, meta_keys: Vec<String>) -> Result<Self> {
         let policy = data.get("policy")
             .cloned()
-            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-            
-        Ok(Self::new(policy, meta_keys))
+            .map(OrderedValue::from)
+            .unwrap_or_default();
+
+        Ok(Self::new(Self::normalize_policy(&policy), meta_keys))
     }
 
     /// Create PolicyMeta from database array data
@@ -303,17 +253,12 @@ impl PolicyMeta {
     ///
     /// Result containing new PolicyMeta instance or error
     pub fn create_from_db(data: &serde_json::Value, meta_keys: Vec<String>) -> Result<Self> {
-        let policy = if let Some(array) = data.as_array() {
-            if !array.is_empty() {
-                array[0].clone()
-            } else {
-                serde_json::Value::Object(serde_json::Map::new())
-            }
-        } else {
-            data.clone()
+        let policy = match data.as_array() {
+            Some(array) => array.first().cloned().map(OrderedValue::from).unwrap_or_default(),
+            None => OrderedValue::from(data.clone()),
         };
-        
-        Ok(Self::new(policy, meta_keys))
+
+        Ok(Self::new(Self::normalize_policy(&policy), meta_keys))
     }
 
     /// Check if a specific permission is allowed
@@ -352,7 +297,8 @@ impl PolicyMeta {
         self.policy.get(action)?.get(key)
     }
 
-    /// Set permissions for a specific action and key
+    /// Set permissions for a specific action and key (a JS property assignment: a new key
+    /// takes its JS object position)
     ///
     /// # Arguments
     ///
@@ -360,10 +306,9 @@ impl PolicyMeta {
     /// * `key` - The metadata key
     /// * `permissions` - Vector of permission strings
     pub fn set_permissions(&mut self, action: &str, key: &str, permissions: Vec<String>) {
-        self.policy
-            .entry(action.to_string())
-            .or_default()
-            .insert(key.to_string(), permissions);
+        let action_map = self.policy.entry(action.to_string()).or_default();
+        action_map.insert(key.to_string(), permissions);
+        sort_js_keys(action_map);
     }
 
     /// Remove permissions for a specific action and key
@@ -377,7 +322,7 @@ impl PolicyMeta {
     ///
     /// Previously stored permissions, if any
     pub fn remove_permissions(&mut self, action: &str, key: &str) -> Option<Vec<String>> {
-        self.policy.get_mut(action)?.remove(key)
+        self.policy.get_mut(action)?.shift_remove(key)
     }
 
     /// Check if policy is empty
@@ -427,18 +372,22 @@ impl std::fmt::Display for PolicyMeta {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::collections::BTreeMap;
+
+    /// A policy given as a JSON value (key-sorted, as `serde_json::Value` is).
+    fn policy(value: serde_json::Value) -> PolicyMap {
+        PolicyMeta::normalize_policy(&OrderedValue::from(value))
+    }
 
     #[test]
     fn test_policy_meta_new() {
-        let policy = json!({
+        let policy = policy(json!({
             "read": {
                 "pubkey": ["all"]
             },
             "write": {
                 "characters": ["all"]
             }
-        });
+        }));
 
         let meta_keys = vec!["pubkey".to_string(), "characters".to_string(), "balance".to_string()];
         let policy_meta = PolicyMeta::new(policy, meta_keys);
@@ -453,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_normalize_policy() {
-        let policy = json!({
+        let raw = json!({
             "read": {
                 "pubkey": ["all"],
                 "balance": ["self"]
@@ -464,7 +413,7 @@ mod tests {
             "invalid": "this should be filtered out"
         });
 
-        let normalized = PolicyMeta::normalize_policy(policy);
+        let normalized = policy(raw);
 
         assert_eq!(normalized.len(), 2);
         assert!(normalized.contains_key("read"));
@@ -476,11 +425,25 @@ mod tests {
         assert_eq!(normalized["write"]["characters"], vec!["all"]);
     }
 
+    /// JS order: the actions as given, each action's array-index keys first, then the rest in
+    /// the order given; defaults append `read` / `write` and the meta keys in order.
+    #[test]
+    fn test_js_key_order() -> Result<()> {
+        let raw: OrderedValue = serde_json::from_str(r#"{"write":{"z":["self"],"5":["a"],"a":["self"]}}"#)?;
+        let policy_meta = PolicyMeta::new(
+            PolicyMeta::normalize_policy(&raw),
+            vec!["k".to_string(), "10".to_string(), "2".to_string(), "b".to_string()],
+        );
+        assert_eq!(
+            policy_meta.to_json()?,
+            r#"{"write":{"2":["self"],"5":["a"],"10":["self"],"z":["self"],"a":["self"],"k":["self"],"b":["self"]},"read":{"2":["all"],"10":["all"],"k":["all"],"b":["all"]}}"#
+        );
+        Ok(())
+    }
+
     #[test]
     fn test_fill_default() {
-        let mut policy_meta = PolicyMeta {
-            policy: BTreeMap::new(),
-        };
+        let mut policy_meta = PolicyMeta::default();
 
         let meta_keys = vec![
             "pubkey".to_string(),
@@ -505,8 +468,8 @@ mod tests {
     fn test_fill_default_preserves_existing() {
         let mut policy_meta = PolicyMeta {
             policy: {
-                let mut policy = BTreeMap::new();
-                let mut read_map = BTreeMap::new();
+                let mut policy = PolicyMap::new();
+                let mut read_map = crate::types::OrderedMap::new();
                 read_map.insert("balance".to_string(), vec!["bundle123".to_string()]);
                 policy.insert("read".to_string(), read_map);
                 policy
@@ -526,24 +489,12 @@ mod tests {
     }
 
     #[test]
-    fn test_diff_function() {
-        let set_a: HashSet<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
-        let set_b: HashSet<String> = ["b", "d"].iter().map(|s| s.to_string()).collect();
-
-        let diff_result = PolicyMeta::diff(&set_a, &set_b);
-        let mut sorted_diff = diff_result;
-        sorted_diff.sort();
-
-        assert_eq!(sorted_diff, vec!["a", "c"]);
-    }
-
-    #[test]
     fn test_get_and_to_json() {
-        let policy = json!({
+        let policy = policy(json!({
             "read": {
                 "pubkey": ["all"]
             }
-        });
+        }));
 
         let policy_meta = PolicyMeta::new(policy, vec![]);
         let policy_ref = policy_meta.get();
@@ -588,7 +539,7 @@ mod tests {
 
     #[test]
     fn test_is_allowed() {
-        let policy = json!({
+        let policy = policy(json!({
             "read": {
                 "pubkey": ["all"],
                 "balance": ["bundle123", "self"]
@@ -596,7 +547,7 @@ mod tests {
             "write": {
                 "private": ["self"]
             }
-        });
+        }));
 
         let policy_meta = PolicyMeta::new(policy, vec![]);
 
@@ -646,11 +597,11 @@ mod tests {
 
     #[test]
     fn test_display() {
-        let policy = json!({
+        let policy = policy(json!({
             "read": {
                 "pubkey": ["all"]
             }
-        });
+        }));
 
         let policy_meta = PolicyMeta::new(policy, vec![]);
         let display_str = format!("{}", policy_meta);
@@ -663,7 +614,7 @@ mod tests {
         // Test exact JavaScript SDK behavior reproduction
 
         // Test empty policy with meta keys (JavaScript line 87-105)
-        let policy_meta = PolicyMeta::new(json!({}), vec![
+        let policy_meta = PolicyMeta::new(PolicyMap::new(), vec![
             "pubkey".to_string(),
             "characters".to_string(),
             "balance".to_string(),
@@ -679,7 +630,7 @@ mod tests {
         assert_eq!(policy_meta.policy["write"]["balance"], vec!["self"]);    // Default case
 
         // Test normalization (JavaScript line 32-54)
-        let raw_policy = json!({
+        let normalized = policy(json!({
             "read": {
                 "pubkey": ["all"]
             },
@@ -689,9 +640,7 @@ mod tests {
             "invalid_action": {
                 "some_key": ["all"]
             }
-        });
-
-        let normalized = PolicyMeta::normalize_policy(raw_policy);
+        }));
         assert_eq!(normalized.len(), 2);
         assert!(normalized.contains_key("read"));
         assert!(normalized.contains_key("write"));
