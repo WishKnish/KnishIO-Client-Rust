@@ -54,10 +54,9 @@ impl FileStorageBackend {
 
     /// Atomically persist current map to disk via tempfile + rename with 0o600 permissions
     fn persist(&self, map: &BTreeMap<String, String>) -> Result<()> {
-        let tmp_path = self.path.with_extension(format!(
-            "tmp.{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let tmp_path = self
+            .path
+            .with_extension(format!("tmp.{}", uuid::Uuid::new_v4().simple()));
 
         let mut options = OpenOptions::new();
         options.write(true).create(true).truncate(true);

@@ -2,10 +2,10 @@
 //!
 //! Equivalent to Rule.js in the JavaScript SDK
 
+use super::{Callback, Condition, FromJsonObject, RuleArgumentError, ToJsonObject};
+use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::error::Result;
-use super::{Condition, Callback, RuleArgumentError, FromJsonObject, ToJsonObject};
 
 /// Rule containing conditions and callbacks
 ///
@@ -127,15 +127,17 @@ impl Rule {
     /// Returns error if condition or callback fields are missing
     pub fn from_object(object: &Value) -> Result<Self> {
         // Check for required fields (matching JS validation)
-        let condition_array = object.get("condition")
-            .ok_or_else(|| RuleArgumentError::new(
-                "Rule::from_object() - Incorrect rule format! There is no condition field."
-            ))?;
+        let condition_array = object.get("condition").ok_or_else(|| {
+            RuleArgumentError::new(
+                "Rule::from_object() - Incorrect rule format! There is no condition field.",
+            )
+        })?;
 
-        let callback_array = object.get("callback")
-            .ok_or_else(|| RuleArgumentError::new(
-                "Rule::from_object() - Incorrect rule format! There is no callback field."
-            ))?;
+        let callback_array = object.get("callback").ok_or_else(|| {
+            RuleArgumentError::new(
+                "Rule::from_object() - Incorrect rule format! There is no callback field.",
+            )
+        })?;
 
         let mut rule = Rule::empty();
 
@@ -146,8 +148,9 @@ impl Rule {
             }
         } else {
             return Err(RuleArgumentError::new(
-                "Rule::from_object() - condition field must be an array"
-            ).into());
+                "Rule::from_object() - condition field must be an array",
+            )
+            .into());
         }
 
         // Process callbacks
@@ -157,8 +160,9 @@ impl Rule {
             }
         } else {
             return Err(RuleArgumentError::new(
-                "Rule::from_object() - callback field must be an array"
-            ).into());
+                "Rule::from_object() - callback field must be an array",
+            )
+            .into());
         }
 
         Ok(rule)
@@ -172,15 +176,9 @@ impl Rule {
     ///
     /// JSON representation of the rule
     pub fn to_json(&self) -> Value {
-        let condition_values: Vec<Value> = self.conditions
-            .iter()
-            .map(|c| c.to_json())
-            .collect();
+        let condition_values: Vec<Value> = self.conditions.iter().map(|c| c.to_json()).collect();
 
-        let callback_values: Vec<Value> = self.callbacks
-            .iter()
-            .map(|c| c.to_json())
-            .collect();
+        let callback_values: Vec<Value> = self.callbacks.iter().map(|c| c.to_json()).collect();
 
         serde_json::json!({
             "condition": condition_values,
@@ -249,11 +247,8 @@ mod tests {
 
     #[test]
     fn test_rule_new() {
-        let condition = Condition::new(
-            "balance".to_string(),
-            "100".to_string(),
-            ">=".to_string()
-        ).unwrap();
+        let condition =
+            Condition::new("balance".to_string(), "100".to_string(), ">=".to_string()).unwrap();
 
         let callback = Callback::new(
             "collect".to_string(),
@@ -264,7 +259,8 @@ mod tests {
             Some("TOKEN".to_string()),
             Some("50".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         let rule = Rule::new(vec![condition], vec![callback]);
 
@@ -286,11 +282,8 @@ mod tests {
     fn test_rule_add_condition() {
         let mut rule = Rule::empty();
 
-        let condition = Condition::new(
-            "token".to_string(),
-            "TEST".to_string(),
-            "==".to_string()
-        ).unwrap();
+        let condition =
+            Condition::new("token".to_string(), "TEST".to_string(), "==".to_string()).unwrap();
 
         rule.add_condition(condition);
 
@@ -313,7 +306,8 @@ mod tests {
             None,
             None,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         rule.add_callback(callback);
 
@@ -405,7 +399,10 @@ mod tests {
 
         // Check first callback
         assert_eq!(rule.get_callbacks()[0].action, "collect");
-        assert_eq!(rule.get_callbacks()[0].address, Some("test_address".to_string()));
+        assert_eq!(
+            rule.get_callbacks()[0].address,
+            Some("test_address".to_string())
+        );
         assert_eq!(rule.get_callbacks()[0].token, Some("TEST".to_string()));
         assert_eq!(rule.get_callbacks()[0].amount, Some("100".to_string()));
         assert_eq!(rule.get_callbacks()[0].comparison, Some(">=".to_string()));
@@ -426,7 +423,10 @@ mod tests {
 
         let result = Rule::from_object(&object);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("no condition field"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no condition field"));
     }
 
     #[test]
@@ -443,7 +443,10 @@ mod tests {
 
         let result = Rule::from_object(&object);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("no callback field"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no callback field"));
     }
 
     #[test]
@@ -455,7 +458,10 @@ mod tests {
 
         let result = Rule::from_object(&object);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("condition field must be an array"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("condition field must be an array"));
     }
 
     #[test]
@@ -467,22 +473,19 @@ mod tests {
 
         let result = Rule::from_object(&object);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("callback field must be an array"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("callback field must be an array"));
     }
 
     #[test]
     fn test_rule_to_json() {
-        let condition1 = Condition::new(
-            "balance".to_string(),
-            "100".to_string(),
-            ">=".to_string()
-        ).unwrap();
+        let condition1 =
+            Condition::new("balance".to_string(), "100".to_string(), ">=".to_string()).unwrap();
 
-        let condition2 = Condition::new(
-            "token".to_string(),
-            "TEST".to_string(),
-            "==".to_string()
-        ).unwrap();
+        let condition2 =
+            Condition::new("token".to_string(), "TEST".to_string(), "==".to_string()).unwrap();
 
         let callback1 = Callback::new(
             "collect".to_string(),
@@ -493,7 +496,8 @@ mod tests {
             Some("TOKEN".to_string()),
             Some("50".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         let callback2 = Callback::new(
             "reject".to_string(),
@@ -504,7 +508,8 @@ mod tests {
             None,
             None,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         let rule = Rule::new(vec![condition1, condition2], vec![callback1, callback2]);
         let json_value = rule.to_json();
@@ -532,11 +537,8 @@ mod tests {
 
     #[test]
     fn test_rule_clear_operations() {
-        let condition = Condition::new(
-            "test".to_string(),
-            "value".to_string(),
-            "==".to_string()
-        ).unwrap();
+        let condition =
+            Condition::new("test".to_string(), "value".to_string(), "==".to_string()).unwrap();
 
         let callback = Callback::new(
             "test_action".to_string(),
@@ -547,7 +549,8 @@ mod tests {
             None,
             None,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         let mut rule = Rule::new(vec![condition], vec![callback]);
 
@@ -565,11 +568,8 @@ mod tests {
         assert!(rule.is_empty());
 
         // Test clear all
-        let condition2 = Condition::new(
-            "test2".to_string(),
-            "value2".to_string(),
-            "!=".to_string()
-        ).unwrap();
+        let condition2 =
+            Condition::new("test2".to_string(), "value2".to_string(), "!=".to_string()).unwrap();
 
         let callback2 = Callback::new(
             "test_action2".to_string(),
@@ -580,7 +580,8 @@ mod tests {
             None,
             None,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         rule.add_condition(condition2);
         rule.add_callback(callback2);
@@ -592,11 +593,8 @@ mod tests {
 
     #[test]
     fn test_rule_serialization() {
-        let condition = Condition::new(
-            "amount".to_string(),
-            "1000".to_string(),
-            "<=".to_string()
-        ).unwrap();
+        let condition =
+            Condition::new("amount".to_string(), "1000".to_string(), "<=".to_string()).unwrap();
 
         let callback = Callback::new(
             "buffer".to_string(),
@@ -607,7 +605,8 @@ mod tests {
             Some("BUFFER".to_string()),
             Some("200".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         let rule = Rule::new(vec![condition], vec![callback]);
 
@@ -664,11 +663,8 @@ mod tests {
         assert!(empty_rule.is_empty());
 
         // Test rule creation with arrays (matches JS constructor)
-        let condition = Condition::new(
-            "balance".to_string(),
-            "500".to_string(),
-            ">".to_string()
-        ).unwrap();
+        let condition =
+            Condition::new("balance".to_string(), "500".to_string(), ">".to_string()).unwrap();
 
         let callback = Callback::new(
             "collect".to_string(),
@@ -679,7 +675,8 @@ mod tests {
             Some("TEST".to_string()),
             Some("100".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         let rule = Rule::new(vec![condition], vec![callback]);
         assert_eq!(rule.condition_count(), 1);
@@ -709,21 +706,37 @@ mod tests {
         let json_output = rule_from_object.to_json();
 
         // Verify round-trip compatibility
-        assert_eq!(json_output["condition"][0]["key"], js_style_object["condition"][0]["key"]);
-        assert_eq!(json_output["condition"][0]["value"], js_style_object["condition"][0]["value"]);
-        assert_eq!(json_output["condition"][0]["comparison"], js_style_object["condition"][0]["comparison"]);
-        assert_eq!(json_output["callback"][0]["action"], js_style_object["callback"][0]["action"]);
-        assert_eq!(json_output["callback"][0]["address"], js_style_object["callback"][0]["address"]);
+        assert_eq!(
+            json_output["condition"][0]["key"],
+            js_style_object["condition"][0]["key"]
+        );
+        assert_eq!(
+            json_output["condition"][0]["value"],
+            js_style_object["condition"][0]["value"]
+        );
+        assert_eq!(
+            json_output["condition"][0]["comparison"],
+            js_style_object["condition"][0]["comparison"]
+        );
+        assert_eq!(
+            json_output["callback"][0]["action"],
+            js_style_object["callback"][0]["action"]
+        );
+        assert_eq!(
+            json_output["callback"][0]["address"],
+            js_style_object["callback"][0]["address"]
+        );
 
         // Test setter-style addition (matches JS property setters)
         let mut dynamic_rule = Rule::empty();
-        
+
         let new_condition = Condition::new(
             "token_type".to_string(),
             "DYNAMIC".to_string(),
-            "==".to_string()
-        ).unwrap();
-        
+            "==".to_string(),
+        )
+        .unwrap();
+
         let new_callback = Callback::new(
             "burn".to_string(),
             None,
@@ -733,7 +746,8 @@ mod tests {
             Some("BURN".to_string()),
             Some("50".to_string()),
             Some(">".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         dynamic_rule.add_condition(new_condition);
         dynamic_rule.add_callback(new_callback);

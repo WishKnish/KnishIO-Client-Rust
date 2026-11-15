@@ -159,16 +159,12 @@ impl QueryBalance {
 
     /// Query balance by token and bundle (common pattern)
     pub fn by_token_and_bundle(token: impl Into<String>, bundle_hash: impl Into<String>) -> Self {
-        Self::new()
-            .with_token(token)
-            .with_bundle_hash(bundle_hash)
+        Self::new().with_token(token).with_bundle_hash(bundle_hash)
     }
 
     /// Query balance by token and address (common pattern)
     pub fn by_token_and_address(token: impl Into<String>, address: impl Into<String>) -> Self {
-        Self::new()
-            .with_token(token)
-            .with_address(address)
+        Self::new().with_token(token).with_address(address)
     }
 }
 
@@ -221,7 +217,7 @@ mod tests {
     fn test_query_string() {
         let query = QueryBalance::new();
         let query_string = query.get_query();
-        
+
         // Check that the query string contains expected fields
         assert!(query_string.contains("Balance("));
         assert!(query_string.contains("address"));

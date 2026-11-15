@@ -26,12 +26,21 @@ impl MemorySecretStorageProvider {
     }
 
     /// Synchronously store a secret in memory
-    pub fn store_secret_sync(&self, bundle_hash: &str, secret: &str, options: StorageOptions) -> Result<()> {
+    pub fn store_secret_sync(
+        &self,
+        bundle_hash: &str,
+        secret: &str,
+        options: StorageOptions,
+    ) -> Result<()> {
         if bundle_hash.is_empty() {
-            return Err(KnishIOError::SecretStorage("Bundle hash cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Bundle hash cannot be empty".to_string(),
+            ));
         }
         if secret.is_empty() {
-            return Err(KnishIOError::SecretStorage("Secret cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Secret cannot be empty".to_string(),
+            ));
         }
 
         let metadata = SecretStorageMetadata {
@@ -43,7 +52,9 @@ impl MemorySecretStorageProvider {
         };
 
         {
-            let mut store = self.store.write()
+            let mut store = self
+                .store
+                .write()
                 .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
             store.insert(bundle_hash.to_string(), (secret.to_string(), metadata));
         }
@@ -56,10 +67,13 @@ impl MemorySecretStorageProvider {
                 hardware_backed: false,
                 provider_type: "aes-gcm".to_string(),
             };
-            let recovery_payload = envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
+            let recovery_payload =
+                envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
             let recovery_json = serde_json::to_string(&recovery_payload)
                 .map_err(|e| KnishIOError::SecretStorage(format!("Serialization failed: {e}")))?;
-            let mut recovery_store = self.recovery_store.write()
+            let mut recovery_store = self
+                .recovery_store
+                .write()
                 .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {e}")))?;
             recovery_store.insert(bundle_hash.to_string(), recovery_json);
         }
@@ -82,15 +96,23 @@ impl MemorySecretStorageProvider {
     }
 
     /// Execute a closure with the unwrapped secret and zeroize memory upon completion
-    pub async fn with_secret<T, F>(&self, bundle_hash: &str, _options: StorageOptions, f: F) -> Result<T>
+    pub async fn with_secret<T, F>(
+        &self,
+        bundle_hash: &str,
+        _options: StorageOptions,
+        f: F,
+    ) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&str) -> Result<T> + Send,
     {
         let secret = {
-            let store = self.store.read()
+            let store = self
+                .store
+                .read()
                 .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
-            store.get(bundle_hash)
+            store
+                .get(bundle_hash)
                 .map(|(sec, _)| sec.clone())
                 .ok_or_else(|| KnishIOError::SecretNotFound(bundle_hash.to_string()))?
         };
@@ -119,12 +141,23 @@ impl SecretStorageProvider for MemorySecretStorageProvider {
         true
     }
 
-    async fn store_secret(&self, bundle_hash: &str, secret: &str, options: StorageOptions) -> Result<()> {
+    async fn store_secret(
+        &self,
+        bundle_hash: &str,
+        secret: &str,
+        options: StorageOptions,
+    ) -> Result<()> {
         self.store_secret_sync(bundle_hash, secret, options)
     }
 
-    async fn retrieve_secret(&self, bundle_hash: &str, _options: StorageOptions) -> Result<Option<String>> {
-        let store = self.store.read()
+    async fn retrieve_secret(
+        &self,
+        bundle_hash: &str,
+        _options: StorageOptions,
+    ) -> Result<Option<String>> {
+        let store = self
+            .store
+            .read()
             .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
         Ok(store.get(bundle_hash).map(|(sec, _)| sec.clone()))
     }
@@ -133,19 +166,25 @@ impl SecretStorageProvider for MemorySecretStorageProvider {
         if let Ok(mut recovery_store) = self.recovery_store.write() {
             recovery_store.remove(bundle_hash);
         }
-        let mut store = self.store.write()
+        let mut store = self
+            .store
+            .write()
             .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
         Ok(store.remove(bundle_hash).is_some())
     }
 
     async fn has_secret(&self, bundle_hash: &str) -> Result<bool> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
         Ok(store.contains_key(bundle_hash))
     }
 
     async fn list_secrets(&self) -> Result<Vec<SecretStorageMetadata>> {
-        let store = self.store.read()
+        let store = self
+            .store
+            .read()
             .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
         Ok(store.values().map(|(_, meta)| meta.clone()).collect())
     }
@@ -157,34 +196,47 @@ impl SecretStorageProvider for MemorySecretStorageProvider {
         options: StorageOptions,
     ) -> Result<()> {
         if bundle_hash.is_empty() {
-            return Err(KnishIOError::SecretStorage("Bundle hash cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Bundle hash cannot be empty".to_string(),
+            ));
         }
         if recovery_passphrase.is_empty() {
-            return Err(KnishIOError::SecretStorage("Recovery passphrase cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Recovery passphrase cannot be empty".to_string(),
+            ));
         }
 
         let raw = {
-            let recovery_store = self.recovery_store.read()
+            let recovery_store = self
+                .recovery_store
+                .read()
                 .map_err(|e| KnishIOError::SecretStorage(format!("Lock poisoned: {}", e)))?;
-            recovery_store.get(bundle_hash).cloned()
-                .ok_or_else(|| KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}")))?
+            recovery_store.get(bundle_hash).cloned().ok_or_else(|| {
+                KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}"))
+            })?
         };
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}")))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}"))
+        })?;
 
         let decrypted = envelope::open(&payload, recovery_passphrase)?;
 
         let secret_str = with_secure_bytes(decrypted.to_vec(), |bytes| {
-            String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext in recovery envelope: {e}")))
+            String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!(
+                    "Invalid UTF-8 plaintext in recovery envelope: {e}"
+                ))
+            })
         })?;
 
         let mut reenroll_options = options;
         if reenroll_options.recovery_passphrase.is_none() {
-            reenroll_options.recovery_passphrase = Some(zeroize::Zeroizing::new(recovery_passphrase.to_string()));
+            reenroll_options.recovery_passphrase =
+                Some(zeroize::Zeroizing::new(recovery_passphrase.to_string()));
         }
 
-        self.store_secret(bundle_hash, &secret_str, reenroll_options).await
+        self.store_secret(bundle_hash, &secret_str, reenroll_options)
+            .await
     }
 }

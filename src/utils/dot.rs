@@ -180,7 +180,10 @@ impl Dot {
     /// # Returns
     ///
     /// Optional object reference
-    pub fn get_object<'a>(obj: &'a Value, keys: &str) -> Option<&'a serde_json::Map<String, Value>> {
+    pub fn get_object<'a>(
+        obj: &'a Value,
+        keys: &str,
+    ) -> Option<&'a serde_json::Map<String, Value>> {
         Self::get(obj, keys, None)?.as_object()
     }
 
@@ -199,7 +202,7 @@ impl Dot {
         if !keys.contains('.') {
             return map.get(keys).cloned();
         }
-        
+
         // For nested access, convert to JSON and use regular get
         if let Ok(json_value) = serde_json::to_value(map) {
             Self::get_string(&json_value, keys)
@@ -417,12 +420,18 @@ mod tests {
         assert_eq!(Dot::get(&data, "user.name", None), Some(&json!("John")));
         assert_eq!(Dot::get(&data, "user.age", None), Some(&json!(30)));
         assert_eq!(Dot::get(&data, "user.active", None), Some(&json!(true)));
-        assert_eq!(Dot::get(&data, "user.tags.0", None), Some(&json!("developer")));
+        assert_eq!(
+            Dot::get(&data, "user.tags.0", None),
+            Some(&json!("developer"))
+        );
         assert_eq!(Dot::get(&data, "user.tags.1", None), Some(&json!("rust")));
         assert_eq!(Dot::get(&data, "user.nonexistent", None), None);
 
         let default = json!("default");
-        assert_eq!(Dot::get(&data, "user.nonexistent", Some(&default)), Some(&default));
+        assert_eq!(
+            Dot::get(&data, "user.nonexistent", Some(&default)),
+            Some(&default)
+        );
     }
 
     #[test]
@@ -459,7 +468,10 @@ mod tests {
             }
         });
 
-        assert_eq!(Dot::get_string(&data, "user.name"), Some("John".to_string()));
+        assert_eq!(
+            Dot::get_string(&data, "user.name"),
+            Some("John".to_string())
+        );
         assert_eq!(Dot::get_number(&data, "user.age"), Some(30.0));
         assert_eq!(Dot::get_bool(&data, "user.active"), Some(true));
         assert!(Dot::get_array(&data, "user.tags").is_some());
@@ -472,7 +484,7 @@ mod tests {
     fn test_hashmap_access() {
         let mut map = HashMap::new();
         map.insert("simple".to_string(), "value".to_string());
-        
+
         assert_eq!(Dot::get_from_map(&map, "simple"), Some("value".to_string()));
         assert_eq!(Dot::get_from_map(&map, "nonexistent"), None);
     }

@@ -16,6 +16,11 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Changed
+
+- The crate is formatted with rustfmt's default settings, and CI checks it (`cargo fmt --check`,
+  job `rustfmt (format gate)`). Formatting only: no item, signature or behaviour changed.
+
 ### Fixed
 
 - `request_authorization` builds its molecule through `create_molecule`, as the authorize step of JS

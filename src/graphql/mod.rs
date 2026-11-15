@@ -34,19 +34,19 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 // Sub-modules for advanced functionality
-mod websocket;
 mod connection_pool;
 mod retry_policy;
+mod websocket;
 
 // Re-export public types from sub-modules
-pub use websocket::{
-    WebSocketManager, ConnectionState, ReconnectConfig as WebSocketReconnectConfig
-};
 pub use connection_pool::{
-    ConnectionPool, PoolConfig as ConnectionPoolConfig, PoolStats, global_pool
+    global_pool, ConnectionPool, PoolConfig as ConnectionPoolConfig, PoolStats,
 };
 pub use retry_policy::{
-    RetryPolicy, RetryStrategy, RetryCondition, RetryExecutor, execute_with_retry
+    execute_with_retry, RetryCondition, RetryExecutor, RetryPolicy, RetryStrategy,
+};
+pub use websocket::{
+    ConnectionState, ReconnectConfig as WebSocketReconnectConfig, WebSocketManager,
 };
 
 /// The post-quantum `CipherHash` wrapper query. The validator intercepts this
@@ -65,11 +65,10 @@ fn parse_operation(query: &str) -> (String, String) {
         .iter()
         .filter_map(|kw| {
             lowered.find(kw).and_then(|idx| {
-                let before_ok = idx == 0
-                    || !lowered.as_bytes()[idx - 1].is_ascii_alphanumeric();
+                let before_ok = idx == 0 || !lowered.as_bytes()[idx - 1].is_ascii_alphanumeric();
                 let after = idx + kw.len();
-                let after_ok = after >= lowered.len()
-                    || !lowered.as_bytes()[after].is_ascii_alphanumeric();
+                let after_ok =
+                    after >= lowered.len() || !lowered.as_bytes()[after].is_ascii_alphanumeric();
                 (before_ok && after_ok).then_some((idx, (*kw).to_string()))
             })
         })
@@ -284,7 +283,7 @@ impl GraphQLClient {
     pub fn new(server_uri: impl Into<String>) -> Self {
         Self::with_config(server_uri, ClientConfig::default(), RetryConfig::default())
     }
-    
+
     /// Create a new GraphQL client with custom configuration
     pub fn with_config(
         server_uri: impl Into<String>,
@@ -362,19 +361,21 @@ impl GraphQLClient {
 
     /// Get socket URI if configured
     pub fn get_socket_uri(&self) -> Option<&str> {
-        self.socket_config.as_ref().map(|config| config.socket_uri.as_str())
+        self.socket_config
+            .as_ref()
+            .map(|config| config.socket_uri.as_str())
     }
 
     /// Set encryption mode
     pub fn set_encryption(&mut self, encrypt: bool) {
         self.encrypt = encrypt;
     }
-    
+
     /// Get socket configuration
     pub fn get_socket_config(&self) -> Option<&SocketConfig> {
         self.socket_config.as_ref()
     }
-    
+
     /// Get authentication token
     pub fn get_auth_token(&self) -> Option<String> {
         self.auth_token.clone()
@@ -476,7 +477,10 @@ impl GraphQLClient {
             )));
         }
 
-        let text = response.text().await.map_err(KnishIOError::from_network_error)?;
+        let text = response
+            .text()
+            .await
+            .map_err(KnishIOError::from_network_error)?;
 
         let graphql_response: GraphQLResponse = match wallet {
             Some(wallet) => {
@@ -492,14 +496,18 @@ impl GraphQLClient {
                     Some(hash) => {
                         let map: HashMap<String, crate::wallet::EncryptedMessage> =
                             serde_json::from_str(hash).map_err(|e| {
-                                KnishIOError::custom(format!("CipherHash: malformed response map: {e}"))
+                                KnishIOError::custom(format!(
+                                    "CipherHash: malformed response map: {e}"
+                                ))
                             })?;
                         let inner = wallet
                             .decrypt_my_message_ml(&map)
                             .await
                             .ok_or(KnishIOError::DecryptionKey)?;
                         serde_json::from_str(&inner).map_err(|e| {
-                            KnishIOError::custom(format!("CipherHash: malformed inner response: {e}"))
+                            KnishIOError::custom(format!(
+                                "CipherHash: malformed inner response: {e}"
+                            ))
                         })?
                     }
                     // No envelope. Only an errors-only reply (`data` absent, null or `{}`)
@@ -517,8 +525,9 @@ impl GraphQLClient {
                                 "CipherHash: plaintext reply to an encrypted request",
                             ));
                         }
-                        serde_json::from_value(parsed)
-                            .map_err(|e| KnishIOError::custom(format!("Invalid response JSON: {e}")))?
+                        serde_json::from_value(parsed).map_err(|e| {
+                            KnishIOError::custom(format!("Invalid response JSON: {e}"))
+                        })?
                     }
                 }
             }
@@ -535,7 +544,8 @@ impl GraphQLClient {
             "query": request.query,
             "variables": request.variables,
             "operationName": request.operation_name
-        })).await
+        }))
+        .await
     }
 
     /// Execute a GraphQL mutation
@@ -544,7 +554,8 @@ impl GraphQLClient {
             "query": request.mutation,
             "variables": request.variables,
             "operationName": request.operation_name
-        })).await
+        }))
+        .await
     }
 
     /// Subscribe to GraphQL subscription (WebSocket-based)
@@ -552,7 +563,9 @@ impl GraphQLClient {
     where
         F: FnMut(GraphQLResponse) + Send + 'static,
     {
-        let socket_config = self.socket_config.as_ref()
+        let socket_config = self
+            .socket_config
+            .as_ref()
             .ok_or_else(|| KnishIOError::custom("Socket not configured for subscriptions"))?;
 
         let ws_url = &socket_config.socket_uri;
@@ -569,7 +582,7 @@ impl GraphQLClient {
                 "authToken": self.auth_token
             }
         });
-        
+
         ws_sender
             .send(Message::Text(init_message.to_string().into()))
             .await
@@ -615,11 +628,15 @@ impl GraphQLClient {
         // Check for errors
         if let Some(ref errors) = response.errors {
             if !errors.is_empty() {
-                let error_msg = errors.iter()
+                let error_msg = errors
+                    .iter()
                     .map(|e| e.message.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
-                return Err(KnishIOError::custom(format!("GraphQL errors: {}", error_msg)));
+                return Err(KnishIOError::custom(format!(
+                    "GraphQL errors: {}",
+                    error_msg
+                )));
             }
         }
 
@@ -640,7 +657,10 @@ pub fn create_query_request(query: impl Into<String>, variables: Option<Value>) 
 }
 
 /// Helper function to create GraphQL mutation request
-pub fn create_mutation_request(mutation: impl Into<String>, variables: Option<Value>) -> GraphQLRequest {
+pub fn create_mutation_request(
+    mutation: impl Into<String>,
+    variables: Option<Value>,
+) -> GraphQLRequest {
     GraphQLRequest {
         query: None,
         mutation: Some(mutation.into()),
@@ -687,7 +707,7 @@ impl GraphQLClient {
             encryption_enabled: self.encrypt,
         }
     }
-    
+
     /// Health check method to verify server connectivity
     pub async fn health_check(&self) -> Result<bool> {
         let health_request = GraphQLRequest {
@@ -698,13 +718,13 @@ impl GraphQLClient {
             timeout: Some(Duration::from_secs(5)),
             headers: HashMap::new(),
         };
-        
+
         match self.query(health_request).await {
             Ok(_) => Ok(true),
-            Err(_) => Ok(false)
+            Err(_) => Ok(false),
         }
     }
-    
+
     /// Unsubscribe from all active subscriptions (synchronous version)
     pub fn unsubscribe_all(&self) {
         // This is a simplified version for now - just a compatibility stub
@@ -731,7 +751,10 @@ mod cipher_hash_transport_tests {
         let c = client();
 
         assert!(!c.should_encrypt(&body("query { __schema { types { name } } }", Value::Null)));
-        assert!(!c.should_encrypt(&body("query ( $bundle: String ) { ContinuId ( bundle: $bundle ) { address } }", Value::Null)));
+        assert!(!c.should_encrypt(&body(
+            "query ( $bundle: String ) { ContinuId ( bundle: $bundle ) { address } }",
+            Value::Null
+        )));
         assert!(!c.should_encrypt(&body("mutation { AccessToken { token } }", Value::Null)));
         assert!(!c.should_encrypt(&body(
             "mutation ( $molecule: MoleculeInput! ) { ProposeMolecule ( molecule: $molecule ) { status } }",
@@ -754,13 +777,21 @@ mod cipher_hash_transport_tests {
 
     #[test]
     fn parse_operation_reads_type_and_root_field() {
-        assert_eq!(parse_operation("query { Balance { address } }"), ("query".into(), "Balance".into()));
         assert_eq!(
-            parse_operation("mutation ( $m: MoleculeInput! ) { ProposeMolecule ( molecule: $m ) { status } }"),
+            parse_operation("query { Balance { address } }"),
+            ("query".into(), "Balance".into())
+        );
+        assert_eq!(
+            parse_operation(
+                "mutation ( $m: MoleculeInput! ) { ProposeMolecule ( molecule: $m ) { status } }"
+            ),
             ("mutation".into(), "ProposeMolecule".into())
         );
         // Anonymous selection sets default to `query`.
-        assert_eq!(parse_operation("{ ContinuId { address } }"), ("query".into(), "ContinuId".into()));
+        assert_eq!(
+            parse_operation("{ ContinuId { address } }"),
+            ("query".into(), "ContinuId".into())
+        );
     }
 
     /// Encryption enabled with no transport key must FAIL CLOSED rather than
@@ -775,7 +806,8 @@ mod cipher_hash_transport_tests {
             .await
             .expect_err("an encrypted request with no key must not be sent");
         assert!(
-            err.to_string().contains("CipherHash: encryption is enabled but no ML-KEM transport key"),
+            err.to_string()
+                .contains("CipherHash: encryption is enabled but no ML-KEM transport key"),
             "expected the fail-closed error, got: {err}"
         );
     }
@@ -788,7 +820,10 @@ mod cipher_hash_transport_tests {
         c.set_encryption(true);
 
         let err = c
-            .query(create_query_request("query { __schema { types { name } } }", None))
+            .query(create_query_request(
+                "query { __schema { types { name } } }",
+                None,
+            ))
             .await
             .expect_err("an unroutable URI must fail at the network layer");
         assert!(
@@ -837,7 +872,9 @@ mod cipher_hash_transport_tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let url = format!("http://{}/graphql", listener.local_addr()?);
         tokio::spawn(async move {
-            let Ok((mut socket, _)) = listener.accept().await else { return };
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
             if read_request_body(&mut socket).await.is_err() {
                 return;
             }
@@ -856,7 +893,16 @@ mod cipher_hash_transport_tests {
     /// A client with encryption on and a transport key, so ordinary operations are wrapped.
     fn keyed_client(url: &str) -> Result<GraphQLClient> {
         let secret = crate::crypto::generate_secret("cipher-hash-reply-rule");
-        let wallet = crate::wallet::Wallet::new(Some(&secret), None, Some("AUTH"), None, None, None, None, None)?;
+        let wallet = crate::wallet::Wallet::new(
+            Some(&secret),
+            None,
+            Some("AUTH"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
         let mut c = GraphQLClient::new(url);
         c.set_encryption(true);
         c.set_auth_data("T".into(), wallet.pubkey.clone(), Some(wallet));
@@ -870,14 +916,19 @@ mod cipher_hash_transport_tests {
     ) -> std::result::Result<Result<GraphQLResponse>, Box<dyn std::error::Error>> {
         let url = stub_replying(reply).await?;
         let client = keyed_client(&url)?;
-        Ok(client.query(create_query_request("query { Balance { address } }", None)).await)
+        Ok(client
+            .query(create_query_request("query { Balance { address } }", None))
+            .await)
     }
 
     #[tokio::test]
     async fn plaintext_data_reply_to_an_encrypted_request_is_rejected() -> TestResult {
         let err = match balance_query_against(r#"{"data":{"Balance":{"address":"x"}}}"#).await? {
             Ok(accepted) => {
-                return Err(format!("plaintext data was accepted as the reply to an encrypted request: {accepted:?}").into())
+                return Err(format!(
+                "plaintext data was accepted as the reply to an encrypted request: {accepted:?}"
+            )
+                .into())
             }
             Err(err) => err,
         };
@@ -892,11 +943,16 @@ mod cipher_hash_transport_tests {
     async fn errors_only_reply_keeps_the_validator_message() -> TestResult {
         let reply = r#"{"data":null,"errors":[{"message":"CipherHash: no envelope addressed to the validator"}]}"#;
         let err = match balance_query_against(reply).await? {
-            Ok(accepted) => return Err(format!("an errors-only reply was returned as a success: {accepted:?}").into()),
+            Ok(accepted) => {
+                return Err(
+                    format!("an errors-only reply was returned as a success: {accepted:?}").into(),
+                )
+            }
             Err(err) => err,
         };
         assert!(
-            err.to_string().contains("CipherHash: no envelope addressed to the validator"),
+            err.to_string()
+                .contains("CipherHash: no envelope addressed to the validator"),
             "the validator's message must stay visible, got: {err}"
         );
         Ok(())

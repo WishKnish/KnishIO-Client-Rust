@@ -197,7 +197,7 @@ mod tests {
     fn test_compiled_variables_partial() {
         let query = QueryPolicy::new().with_meta_type("user");
         let variables = query.compiled_variables(None).unwrap();
-        
+
         assert_eq!(variables["metaType"], json!("user"));
         assert!(!variables.as_object().unwrap().contains_key("metaId"));
     }
@@ -206,7 +206,7 @@ mod tests {
     fn test_compiled_variables_empty() {
         let query = QueryPolicy::new();
         let variables = query.compiled_variables(None).unwrap();
-        
+
         let obj = variables.as_object().unwrap();
         assert!(!obj.contains_key("metaType"));
         assert!(!obj.contains_key("metaId"));
@@ -216,7 +216,7 @@ mod tests {
     fn test_query_string() {
         let query = QueryPolicy::new();
         let query_string = query.get_query();
-        
+
         // Check that the query string contains expected fields
         assert!(query_string.contains("Policy( metaType: $metaType, metaId: $metaId )"));
         assert!(query_string.contains("molecularHash"));

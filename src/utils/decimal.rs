@@ -255,8 +255,8 @@ mod tests {
     fn test_val() {
         // Below the 1e-18 threshold (|v * 1e18| < 1.0) is normalized to 0
         assert_eq!(Decimal::val(0.0000000000000000001), 0.0); // 1e-19
-        // 1e-18 is the boundary itself (|v * 1e18| == 1.0, NOT < 1.0) → unchanged,
-        // matching JS Decimal.val (Math.abs(1e-18 * 1e18) < 1 is false).
+                                                              // 1e-18 is the boundary itself (|v * 1e18| == 1.0, NOT < 1.0) → unchanged,
+                                                              // matching JS Decimal.val (Math.abs(1e-18 * 1e18) < 1 is false).
         assert_eq!(Decimal::val(0.000000000000000001), 0.000000000000000001);
 
         // Normal values should pass through
@@ -285,7 +285,7 @@ mod tests {
     fn test_equal() {
         assert!(Decimal::equal(1.0, 1.0));
         assert!(Decimal::equal(0.25 + 0.25, 0.5)); // exact in f64
-        // Mirrors JS Decimal.js: 0.1 + 0.2 is NOT equal to 0.3 at 1e18 scale.
+                                                   // Mirrors JS Decimal.js: 0.1 + 0.2 is NOT equal to 0.3 at 1e18 scale.
         assert!(!Decimal::equal(0.1 + 0.2, 0.3));
         assert!(!Decimal::equal(1.0, 2.0));
     }
@@ -336,7 +336,10 @@ mod tests {
         assert_eq!(Decimal::cmp_str("1000", "2000", false), -1);
 
         // Large values beyond f64 precision (> 2^53)
-        assert_eq!(Decimal::cmp_str("9007199254740993", "9007199254740992", false), 1);
+        assert_eq!(
+            Decimal::cmp_str("9007199254740993", "9007199254740992", false),
+            1
+        );
 
         // Negative values
         assert_eq!(Decimal::cmp_str("-500", "500", false), -1);

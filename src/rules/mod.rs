@@ -3,16 +3,16 @@
 //! This module provides the Rules system matching the JavaScript SDK functionality.
 //! Rules consist of Conditions and Callbacks that define validation and action patterns.
 
-use serde_json::Value;
 use crate::error::{KnishIOError, Result};
+use serde_json::Value;
 
-pub mod rule;
 pub mod callback;
 pub mod condition;
+pub mod rule;
 
-pub use rule::Rule;
 pub use callback::Callback;
 pub use condition::Condition;
+pub use rule::Rule;
 
 /// Exception for rule argument validation errors
 ///
@@ -72,15 +72,12 @@ mod tests {
     #[test]
     fn test_cross_sdk_rule_json_compatibility() {
         // Test that our Rule JSON output matches JavaScript SDK exactly
-        use crate::rules::{Rule, Condition, Callback};
+        use crate::rules::{Callback, Condition, Rule};
         use callback::Meta;
 
         // Create a complex rule matching JavaScript SDK test patterns
-        let condition = Condition::new(
-            "balance".to_string(),
-            "1000".to_string(),
-            ">=".to_string()
-        ).unwrap();
+        let condition =
+            Condition::new("balance".to_string(), "1000".to_string(), ">=".to_string()).unwrap();
 
         let mut meta = Meta::empty();
         meta.set_property("type".to_string(), json!("validation"));
@@ -95,7 +92,8 @@ mod tests {
             Some("COLLECT".to_string()),
             Some("250".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         let rule = Rule::new(vec![condition], vec![callback]);
         let json_output = rule.to_json();
@@ -103,7 +101,7 @@ mod tests {
         // Verify JSON structure matches JavaScript SDK format
         assert!(json_output.get("condition").is_some());
         assert!(json_output.get("callback").is_some());
-        
+
         let conditions = json_output["condition"].as_array().unwrap();
         assert_eq!(conditions.len(), 1);
         assert_eq!(conditions[0]["key"], "balance");
@@ -135,8 +133,15 @@ mod tests {
         // Test reject callback (minimal requirements)
         let reject_callback = Callback::new(
             "reject".to_string(),
-            None, None, None, None, None, None, None,
-        ).unwrap();
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(reject_callback.is_reject());
         assert!(!reject_callback.is_collect());
         assert!(!reject_callback.is_meta());
@@ -144,14 +149,18 @@ mod tests {
         // Test meta callback (requires action, metaId, metaType, meta)
         let mut meta = Meta::empty();
         meta.set_property("test".to_string(), json!("value"));
-        
+
         let meta_callback = Callback::new(
             "meta".to_string(),
             Some("test_type".to_string()),
             Some("test_id".to_string()),
             Some(meta),
-            None, None, None, None,
-        ).unwrap();
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(meta_callback.is_meta());
         assert!(!meta_callback.is_collect());
         assert!(!meta_callback.is_reject());
@@ -159,12 +168,15 @@ mod tests {
         // Test collect callback (requires action, address, token, amount, comparison)
         let collect_callback = Callback::new(
             "collect".to_string(),
-            None, None, None,
+            None,
+            None,
+            None,
             Some("test_address".to_string()),
             Some("TEST".to_string()),
             Some("100".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(collect_callback.is_collect());
         assert!(!collect_callback.is_meta());
         assert!(!collect_callback.is_reject());
@@ -172,34 +184,45 @@ mod tests {
         // Test buffer callback (same requirements as collect)
         let buffer_callback = Callback::new(
             "buffer".to_string(),
-            None, None, None,
+            None,
+            None,
+            None,
             Some("buffer_address".to_string()),
             Some("BUFFER".to_string()),
             Some("200".to_string()),
             Some(">".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(buffer_callback.is_buffer());
         assert!(!buffer_callback.is_collect());
 
         // Test remit callback (requires action, token, amount)
         let remit_callback = Callback::new(
             "remit".to_string(),
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
             Some("REMIT".to_string()),
             Some("150".to_string()),
             None,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(remit_callback.is_remit());
         assert!(!remit_callback.is_collect());
 
         // Test burn callback (requires action, token, amount, comparison)
         let burn_callback = Callback::new(
             "burn".to_string(),
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
             Some("BURN".to_string()),
             Some("50".to_string()),
             Some("<".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(burn_callback.is_burn());
         assert!(!burn_callback.is_remit());
     }
@@ -266,7 +289,9 @@ mod tests {
         for amount in valid_amounts {
             let result = Callback::new(
                 "collect".to_string(),
-                None, None, None,
+                None,
+                None,
+                None,
                 Some("address".to_string()),
                 Some("TOKEN".to_string()),
                 Some(amount.to_string()),
@@ -280,7 +305,9 @@ mod tests {
         for amount in invalid_amounts {
             let result = Callback::new(
                 "collect".to_string(),
-                None, None, None,
+                None,
+                None,
+                None,
                 Some("address".to_string()),
                 Some("TOKEN".to_string()),
                 Some(amount.to_string()),
@@ -295,21 +322,23 @@ mod tests {
     #[test]
     fn test_cross_sdk_round_trip_compatibility() {
         // Test that JSON round-trip maintains compatibility with JavaScript SDK
-        use crate::rules::{Rule, Condition, Callback};
+        use crate::rules::{Callback, Condition, Rule};
         use callback::Meta;
 
         // Create a complex rule structure
         let condition1 = Condition::new(
             "wallet_balance".to_string(),
             "500".to_string(),
-            ">=".to_string()
-        ).unwrap();
+            ">=".to_string(),
+        )
+        .unwrap();
 
         let condition2 = Condition::new(
             "token_type".to_string(),
             "PREMIUM".to_string(),
-            "==".to_string()
-        ).unwrap();
+            "==".to_string(),
+        )
+        .unwrap();
 
         let mut meta = Meta::empty();
         meta.set_property("validation_level".to_string(), json!("high"));
@@ -325,22 +354,36 @@ mod tests {
             Some("REWARD".to_string()),
             Some("100".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         let callback2 = Callback::new(
             "reject".to_string(),
-            None, None, None, None, None, None, None,
-        ).unwrap();
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         let original_rule = Rule::new(vec![condition1, condition2], vec![callback1, callback2]);
-        
+
         // Convert to JSON and back
         let json_output = original_rule.to_json();
         let restored_rule = Rule::from_object(&json_output).unwrap();
 
         // Verify complete compatibility
-        assert_eq!(original_rule.condition_count(), restored_rule.condition_count());
-        assert_eq!(original_rule.callback_count(), restored_rule.callback_count());
+        assert_eq!(
+            original_rule.condition_count(),
+            restored_rule.condition_count()
+        );
+        assert_eq!(
+            original_rule.callback_count(),
+            restored_rule.callback_count()
+        );
 
         // Verify conditions are preserved
         let original_conditions = original_rule.get_conditions();
@@ -375,7 +418,7 @@ mod tests {
         use callback::Meta;
 
         let mut meta = Meta::empty();
-        
+
         // Test dynamic property assignment (like JavaScript)
         meta.set_property("stringProp".to_string(), json!("test_value"));
         meta.set_property("numberProp".to_string(), json!(42));
@@ -387,8 +430,14 @@ mod tests {
         assert_eq!(meta.get_property("stringProp"), Some(&json!("test_value")));
         assert_eq!(meta.get_property("numberProp"), Some(&json!(42)));
         assert_eq!(meta.get_property("booleanProp"), Some(&json!(true)));
-        assert_eq!(meta.get_property("arrayProp"), Some(&json!(["item1", "item2"])));
-        assert_eq!(meta.get_property("objectProp"), Some(&json!({"nested": "value"})));
+        assert_eq!(
+            meta.get_property("arrayProp"),
+            Some(&json!(["item1", "item2"]))
+        );
+        assert_eq!(
+            meta.get_property("objectProp"),
+            Some(&json!({"nested": "value"}))
+        );
 
         // Test property existence
         assert!(meta.has_property("stringProp"));
@@ -414,8 +463,14 @@ mod tests {
 
         // Test round-trip through JSON
         let restored_meta = Meta::from_object(&json_output).unwrap();
-        assert_eq!(restored_meta.get_property("stringProp"), Some(&json!("test_value")));
+        assert_eq!(
+            restored_meta.get_property("stringProp"),
+            Some(&json!("test_value"))
+        );
         assert_eq!(restored_meta.get_property("numberProp"), Some(&json!(42)));
-        assert_eq!(restored_meta.get_property("booleanProp"), Some(&json!(true)));
+        assert_eq!(
+            restored_meta.get_property("booleanProp"),
+            Some(&json!(true))
+        );
     }
 }

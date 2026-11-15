@@ -73,9 +73,9 @@ pub fn open(payload: &EncryptedSecretPayload, passphrase: &str) -> Result<Zeroiz
 
     let nonce = Nonce::try_from(iv.as_slice())
         .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid IV length: {}", e)))?;
-    let decrypted = cipher
-        .decrypt(&nonce, ciphertext.as_ref())
-        .map_err(|e| KnishIOError::DecryptionFailed(format!("Decryption authentication failed: {}", e)))?;
+    let decrypted = cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|e| {
+        KnishIOError::DecryptionFailed(format!("Decryption authentication failed: {}", e))
+    })?;
 
     Ok(Zeroizing::new(decrypted))
 }

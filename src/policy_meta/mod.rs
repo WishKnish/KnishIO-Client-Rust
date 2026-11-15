@@ -4,18 +4,17 @@
 //! access control policies for metadata, ensuring exact compatibility with the
 //! JavaScript PolicyMeta.js implementation.
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use crate::error::{KnishIOError, Result};
 use crate::types::ordered::{sort_js_keys, OrderedValue, PolicyMap};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// Represents access control policies for metadata
 ///
 /// PolicyMeta manages read and write permissions for metadata keys,
 /// providing default policy generation and normalization functionality.
 /// This struct maintains exact compatibility with the JavaScript PolicyMeta class.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct PolicyMeta {
     /// The policy: action → meta key → permissions, in JS object key order (array-index keys
     /// ascending, then insertion order), the order JS signs it in
@@ -142,7 +141,7 @@ impl PolicyMeta {
     /// # Default Rules
     ///
     /// - **Read permissions**: Default to `["all"]` for all keys
-    /// - **Write permissions**: 
+    /// - **Write permissions**:
     ///   - `["all"]` for `characters` and `pubkey` keys
     ///   - `["self"]` for all other keys
     ///
@@ -163,11 +162,12 @@ impl PolicyMeta {
             let action_map = self.policy.entry(action.to_string()).or_default();
             for key in &meta_keys {
                 if !action_map.contains_key(key) {
-                    let default_permission = if action == "write" && key != "characters" && key != "pubkey" {
-                        "self"
-                    } else {
-                        "all"
-                    };
+                    let default_permission =
+                        if action == "write" && key != "characters" && key != "pubkey" {
+                            "self"
+                        } else {
+                            "all"
+                        };
                     action_map.insert(key.clone(), vec![default_permission.to_string()]);
                 }
             }
@@ -219,8 +219,7 @@ impl PolicyMeta {
         for action_map in policy.values_mut() {
             sort_js_keys(action_map);
         }
-        serde_json::to_string(&policy)
-            .map_err(|e| KnishIOError::Serialization(e.to_string()))
+        serde_json::to_string(&policy).map_err(|e| KnishIOError::Serialization(e.to_string()))
     }
 
     /// Create PolicyMeta from GraphQL response data
@@ -234,7 +233,8 @@ impl PolicyMeta {
     ///
     /// Result containing new PolicyMeta instance or error
     pub fn create_from_graphql(data: &serde_json::Value, meta_keys: Vec<String>) -> Result<Self> {
-        let policy = data.get("policy")
+        let policy = data
+            .get("policy")
             .cloned()
             .map(OrderedValue::from)
             .unwrap_or_default();
@@ -254,7 +254,11 @@ impl PolicyMeta {
     /// Result containing new PolicyMeta instance or error
     pub fn create_from_db(data: &serde_json::Value, meta_keys: Vec<String>) -> Result<Self> {
         let policy = match data.as_array() {
-            Some(array) => array.first().cloned().map(OrderedValue::from).unwrap_or_default(),
+            Some(array) => array
+                .first()
+                .cloned()
+                .map(OrderedValue::from)
+                .unwrap_or_default(),
             None => OrderedValue::from(data.clone()),
         };
 
@@ -275,9 +279,9 @@ impl PolicyMeta {
     pub fn is_allowed(&self, action: &str, key: &str, bundle: &str) -> bool {
         if let Some(action_map) = self.policy.get(action) {
             if let Some(permissions) = action_map.get(key) {
-                return permissions.contains(&"all".to_string()) || 
-                       permissions.contains(&bundle.to_string()) ||
-                       (permissions.contains(&"self".to_string()) && bundle == "self");
+                return permissions.contains(&"all".to_string())
+                    || permissions.contains(&bundle.to_string())
+                    || (permissions.contains(&"self".to_string()) && bundle == "self");
             }
         }
         false
@@ -331,8 +335,7 @@ impl PolicyMeta {
     ///
     /// True if no policies are defined
     pub fn is_empty(&self) -> bool {
-        self.policy.is_empty() || 
-        self.policy.values().all(|action_map| action_map.is_empty())
+        self.policy.is_empty() || self.policy.values().all(|action_map| action_map.is_empty())
     }
 
     /// Clear all policies
@@ -347,17 +350,16 @@ impl PolicyMeta {
     /// Set of all metadata keys with policies
     pub fn get_policy_keys(&self) -> HashSet<String> {
         let mut keys = HashSet::new();
-        
+
         for action_map in self.policy.values() {
             for key in action_map.keys() {
                 keys.insert(key.clone());
             }
         }
-        
+
         keys
     }
 }
-
 
 impl std::fmt::Display for PolicyMeta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -389,12 +391,16 @@ mod tests {
             }
         }));
 
-        let meta_keys = vec!["pubkey".to_string(), "characters".to_string(), "balance".to_string()];
+        let meta_keys = vec![
+            "pubkey".to_string(),
+            "characters".to_string(),
+            "balance".to_string(),
+        ];
         let policy_meta = PolicyMeta::new(policy, meta_keys);
 
         assert!(policy_meta.policy.contains_key("read"));
         assert!(policy_meta.policy.contains_key("write"));
-        
+
         // Should have default policies for balance
         assert!(policy_meta.policy["read"].contains_key("balance"));
         assert!(policy_meta.policy["write"].contains_key("balance"));
@@ -429,10 +435,16 @@ mod tests {
     /// the order given; defaults append `read` / `write` and the meta keys in order.
     #[test]
     fn test_js_key_order() -> Result<()> {
-        let raw: OrderedValue = serde_json::from_str(r#"{"write":{"z":["self"],"5":["a"],"a":["self"]}}"#)?;
+        let raw: OrderedValue =
+            serde_json::from_str(r#"{"write":{"z":["self"],"5":["a"],"a":["self"]}}"#)?;
         let policy_meta = PolicyMeta::new(
             PolicyMeta::normalize_policy(&raw),
-            vec!["k".to_string(), "10".to_string(), "2".to_string(), "b".to_string()],
+            vec![
+                "k".to_string(),
+                "10".to_string(),
+                "2".to_string(),
+                "b".to_string(),
+            ],
         );
         assert_eq!(
             policy_meta.to_json()?,
@@ -459,9 +471,9 @@ mod tests {
         assert_eq!(policy_meta.policy["read"]["balance"], vec!["all"]);
 
         // Check write defaults
-        assert_eq!(policy_meta.policy["write"]["pubkey"], vec!["all"]);      // Special case
-        assert_eq!(policy_meta.policy["write"]["characters"], vec!["all"]);  // Special case
-        assert_eq!(policy_meta.policy["write"]["balance"], vec!["self"]);    // Default case
+        assert_eq!(policy_meta.policy["write"]["pubkey"], vec!["all"]); // Special case
+        assert_eq!(policy_meta.policy["write"]["characters"], vec!["all"]); // Special case
+        assert_eq!(policy_meta.policy["write"]["balance"], vec!["self"]); // Default case
     }
 
     #[test]
@@ -481,7 +493,7 @@ mod tests {
 
         // Existing policy should be preserved
         assert_eq!(policy_meta.policy["read"]["balance"], vec!["bundle123"]);
-        
+
         // New keys should get defaults
         assert_eq!(policy_meta.policy["read"]["pubkey"], vec!["all"]);
         assert_eq!(policy_meta.policy["write"]["pubkey"], vec!["all"]);
@@ -498,7 +510,7 @@ mod tests {
 
         let policy_meta = PolicyMeta::new(policy, vec![]);
         let policy_ref = policy_meta.get();
-        
+
         assert!(policy_ref.contains_key("read"));
         assert_eq!(policy_ref["read"]["pubkey"], vec!["all"]);
 
@@ -553,15 +565,15 @@ mod tests {
 
         // Test "all" permission
         assert!(policy_meta.is_allowed("read", "pubkey", "anyone"));
-        
+
         // Test specific bundle permission
         assert!(policy_meta.is_allowed("read", "balance", "bundle123"));
         assert!(!policy_meta.is_allowed("read", "balance", "other_bundle"));
-        
+
         // Test "self" permission
         assert!(policy_meta.is_allowed("read", "balance", "self"));
         assert!(policy_meta.is_allowed("write", "private", "self"));
-        
+
         // Test non-existent key
         assert!(!policy_meta.is_allowed("read", "nonexistent", "anyone"));
     }
@@ -572,7 +584,10 @@ mod tests {
 
         // Set permissions
         policy_meta.set_permissions("read", "test_key", vec!["all".to_string()]);
-        assert_eq!(policy_meta.get_permissions("read", "test_key"), Some(&vec!["all".to_string()]));
+        assert_eq!(
+            policy_meta.get_permissions("read", "test_key"),
+            Some(&vec!["all".to_string()])
+        );
 
         // Remove permissions
         let removed = policy_meta.remove_permissions("read", "test_key");
@@ -614,20 +629,23 @@ mod tests {
         // Test exact JavaScript SDK behavior reproduction
 
         // Test empty policy with meta keys (JavaScript line 87-105)
-        let policy_meta = PolicyMeta::new(PolicyMap::new(), vec![
-            "pubkey".to_string(),
-            "characters".to_string(),
-            "balance".to_string(),
-        ]);
+        let policy_meta = PolicyMeta::new(
+            PolicyMap::new(),
+            vec![
+                "pubkey".to_string(),
+                "characters".to_string(),
+                "balance".to_string(),
+            ],
+        );
 
         // Verify default policy generation matches JavaScript behavior
         assert_eq!(policy_meta.policy["read"]["pubkey"], vec!["all"]);
         assert_eq!(policy_meta.policy["read"]["characters"], vec!["all"]);
         assert_eq!(policy_meta.policy["read"]["balance"], vec!["all"]);
 
-        assert_eq!(policy_meta.policy["write"]["pubkey"], vec!["all"]);      // Special case
-        assert_eq!(policy_meta.policy["write"]["characters"], vec!["all"]);  // Special case
-        assert_eq!(policy_meta.policy["write"]["balance"], vec!["self"]);    // Default case
+        assert_eq!(policy_meta.policy["write"]["pubkey"], vec!["all"]); // Special case
+        assert_eq!(policy_meta.policy["write"]["characters"], vec!["all"]); // Special case
+        assert_eq!(policy_meta.policy["write"]["balance"], vec!["self"]); // Default case
 
         // Test normalization (JavaScript line 32-54)
         let normalized = policy(json!({

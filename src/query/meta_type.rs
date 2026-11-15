@@ -319,9 +319,7 @@ impl QueryMetaType {
 
     /// Query by meta type and ID
     pub fn by_meta(meta_type: impl Into<String>, meta_id: impl Into<String>) -> Self {
-        Self::new()
-            .with_meta_type(meta_type)
-            .with_meta_id(meta_id)
+        Self::new().with_meta_type(meta_type).with_meta_id(meta_id)
     }
 
     /// Query latest metas only
@@ -368,7 +366,7 @@ mod tests {
     fn test_query_meta_type_with_multiple_values() {
         let meta_types = vec!["user".to_string(), "admin".to_string()];
         let meta_ids = vec!["123".to_string(), "456".to_string()];
-        
+
         let query = QueryMetaType::new()
             .with_meta_types(meta_types.clone())
             .with_meta_ids(meta_ids.clone());
@@ -395,8 +393,14 @@ mod tests {
     #[test]
     fn test_create_variables_multiple_values() {
         let params = QueryMetaTypeParams {
-            meta_type: Some(MetaTypeValue::Multiple(vec!["user".to_string(), "admin".to_string()])),
-            meta_id: Some(MetaIdValue::Multiple(vec!["123".to_string(), "456".to_string()])),
+            meta_type: Some(MetaTypeValue::Multiple(vec![
+                "user".to_string(),
+                "admin".to_string(),
+            ])),
+            meta_id: Some(MetaIdValue::Multiple(vec![
+                "123".to_string(),
+                "456".to_string(),
+            ])),
             ..Default::default()
         };
 
@@ -439,7 +443,7 @@ mod tests {
     fn test_query_string() {
         let query = QueryMetaType::new();
         let query_string = query.get_query();
-        
+
         // Check that the query string contains expected fields
         assert!(query_string.contains("MetaType("));
         assert!(query_string.contains("metaType: $metaType"));

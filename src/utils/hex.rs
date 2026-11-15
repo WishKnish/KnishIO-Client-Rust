@@ -4,8 +4,7 @@
 //! ensuring exact compatibility with the JavaScript SDK's Hex.js implementation.
 
 /// Options for hexadecimal formatting
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct HexOptions {
     /// Number of hex bytes grouped together with spaces between groups (0 = no grouping)
     pub grouping: usize,
@@ -14,7 +13,6 @@ pub struct HexOptions {
     /// Use uppercase hex characters
     pub uppercase: bool,
 }
-
 
 impl HexOptions {
     /// Create new HexOptions with default values
@@ -80,11 +78,15 @@ impl Hex {
     /// ```
     pub fn to_hex(arr: &[u8], options: Option<HexOptions>) -> String {
         let opts = options.unwrap_or_default();
-        
+
         let hex_chars = if opts.uppercase {
-            ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F']
+            [
+                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
+            ]
         } else {
-            ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f']
+            [
+                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+            ]
         };
 
         let mut result = String::new();
@@ -164,7 +166,8 @@ impl Hex {
     /// ```
     pub fn to_uint8_array(hex_str: &str) -> Result<Vec<u8>, String> {
         // Remove whitespace and convert to lowercase
-        let mut target = hex_str.chars()
+        let mut target = hex_str
+            .chars()
             .filter(|c| !c.is_whitespace())
             .map(|c| c.to_ascii_lowercase())
             .collect::<String>();
@@ -175,8 +178,10 @@ impl Hex {
         }
 
         let mut buffer = Vec::with_capacity(target.len() / 2);
-        let hex_chars = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
-        
+        let hex_chars = [
+            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+        ];
+
         let chars: Vec<char> = target.chars().collect();
         let mut i = 0;
 
@@ -185,9 +190,13 @@ impl Hex {
             let low_char = chars[i + 1];
 
             // Find hex values
-            let high_val = hex_chars.iter().position(|&c| c == high_char)
+            let high_val = hex_chars
+                .iter()
+                .position(|&c| c == high_char)
                 .ok_or_else(|| format!("Unexpected character: '{}'", high_char))?;
-            let low_val = hex_chars.iter().position(|&c| c == low_char)
+            let low_val = hex_chars
+                .iter()
+                .position(|&c| c == low_char)
                 .ok_or_else(|| format!("Unexpected character: '{}'", low_char))?;
 
             buffer.push((high_val * 16 + low_val) as u8);
@@ -237,9 +246,7 @@ impl Hex {
     ///
     /// `true` if the string contains only valid hex characters (ignoring whitespace)
     pub fn is_valid_hex(s: &str) -> bool {
-        let cleaned = s.chars()
-            .filter(|c| !c.is_whitespace())
-            .collect::<String>();
+        let cleaned = s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
 
         if cleaned.is_empty() {
             return false;
@@ -284,10 +291,8 @@ impl Hex {
     ///
     /// Number of bytes the hex string represents
     pub fn byte_length(hex_str: &str) -> usize {
-        let cleaned = hex_str.chars()
-            .filter(|c| !c.is_whitespace())
-            .count();
-        
+        let cleaned = hex_str.chars().filter(|c| !c.is_whitespace()).count();
+
         cleaned.div_ceil(2) // Round up for odd-length strings
     }
 }
@@ -323,9 +328,7 @@ mod tests {
     #[test]
     fn test_to_hex_with_rows() {
         let data = vec![0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x57, 0x6f];
-        let options = HexOptions::new()
-            .with_grouping(2)
-            .with_rowlength(2);
+        let options = HexOptions::new().with_grouping(2).with_rowlength(2);
         let hex = Hex::to_hex(&data, Some(options));
         // grouping = 2 bytes/group, rowlength = 2 groups/row (matches JS Hex.js)
         assert_eq!(hex, "4865 6c6c\n6f20 576f");
@@ -381,7 +384,7 @@ mod tests {
         assert!(Hex::is_valid_hex("48 65 6c 6c 6f"));
         assert!(Hex::is_valid_hex("ABCDEF"));
         assert!(Hex::is_valid_hex("0123456789abcdef"));
-        
+
         assert!(!Hex::is_valid_hex(""));
         assert!(!Hex::is_valid_hex("G"));
         assert!(!Hex::is_valid_hex("48G5"));
@@ -418,7 +421,7 @@ mod tests {
         let data = vec![0x42];
         let hex = Hex::to_hex(&data, None);
         assert_eq!(hex, "42");
-        
+
         let bytes = Hex::to_uint8_array("42").unwrap();
         assert_eq!(bytes, vec![0x42]);
     }
@@ -426,22 +429,22 @@ mod tests {
     #[test]
     fn test_compatibility_with_js_examples() {
         // Test cases that should match JavaScript SDK behavior exactly
-        
+
         // Basic conversion
         let data = vec![255, 254, 253];
         let hex = Hex::to_hex(&data, None);
         assert_eq!(hex, "fffefd");
-        
+
         // Uppercase
         let options = HexOptions::new().with_uppercase(true);
         let hex = Hex::to_hex(&data, Some(options));
         assert_eq!(hex, "FFFEFD");
-        
+
         // Grouping
         let options = HexOptions::new().with_grouping(1);
         let hex = Hex::to_hex(&data, Some(options));
         assert_eq!(hex, "ff fe fd");
-        
+
         // Reverse conversion
         let bytes = Hex::to_uint8_array("fffefd").unwrap();
         assert_eq!(bytes, vec![255, 254, 253]);

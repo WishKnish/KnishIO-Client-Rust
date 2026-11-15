@@ -219,7 +219,7 @@ mod tests {
     fn test_compiled_variables_partial() {
         let query = QueryActiveSession::new().with_bundle_hash("test-bundle");
         let variables = query.compiled_variables(None).unwrap();
-        
+
         assert_eq!(variables["bundleHash"], json!("test-bundle"));
         assert!(!variables.as_object().unwrap().contains_key("metaType"));
         assert!(!variables.as_object().unwrap().contains_key("metaId"));
@@ -229,7 +229,7 @@ mod tests {
     fn test_query_string() {
         let query = QueryActiveSession::new();
         let query_string = query.get_query();
-        
+
         // Check that the query string contains expected fields
         assert!(query_string.contains("ActiveUserQuery"));
         assert!(query_string.contains("ActiveUser"));

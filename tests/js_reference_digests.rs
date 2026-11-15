@@ -6,9 +6,14 @@
 //! at OTS v1, and `createdAt = '1700000000000'` written on every atom before hashing with
 //! `Atom.hashAtoms`. A Rust builder that diverges from JS changes the digest and fails here.
 
-use knishio_client::crypto::{generate_bundle_hash_with_source, generate_secret, generate_secret_with_params, shake256};
+use knishio_client::crypto::{
+    generate_bundle_hash_with_source, generate_secret, generate_secret_with_params, shake256,
+};
 use knishio_client::utils::strings::{charset_base_convert, hex_to_base17};
-use knishio_client::{Atom, Isotope, MetaItem, Molecule, OrderedMap, OrderedValue, OtsVersion, TokenUnit, Version4, Wallet};
+use knishio_client::{
+    Atom, Isotope, MetaItem, Molecule, OrderedMap, OrderedValue, OtsVersion, TokenUnit, Version4,
+    Wallet,
+};
 use std::collections::HashMap;
 use std::error::Error;
 
@@ -26,7 +31,17 @@ fn position(byte: &str) -> String {
 }
 
 fn wallet(secret: &str, token: &str, at: &str) -> knishio_client::Result<Wallet> {
-    Wallet::new_with_ots_version(Some(secret), None, Some(token), None, Some(&position(at)), None, None, None, OtsVersion::V1)
+    Wallet::new_with_ots_version(
+        Some(secret),
+        None,
+        Some(token),
+        None,
+        Some(&position(at)),
+        None,
+        None,
+        None,
+        OtsVersion::V1,
+    )
 }
 
 /// A molecule signed by the USER wallet at `aa…`, with the USER remainder at `bb…`.
@@ -60,8 +75,14 @@ fn identifier_creation_hashes_the_contact_like_js() -> TestResult {
         meta_json(&molecule.atoms[0])?,
         r#"[{"key":"code","value":"123456"},{"key":"hash","value":"3378995cc4dadde1107a04bbedee886ae9e43458b2bad974ee25a995a6bac83d"}]"#
     );
-    assert!(!serde_json::to_string(&molecule)?.contains("probe@example.com"), "the contact must not be serialized");
-    assert_eq!(digest(&mut molecule)?, "04a82b82e431dcb5d128a8e4c0823cf0689110e5e57d8405dad032570d1d6846");
+    assert!(
+        !serde_json::to_string(&molecule)?.contains("probe@example.com"),
+        "the contact must not be serialized"
+    );
+    assert_eq!(
+        digest(&mut molecule)?,
+        "04a82b82e431dcb5d128a8e4c0823cf0689110e5e57d8405dad032570d1d6846"
+    );
     Ok(())
 }
 
@@ -69,7 +90,12 @@ fn identifier_creation_hashes_the_contact_like_js() -> TestResult {
 async fn sign_with_secret_keeps_the_molecular_hash() -> TestResult {
     let secret = secret();
     let mut molecule = user_molecule(&secret)?;
-    molecule.init_meta(vec![MetaItem::new("name", "probe")], "probeType", "probe-1", None)?;
+    molecule.init_meta(
+        vec![MetaItem::new("name", "probe")],
+        "probeType",
+        "probe-1",
+        None,
+    )?;
     for atom in &mut molecule.atoms {
         atom.created_at = CREATED_AT.to_string();
     }
@@ -79,8 +105,14 @@ async fn sign_with_secret_keeps_the_molecular_hash() -> TestResult {
     let expected = "021f4bd951ba8f8g3g1d03f457b4856913e45d0ga66gec8654f3fc7df81d9886";
     assert_eq!(molecule.molecular_hash.as_deref(), Some(expected));
     assert_eq!(molecule.get_molecular_hash()?, expected);
-    let fragment = molecule.atoms[0].ots_fragment.as_deref().ok_or("unsigned")?;
-    assert!(!fragment.chars().all(|c| c.is_ascii_hexdigit()), "the signature is compressed (base64), as JS sign() does by default");
+    let fragment = molecule.atoms[0]
+        .ots_fragment
+        .as_deref()
+        .ok_or("unsigned")?;
+    assert!(
+        !fragment.chars().all(|c| c.is_ascii_hexdigit()),
+        "the signature is compressed (base64), as JS sign() does by default"
+    );
     assert!(molecule.check(None)?);
     Ok(())
 }
@@ -89,7 +121,12 @@ async fn sign_with_secret_keeps_the_molecular_hash() -> TestResult {
 fn init_meta_with_a_policy_adds_the_js_policy_atom() -> TestResult {
     let secret = secret();
     let mut molecule = user_molecule(&secret)?;
-    molecule.init_meta(vec![MetaItem::new("name", "probe"), MetaItem::new("age", "3")], "probeType", "probe-1", Some(POLICY))?;
+    molecule.init_meta(
+        vec![MetaItem::new("name", "probe"), MetaItem::new("age", "3")],
+        "probeType",
+        "probe-1",
+        Some(POLICY),
+    )?;
 
     let isotopes: String = molecule.atoms.iter().map(|a| a.isotope.as_str()).collect();
     assert_eq!(isotopes, "MRI");
@@ -97,7 +134,10 @@ fn init_meta_with_a_policy_adds_the_js_policy_atom() -> TestResult {
         meta_json(&molecule.atoms[1])?,
         r#"[{"key":"name","value":"probe"},{"key":"age","value":"3"},{"key":"policy","value":"{\"read\":{\"0\":[\"all\"],\"1\":[\"all\"],\"name\":[\"all\"]},\"write\":{\"0\":[\"self\"],\"1\":[\"self\"],\"name\":[\"self\"]}}"}]"#
     );
-    assert_eq!(digest(&mut molecule)?, "05f643dg090dd41dc02bfa8g1d69c12b0d34a79ef3bfdee9b2c90242b2879c3c");
+    assert_eq!(
+        digest(&mut molecule)?,
+        "05f643dg090dd41dc02bfa8g1d69c12b0d34a79ef3bfdee9b2c90242b2879c3c"
+    );
     Ok(())
 }
 
@@ -112,7 +152,10 @@ fn create_rule_with_a_policy_matches_js_and_is_stable() -> TestResult {
             meta_json(&molecule.atoms[0])?,
             r#"[{"key":"rule","value":"[{\"condition\":[{\"key\":\"name\",\"value\":\"probe\",\"comparison\":\"===\"}],\"callback\":[{\"action\":\"reject\"}]}]"},{"key":"policy","value":"{\"read\":{\"0\":[\"all\"],\"name\":[\"all\"]},\"write\":{\"0\":[\"self\"],\"name\":[\"self\"]}}"}]"#
         );
-        assert_eq!(digest(&mut molecule)?, "05egfe8d6f86da39g88737174b0ca3faa37a3cc180a99748cfac0fdb9331384g");
+        assert_eq!(
+            digest(&mut molecule)?,
+            "05egfe8d6f86da39g88737174b0ca3faa37a3cc180a99748cfac0fdb9331384g"
+        );
     }
     Ok(())
 }
@@ -124,12 +167,19 @@ fn add_policy_atom_signs_from_the_source_wallet() -> TestResult {
     molecule.add_policy_atom("probeType", "probe-1", Vec::new(), Some(POLICY))?;
     molecule.add_continuid_atom()?;
 
-    assert_eq!(molecule.atoms[0].position, position("aa"), "the R atom is signed by the source wallet");
+    assert_eq!(
+        molecule.atoms[0].position,
+        position("aa"),
+        "the R atom is signed by the source wallet"
+    );
     assert_eq!(
         meta_json(&molecule.atoms[0])?,
         r#"[{"key":"policy","value":"{\"read\":{\"name\":[\"all\"]},\"write\":{\"name\":[\"self\"]}}"}]"#
     );
-    assert_eq!(digest(&mut molecule)?, "04dfg6ge3eg5f05cbd6g8dbb91b2180g9c5db7fdag6ab1e4fae590eef978902a");
+    assert_eq!(
+        digest(&mut molecule)?,
+        "04dfg6ge3eg5f05cbd6g8dbb91b2180g9c5db7fdag6ab1e4fae590eef978902a"
+    );
     Ok(())
 }
 
@@ -142,7 +192,14 @@ fn deposit_buffer_carries_wallet_metas_like_js() -> TestResult {
     source.batch_id = Some(batch.clone());
     source.token_units = vec![
         TokenUnit::new("u1".to_string(), "Unit 1".to_string(), None),
-        TokenUnit::new("u2".to_string(), "Unit 2".to_string(), Some(OrderedMap::from([("color".to_string(), OrderedValue::from("red"))]))),
+        TokenUnit::new(
+            "u2".to_string(),
+            "Unit 2".to_string(),
+            Some(OrderedMap::from([(
+                "color".to_string(),
+                OrderedValue::from("red"),
+            )])),
+        ),
     ];
     let mut remainder = wallet(&secret, "TEST", "cc")?;
     remainder.batch_id = Some(batch);
@@ -161,14 +218,23 @@ fn deposit_buffer_carries_wallet_metas_like_js() -> TestResult {
     let shape: Vec<(String, Option<String>, String)> = molecule
         .atoms
         .iter()
-        .map(|a| Ok((a.isotope.as_str().to_string(), a.value.clone(), meta_json(a)?)))
+        .map(|a| {
+            Ok((
+                a.isotope.as_str().to_string(),
+                a.value.clone(),
+                meta_json(a)?,
+            ))
+        })
         .collect::<Result<_, serde_json::Error>>()?;
     assert_eq!(shape, vec![
         ("V".to_string(), Some("-10".to_string()), r#"[{"key":"tokenUnits","value":"[[\"u1\",\"Unit 1\",{}],[\"u2\",\"Unit 2\",{\"color\":\"red\"}]]"}]"#.to_string()),
         ("B".to_string(), Some("4".to_string()), "[]".to_string()),
         ("V".to_string(), Some("6".to_string()), "[]".to_string()),
     ]);
-    assert_eq!(digest(&mut molecule)?, "046a7a0c169f43a9a1f83e15g35f6a3cad2b51f10caab0b4d4ba9ed052c862b3");
+    assert_eq!(
+        digest(&mut molecule)?,
+        "046a7a0c169f43a9a1f83e15g35f6a3cad2b51f10caab0b4d4ba9ed052c862b3"
+    );
     Ok(())
 }
 
@@ -176,10 +242,23 @@ fn deposit_buffer_carries_wallet_metas_like_js() -> TestResult {
 fn string_and_crypto_helpers_return_the_js_values() -> TestResult {
     let secret = secret();
     let hash = shake256("fleet-audit-2026-11", 256);
-    assert_eq!(hash, "1e2c25ec65edc9739bab719565abd86951b070be413ec024996c33c5e9e7f84b");
-    assert_eq!(hex_to_base17(&hash)?, "00bg4f9ceea06997e078fe643e7868fg46df6g840927578g4a57bd7042a83ga6");
     assert_eq!(
-        charset_base_convert(&hash, 16, 17, Some("0123456789abcdef"), Some("0123456789abcdefg")).as_deref(),
+        hash,
+        "1e2c25ec65edc9739bab719565abd86951b070be413ec024996c33c5e9e7f84b"
+    );
+    assert_eq!(
+        hex_to_base17(&hash)?,
+        "00bg4f9ceea06997e078fe643e7868fg46df6g840927578g4a57bd7042a83ga6"
+    );
+    assert_eq!(
+        charset_base_convert(
+            &hash,
+            16,
+            17,
+            Some("0123456789abcdef"),
+            Some("0123456789abcdefg")
+        )
+        .as_deref(),
         Some("bg4f9ceea06997e078fe643e7868fg46df6g840927578g4a57bd7042a83ga6")
     );
     assert_eq!(
@@ -192,17 +271,35 @@ fn string_and_crypto_helpers_return_the_js_values() -> TestResult {
 #[test]
 fn wallet_helpers_follow_the_js_wallet() -> TestResult {
     let secret = secret();
-    let mut keyed = Wallet::new_with_ots_version(None, None, Some("TEST"), None, None, None, None, None, OtsVersion::V2)?;
+    let mut keyed = Wallet::new_with_ots_version(
+        None,
+        None,
+        Some("TEST"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        OtsVersion::V2,
+    )?;
     keyed.set_key_from_secret(&secret, "TEST", &position("aa"))?;
     let key = keyed.key.as_deref().ok_or("no key")?;
-    assert_eq!(shake256(key, 256), "050d2f2b03cafd33cf378eb3e022d6e03620bc3e5207e651911408c1327eefd3", "OTS v2 key");
+    assert_eq!(
+        shake256(key, 256),
+        "050d2f2b03cafd33cf378eb3e022d6e03620bc3e5207e651911408c1327eefd3",
+        "OTS v2 key"
+    );
 
     let mut source = wallet(&secret, "TEST", "aa")?;
     source.batch_id = Some("dd".repeat(32));
     let mut recipient = Wallet::create(None, Some(&"ee".repeat(32)), "TEST", None, None, None)?;
     recipient.init_batch_id(Some(&source), false);
     let batch_id = recipient.batch_id.as_deref().ok_or("no batch id")?;
-    assert_eq!(batch_id.len(), 64, "JS generateBatchId({{}}) is 64 hex characters");
+    assert_eq!(
+        batch_id.len(),
+        64,
+        "JS generateBatchId({{}}) is 64 hex characters"
+    );
     assert!(batch_id.chars().all(|c| c.is_ascii_hexdigit()));
     Ok(())
 }
@@ -211,14 +308,28 @@ fn wallet_helpers_follow_the_js_wallet() -> TestResult {
 fn large_secrets_squeeze_one_stream() {
     let seed = "fleet-audit-2026-11";
     let standard = generate_secret_with_params(Some(seed), 20000);
-    assert_eq!(shake256(&standard, 256), "a4553a5534d7a1061a7a509a6a3005273491856ad7e70c5000c872ef7e9a7c79");
-    assert_eq!(knishio_client::crypto::simd::simd_generate_secret_optimized(seed, 20000), standard);
+    assert_eq!(
+        shake256(&standard, 256),
+        "a4553a5534d7a1061a7a509a6a3005273491856ad7e70c5000c872ef7e9a7c79"
+    );
+    assert_eq!(
+        knishio_client::crypto::simd::simd_generate_secret_optimized(seed, 20000),
+        standard
+    );
 }
 
 #[test]
 fn version4_view_matches_the_hashed_structure() -> TestResult {
     let secret = secret();
-    let mut first = Atom::new(position("aa"), wallet(&secret, "TEST", "aa")?.address.as_deref().ok_or("no address")?, Isotope::V, "TEST");
+    let mut first = Atom::new(
+        position("aa"),
+        wallet(&secret, "TEST", "aa")?
+            .address
+            .as_deref()
+            .ok_or("no address")?,
+        Isotope::V,
+        "TEST",
+    );
     first.value = Some("-10".to_string());
     first.index = Some(0);
     first.created_at = CREATED_AT.to_string();
@@ -236,7 +347,10 @@ fn version4_view_matches_the_hashed_structure() -> TestResult {
 
     let expected = "75a8d98857ce9a09a7088dd541c22def3d8702eeb948695179649b26682fde97";
     assert_eq!(Atom::hash_atoms(&atoms, "hex")?, expected);
-    let views: Vec<serde_json::Value> = atoms.iter().map(|a| Version4::from_atom(a).view()).collect();
+    let views: Vec<serde_json::Value> = atoms
+        .iter()
+        .map(|a| Version4::from_atom(a).view())
+        .collect();
     assert_eq!(shake256(&serde_json::to_string(&views)?, 256), expected);
     Ok(())
 }
@@ -247,7 +361,14 @@ fn version4_view_matches_the_hashed_structure() -> TestResult {
 #[test]
 fn init_meta_keeps_the_meta_list_order_like_js() -> TestResult {
     let secret = secret();
-    let meta = || vec![MetaItem::new("z", "1"), MetaItem::new("10", "2"), MetaItem::new("2", "3"), MetaItem::new("a", "4")];
+    let meta = || {
+        vec![
+            MetaItem::new("z", "1"),
+            MetaItem::new("10", "2"),
+            MetaItem::new("2", "3"),
+            MetaItem::new("a", "4"),
+        ]
+    };
     for _ in 0..20 {
         let mut molecule = user_molecule(&secret)?;
         molecule.init_meta(meta(), "probeType", "probe-1", None)?;
@@ -255,7 +376,10 @@ fn init_meta_keeps_the_meta_list_order_like_js() -> TestResult {
             meta_json(&molecule.atoms[0])?,
             r#"[{"key":"z","value":"1"},{"key":"10","value":"2"},{"key":"2","value":"3"},{"key":"a","value":"4"}]"#
         );
-        assert_eq!(digest(&mut molecule)?, "05cf6300a55ec618f849816bf9616108204c7061f34dcg31da698bd49223e878");
+        assert_eq!(
+            digest(&mut molecule)?,
+            "05cf6300a55ec618f849816bf9616108204c7061f34dcg31da698bd49223e878"
+        );
     }
     Ok(())
 }
@@ -268,7 +392,10 @@ fn token_unit_metas_serialize_in_js_key_order() -> TestResult {
         unit.set_meta("10", serde_json::json!(2));
         unit.set_meta("2", serde_json::json!(3));
         unit.set_meta("a", serde_json::json!(4));
-        assert_eq!(serde_json::to_string(&unit.to_data())?, r#"["u1","U1",{"2":3,"10":2,"z":1,"a":4}]"#);
+        assert_eq!(
+            serde_json::to_string(&unit.to_data())?,
+            r#"["u1","U1",{"2":3,"10":2,"z":1,"a":4}]"#
+        );
     }
     Ok(())
 }
@@ -280,10 +407,16 @@ fn fused_ledger_unit_metas_keep_the_js_key_order() -> TestResult {
         let u1 = TokenUnit::create_from_graphql(&serde_json::json!({
             "id": "u1", "name": "U1", "metas": r#"{"zone":"Z","10":1,"2":2,"attr":{"b":1,"a":2}}"#,
         }))?;
-        let u2 = TokenUnit::create_from_graphql(&serde_json::json!({ "id": "u2", "name": "U2", "metas": r#"{"fragmentZone":"F"}"# }))?;
+        let u2 = TokenUnit::create_from_graphql(
+            &serde_json::json!({ "id": "u2", "name": "U2", "metas": r#"{"fragmentZone":"F"}"# }),
+        )?;
         let mut source = wallet(&secret, "STK", "aa")?;
         source.balance = "3".to_string();
-        source.token_units = vec![u1, u2, TokenUnit::new("u3".to_string(), "U3".to_string(), None)];
+        source.token_units = vec![
+            u1,
+            u2,
+            TokenUnit::new("u3".to_string(), "U3".to_string(), None),
+        ];
         let mut recipient = wallet(&secret, "STK", "bb")?;
         recipient.token_units = vec![TokenUnit::new("n1".to_string(), "n1".to_string(), None)];
         let mut molecule = Molecule::new();
@@ -294,12 +427,20 @@ fn fused_ledger_unit_metas_keep_the_js_key_order() -> TestResult {
 
         let isotopes: String = molecule.atoms.iter().map(|a| a.isotope.as_str()).collect();
         assert_eq!(isotopes, "VVFV");
-        let fused = molecule.atoms[2].meta.iter().find(|m| m.key == "tokenUnits").and_then(|m| m.value.as_deref()).ok_or("no F tokenUnits")?;
+        let fused = molecule.atoms[2]
+            .meta
+            .iter()
+            .find(|m| m.key == "tokenUnits")
+            .and_then(|m| m.value.as_deref())
+            .ok_or("no F tokenUnits")?;
         assert_eq!(
             fused,
             r#"[["n1","n1",{"fusedTokenUnits":[["u1","U1",{"2":2,"10":1,"zone":"Z","attr":{"b":1,"a":2}}],["u2","U2",{"fragmentZone":"F"}]]}]]"#
         );
-        assert_eq!(digest(&mut molecule)?, "054187618g161b9185548g18fc3g391ca8d69445520a0fa88f01d9dc8730451a");
+        assert_eq!(
+            digest(&mut molecule)?,
+            "054187618g161b9185548g18fc3g391ca8d69445520a0fa88f01d9dc8730451a"
+        );
     }
     Ok(())
 }
@@ -307,19 +448,34 @@ fn fused_ledger_unit_metas_keep_the_js_key_order() -> TestResult {
 #[test]
 fn policy_keys_follow_the_js_object_order() -> TestResult {
     let secret = secret();
-    let meta: Vec<MetaItem> = (0..12).map(|i| MetaItem::new(format!("k{i}"), format!("v{i}"))).collect();
+    let meta: Vec<MetaItem> = (0..12)
+        .map(|i| MetaItem::new(format!("k{i}"), format!("v{i}")))
+        .collect();
     let expected_policy = concat!(
         r#"{"write":{"0":["self"],"1":["self"],"2":["self"],"3":["self"],"4":["self"],"5":["self"],"6":["self"],"7":["self"],"8":["self"],"9":["self"],"10":["self"],"11":["self"],"z":["self"],"a":["self"]},"#,
         r#""read":{"0":["all"],"1":["all"],"2":["all"],"3":["all"],"4":["all"],"5":["all"],"6":["all"],"7":["all"],"8":["all"],"9":["all"],"10":["all"],"11":["all"]}}"#
     );
     for _ in 0..20 {
         let mut molecule = user_molecule(&secret)?;
-        molecule.init_meta(meta.clone(), "probeType", "probe-1", Some(r#"{"write":{"z":["self"],"a":["self"]}}"#))?;
+        molecule.init_meta(
+            meta.clone(),
+            "probeType",
+            "probe-1",
+            Some(r#"{"write":{"z":["self"],"a":["self"]}}"#),
+        )?;
         let isotopes: String = molecule.atoms.iter().map(|a| a.isotope.as_str()).collect();
         assert_eq!(isotopes, "MRI");
-        let policy = molecule.atoms[1].meta.iter().find(|m| m.key == "policy").and_then(|m| m.value.as_deref()).ok_or("no policy meta")?;
+        let policy = molecule.atoms[1]
+            .meta
+            .iter()
+            .find(|m| m.key == "policy")
+            .and_then(|m| m.value.as_deref())
+            .ok_or("no policy meta")?;
         assert_eq!(policy, expected_policy);
-        assert_eq!(digest(&mut molecule)?, "01cd91ad98e73ce1gc8g6681c8c353e67cag88e10e602528a783591f8437bge4");
+        assert_eq!(
+            digest(&mut molecule)?,
+            "01cd91ad98e73ce1gc8g6681c8c353e67cag88e10e602528a783591f8437bge4"
+        );
     }
     Ok(())
 }

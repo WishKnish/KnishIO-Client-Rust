@@ -3,12 +3,12 @@
 //! Mutation for withdrawing tokens from a buffer,
 //! equivalent to MutationWithdrawBufferToken.js
 
-use crate::mutation::{Mutation, propose_molecule::MutationProposeMolecule};
+use crate::client::KnishIOClient;
+use crate::graphql::GraphQLClient;
+use crate::molecule::Molecule;
+use crate::mutation::{propose_molecule::MutationProposeMolecule, Mutation};
 use crate::query::Query;
 use crate::response::{Response, ResponseProposeMolecule};
-use crate::molecule::Molecule;
-use crate::graphql::GraphQLClient;
-use crate::client::KnishIOClient;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -28,29 +28,37 @@ pub struct MutationWithdrawBufferToken {
 
 impl MutationWithdrawBufferToken {
     /// Create a new MutationWithdrawBufferToken (matches JS constructor)
-    pub fn new(graph_ql_client: GraphQLClient, knish_io_client: KnishIOClient, molecule: Molecule) -> Self {
+    pub fn new(
+        graph_ql_client: GraphQLClient,
+        knish_io_client: KnishIOClient,
+        molecule: Molecule,
+    ) -> Self {
         MutationWithdrawBufferToken {
-            propose_molecule: MutationProposeMolecule::new(graph_ql_client, knish_io_client, molecule),
+            propose_molecule: MutationProposeMolecule::new(
+                graph_ql_client,
+                knish_io_client,
+                molecule,
+            ),
         }
     }
-    
+
     /// Create with just molecule (for backward compatibility)
     pub fn from_molecule(molecule: Molecule) -> Self {
         MutationWithdrawBufferToken {
             propose_molecule: MutationProposeMolecule::from_molecule(molecule),
         }
     }
-    
+
     /// Fill the molecule with withdraw buffer data (matches JS fillMolecule exactly)
     /// JS: fillMolecule({ recipients })
     pub fn fill_molecule(&mut self, params: WithdrawBufferTokenParams) -> crate::error::Result<()> {
         // Call molecule's initWithdrawBuffer method (matches JS: this.$__molecule.initWithdrawBuffer({ recipients }))
         if let Some(molecule) = self.propose_molecule.get_molecule_mut() {
             molecule.init_withdraw_buffer(params.recipients)?;
-            
+
             // Sign with empty params (matches JS: this.$__molecule.sign({}))
             molecule.sign(None, false, true)?;
-            
+
             // Check with source wallet (matches JS: this.$__molecule.check(this.$__molecule.sourceWallet))
             if let Some(ref source_wallet) = molecule.source_wallet {
                 molecule.check(Some(source_wallet))?;
@@ -58,10 +66,10 @@ impl MutationWithdrawBufferToken {
                 molecule.check(None)?;
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Create from withdraw buffer parameters
     pub fn from_params(_params: WithdrawBufferTokenParams, _secret: &str) -> Self {
         Self::from_molecule(Molecule::new())
@@ -74,12 +82,12 @@ impl Query for MutationWithdrawBufferToken {
     fn get_query(&self) -> &str {
         self.propose_molecule.get_query()
     }
-    
+
     /// Delegate compiled variables
     fn compiled_variables(&self, variables: Option<Value>) -> Option<Value> {
         self.propose_molecule.compiled_variables(variables)
     }
-    
+
     /// Create a response from the JSON data (uses base ProposeMolecule response)
     fn create_response(&self, json: Value) -> Box<dyn Response> {
         match ResponseProposeMolecule::new(json, None) {
@@ -111,12 +119,12 @@ impl MutationWithdrawBufferToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_mutation_withdraw_buffer_token_creation() {
         let molecule = Molecule::new();
         let mutation = MutationWithdrawBufferToken::from_molecule(molecule);
-        
+
         // Test basic creation
         assert!(mutation.propose_molecule.remainder_wallet().is_none());
     }

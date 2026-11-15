@@ -1,14 +1,16 @@
+use knishio_client::atom::Atom;
 use knishio_client::client::KnishIOClient;
 use knishio_client::crypto::{generate_bundle_hash, generate_secret};
 use knishio_client::error::KnishIOError;
-use knishio_client::storage::secure_memory::{constant_time_equals, with_secure_bytes, zeroize_bytes};
+use knishio_client::storage::secure_memory::{
+    constant_time_equals, with_secure_bytes, zeroize_bytes,
+};
 use knishio_client::storage::{
     AesGcmSecretStorageProvider, EncryptedSecretPayload, MemorySecretStorageProvider,
     MemoryStorageBackend, SecretStorageProvider, StorageBackend, StorageOptions,
     RECOVERY_KEY_PREFIX,
 };
 use knishio_client::wallet::Wallet;
-use knishio_client::atom::Atom;
 use std::sync::Arc;
 
 #[test]
@@ -38,14 +40,21 @@ async fn test_memory_secret_storage_provider() {
     let secret = "master_secret_value_xyz";
 
     assert!(!provider.has_secret(bundle).await.unwrap());
-    assert!(provider.retrieve_secret(bundle, StorageOptions::default()).await.unwrap().is_none());
+    assert!(provider
+        .retrieve_secret(bundle, StorageOptions::default())
+        .await
+        .unwrap()
+        .is_none());
 
     let opts = StorageOptions::new(Some("Test Key".to_string()), None);
     provider.store_secret(bundle, secret, opts).await.unwrap();
 
     assert!(provider.has_secret(bundle).await.unwrap());
     assert_eq!(
-        provider.retrieve_secret(bundle, StorageOptions::default()).await.unwrap(),
+        provider
+            .retrieve_secret(bundle, StorageOptions::default())
+            .await
+            .unwrap(),
         Some(secret.to_string())
     );
 
@@ -54,7 +63,10 @@ async fn test_memory_secret_storage_provider() {
     assert_eq!(list[0].bundle_hash, bundle);
     assert_eq!(list[0].label.as_deref(), Some("Test Key"));
 
-    let len = provider.with_secret(bundle, StorageOptions::default(), |s| Ok(s.len())).await.unwrap();
+    let len = provider
+        .with_secret(bundle, StorageOptions::default(), |s| Ok(s.len()))
+        .await
+        .unwrap();
     assert_eq!(len, secret.len());
 
     assert!(provider.delete_secret(bundle).await.unwrap());
@@ -63,10 +75,8 @@ async fn test_memory_secret_storage_provider() {
 
 #[tokio::test]
 async fn test_aes_gcm_secret_storage_provider() {
-    let provider = AesGcmSecretStorageProvider::new(
-        None,
-        Some("client-secure-passphrase".to_string()),
-    );
+    let provider =
+        AesGcmSecretStorageProvider::new(None, Some("client-secure-passphrase".to_string()));
 
     assert!(provider.is_available().await);
     assert_eq!(provider.provider_type(), "aes-gcm");
@@ -80,10 +90,18 @@ async fn test_aes_gcm_secret_storage_provider() {
 
     assert!(provider.has_secret(bundle).await.unwrap());
 
-    let retrieved = provider.retrieve_secret(bundle, StorageOptions::default()).await.unwrap();
+    let retrieved = provider
+        .retrieve_secret(bundle, StorageOptions::default())
+        .await
+        .unwrap();
     assert_eq!(retrieved, Some(secret.clone()));
 
-    let prefix = provider.with_secret(bundle, StorageOptions::default(), |s| Ok(s[..10].to_string())).await.unwrap();
+    let prefix = provider
+        .with_secret(bundle, StorageOptions::default(), |s| {
+            Ok(s[..10].to_string())
+        })
+        .await
+        .unwrap();
     assert_eq!(prefix, "aaaaaaaaaa");
 
     let list = provider.list_secrets().await.unwrap();
@@ -115,7 +133,14 @@ async fn test_knishio_client_secret_storage_integration() {
         Some("client-secure-pass".to_string()),
     ));
 
-    storage.store_secret(&canonical_bundle, &canonical_secret, StorageOptions::default()).await.unwrap();
+    storage
+        .store_secret(
+            &canonical_bundle,
+            &canonical_secret,
+            StorageOptions::default(),
+        )
+        .await
+        .unwrap();
 
     let mut client = KnishIOClient::new(
         "https://api.test.knish.io/graphql",
@@ -135,7 +160,10 @@ async fn test_knishio_client_secret_storage_integration() {
     assert!(client.get_secret().is_err());
 
     // Can retrieve secret via storage
-    let retrieved = client.retrieve_secret(StorageOptions::default()).await.unwrap();
+    let retrieved = client
+        .retrieve_secret(StorageOptions::default())
+        .await
+        .unwrap();
     assert_eq!(retrieved, Some(canonical_secret.clone()));
 
     // Create a source wallet to provide to create_molecule
@@ -146,15 +174,14 @@ async fn test_knishio_client_secret_storage_integration() {
         None,
         Some(&"0".repeat(64)),
         None,
-    ).unwrap();
+    )
+    .unwrap();
 
     // create_molecule unwraps from storage, sets up remainder wallet, and sets molecule.bundle
-    let mut molecule = client.create_molecule(
-        None,
-        None,
-        Some(source_wallet.clone()),
-        None,
-    ).await.unwrap();
+    let mut molecule = client
+        .create_molecule(None, None, Some(source_wallet.clone()), None)
+        .await
+        .unwrap();
 
     assert_eq!(molecule.bundle.as_deref(), Some(canonical_bundle.as_str()));
     assert!(molecule.source_wallet.is_some());
@@ -202,7 +229,10 @@ async fn test_knishio_client_set_secret_auto_sync_and_reset() {
     let storage = storage.unwrap();
     assert!(storage.has_secret(&canonical_bundle).await.unwrap());
     assert_eq!(
-        storage.retrieve_secret(&canonical_bundle, StorageOptions::default()).await.unwrap(),
+        storage
+            .retrieve_secret(&canonical_bundle, StorageOptions::default())
+            .await
+            .unwrap(),
         Some(canonical_secret.clone())
     );
 
@@ -246,7 +276,10 @@ async fn decrypt_frozen(envelope: &str) -> Result<Option<String>, KnishIOError> 
         )
         .unwrap();
     AesGcmSecretStorageProvider::new(Some(backend), None)
-        .retrieve_secret(XSDK_BUNDLE, StorageOptions::with_passphrase(XSDK_PASSPHRASE))
+        .retrieve_secret(
+            XSDK_BUNDLE,
+            StorageOptions::with_passphrase(XSDK_PASSPHRASE),
+        )
         .await
 }
 
@@ -296,7 +329,12 @@ async fn emits_camel_case_metadata_for_peer_sdks() {
             metadata.keys().collect::<Vec<_>>()
         );
     }
-    for key in ["bundle_hash", "created_at", "hardware_backed", "provider_type"] {
+    for key in [
+        "bundle_hash",
+        "created_at",
+        "hardware_backed",
+        "provider_type",
+    ] {
         assert!(
             !metadata.contains_key(key),
             "`{}` is the 0.9.5 divergence and must not be emitted",
@@ -322,8 +360,15 @@ async fn emits_camel_case_metadata_for_peer_sdks() {
         .unwrap()
         .expect("envelope stored");
     let json_with_label: serde_json::Value = serde_json::from_str(&raw_with_label).unwrap();
-    assert_eq!(json_with_label["metadata"]["label"], serde_json::json!("probe"));
-    assert_eq!(metadata["hardwareBacked"], serde_json::json!(false), "a software provider must never emit hardwareBacked=true");
+    assert_eq!(
+        json_with_label["metadata"]["label"],
+        serde_json::json!("probe")
+    );
+    assert_eq!(
+        metadata["hardwareBacked"],
+        serde_json::json!(false),
+        "a software provider must never emit hardwareBacked=true"
+    );
     assert_eq!(metadata["providerType"], serde_json::json!("aes-gcm"));
 }
 
@@ -366,15 +411,25 @@ async fn recovers_the_frozen_cross_sdk_recovery_record_and_reenrolls_the_primary
     assert!(stored_secret_raw.is_some());
     assert!(stored_recovery_raw.is_some());
 
-    let stored_json: serde_json::Value =
-        serde_json::from_str(&stored_secret_raw.unwrap()).unwrap();
+    let stored_json: serde_json::Value = serde_json::from_str(&stored_secret_raw.unwrap()).unwrap();
     let metadata = &stored_json["metadata"];
     assert_eq!(metadata["hardwareBacked"], serde_json::json!(false));
     for key in &["bundleHash", "createdAt", "hardwareBacked", "providerType"] {
-        assert!(!metadata[key].is_null(), "emitted metadata must contain {key}");
+        assert!(
+            !metadata[key].is_null(),
+            "emitted metadata must contain {key}"
+        );
     }
-    for key in &["bundle_hash", "created_at", "hardware_backed", "provider_type"] {
-        assert!(metadata.get(key).is_none(), "snake_case key {key} must never be emitted");
+    for key in &[
+        "bundle_hash",
+        "created_at",
+        "hardware_backed",
+        "provider_type",
+    ] {
+        assert!(
+            metadata.get(key).is_none(),
+            "snake_case key {key} must never be emitted"
+        );
     }
 }
 
@@ -398,7 +453,11 @@ async fn file_storage_backend_round_trip_permissions_and_corruption() {
             use std::os::unix::fs::PermissionsExt;
             let meta = fs::metadata(&temp_path).expect("read metadata");
             let mode = meta.permissions().mode() & 0o777;
-            assert_eq!(mode, 0o600, "file mode must be 0600 on unix, got {:o}", mode);
+            assert_eq!(
+                mode, 0o600,
+                "file mode must be 0600 on unix, got {:o}",
+                mode
+            );
         }
     }
 
@@ -423,7 +482,8 @@ async fn file_storage_backend_round_trip_permissions_and_corruption() {
 #[tokio::test]
 async fn test_aes_gcm_secret_storage_recovery_lifecycle() {
     let backend = Arc::new(MemoryStorageBackend::new());
-    let provider = AesGcmSecretStorageProvider::new(Some(backend.clone()), Some("primary-pass".into()));
+    let provider =
+        AesGcmSecretStorageProvider::new(Some(backend.clone()), Some("primary-pass".into()));
 
     let bundle = "bundle_rec_aes_gcm_1234567890abcdef";
     let secret = "MASTER-SECRET-AES-GCM-RECOVERY-TEST";
@@ -436,7 +496,10 @@ async fn test_aes_gcm_secret_storage_recovery_lifecycle() {
     let prim_key = format!("knishio:secret:{}", bundle);
     let rec_key = format!("{}{}", RECOVERY_KEY_PREFIX, bundle);
     assert!(backend.get_item(&prim_key).unwrap().is_some());
-    let rec_raw = backend.get_item(&rec_key).unwrap().expect("recovery record");
+    let rec_raw = backend
+        .get_item(&rec_key)
+        .unwrap()
+        .expect("recovery record");
 
     // Recovery envelope metadata matches contract
     let rec_payload: EncryptedSecretPayload = serde_json::from_str(&rec_raw).unwrap();
@@ -451,19 +514,37 @@ async fn test_aes_gcm_secret_storage_recovery_lifecycle() {
 
     // Corrupt primary record to simulate key loss
     backend.remove_item(&prim_key).unwrap();
-    assert_eq!(provider.retrieve_secret(bundle, StorageOptions::default()).await.unwrap(), None);
+    assert_eq!(
+        provider
+            .retrieve_secret(bundle, StorageOptions::default())
+            .await
+            .unwrap(),
+        None
+    );
 
     // Wrong recovery passphrase fails with DecryptionFailed
-    let wrong_res = provider.recover_secret(bundle, "wrong-recovery-pass", StorageOptions::default()).await;
+    let wrong_res = provider
+        .recover_secret(bundle, "wrong-recovery-pass", StorageOptions::default())
+        .await;
     assert!(wrong_res.is_err());
-    assert!(matches!(wrong_res.unwrap_err(), KnishIOError::DecryptionFailed(_)));
+    assert!(matches!(
+        wrong_res.unwrap_err(),
+        KnishIOError::DecryptionFailed(_)
+    ));
 
     // Recover secret re-enrolls under new primary passphrase
     let new_opts = StorageOptions::with_passphrase("brand-new-primary-pass");
-    provider.recover_secret(bundle, recovery_pass, new_opts.clone()).await.unwrap();
+    provider
+        .recover_secret(bundle, recovery_pass, new_opts.clone())
+        .await
+        .unwrap();
 
     // Primary retrieval with new passphrase succeeds
-    let recovered = provider.retrieve_secret(bundle, new_opts).await.unwrap().expect("recovered secret");
+    let recovered = provider
+        .retrieve_secret(bundle, new_opts)
+        .await
+        .unwrap()
+        .expect("recovered secret");
     assert_eq!(recovered, secret);
 
     // delete_secret removes both primary and recovery keys
@@ -490,18 +571,35 @@ async fn test_memory_secret_storage_recovery_lifecycle() {
     assert_eq!(provider.list_secrets().await.unwrap().len(), 1);
 
     // Simulate loss by deleting primary internally
-    let wrong_res = provider.recover_secret("nonexistent", recovery_pass, StorageOptions::default()).await;
+    let wrong_res = provider
+        .recover_secret("nonexistent", recovery_pass, StorageOptions::default())
+        .await;
     assert!(wrong_res.is_err());
-    assert!(matches!(wrong_res.unwrap_err(), KnishIOError::SecretNotFound(_)));
+    assert!(matches!(
+        wrong_res.unwrap_err(),
+        KnishIOError::SecretNotFound(_)
+    ));
 
     // Wrong recovery passphrase fails
-    let wrong_pass_res = provider.recover_secret(bundle, "bad-pass", StorageOptions::default()).await;
+    let wrong_pass_res = provider
+        .recover_secret(bundle, "bad-pass", StorageOptions::default())
+        .await;
     assert!(wrong_pass_res.is_err());
-    assert!(matches!(wrong_pass_res.unwrap_err(), KnishIOError::DecryptionFailed(_)));
+    assert!(matches!(
+        wrong_pass_res.unwrap_err(),
+        KnishIOError::DecryptionFailed(_)
+    ));
 
     // Successful recovery re-enrolls
-    provider.recover_secret(bundle, recovery_pass, StorageOptions::default()).await.unwrap();
-    let retrieved = provider.retrieve_secret(bundle, StorageOptions::default()).await.unwrap().expect("retrieved");
+    provider
+        .recover_secret(bundle, recovery_pass, StorageOptions::default())
+        .await
+        .unwrap();
+    let retrieved = provider
+        .retrieve_secret(bundle, StorageOptions::default())
+        .await
+        .unwrap()
+        .expect("retrieved");
     assert_eq!(retrieved, secret);
 
     // Deleting cleans up both

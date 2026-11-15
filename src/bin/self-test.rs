@@ -20,18 +20,18 @@
 #![forbid(unsafe_code)]
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::time::SystemTime;
-use chrono::{DateTime, Utc};
 
 // KnishIO SDK imports
 use knishio_client::{
-    Molecule, Wallet, Atom, Isotope, KnishIOError,
-    crypto::{generate_secret, generate_bundle_hash},
+    crypto::{generate_bundle_hash, generate_secret},
     types::MetaItem,
     wallet::EncryptedMessage,
+    Atom, Isotope, KnishIOError, Molecule, Wallet,
 };
 
 /* ANSI Color codes for terminal output */
@@ -49,8 +49,13 @@ const FIXED_TEST_TIMESTAMP_BASE: u64 = 1700000000000; // Fixed base timestamp fo
 
 /// Report a negative case: it passes only when verification failed with `expected`. Any other
 /// error, `Ok(false)` or `Ok(true)` fails it and says what came back instead.
-fn expect_rejection(name: &str, result: &knishio_client::Result<bool>, expected: &KnishIOError) -> bool {
-    let passed = matches!(result, Err(e) if std::mem::discriminant(e) == std::mem::discriminant(expected));
+fn expect_rejection(
+    name: &str,
+    result: &knishio_client::Result<bool>,
+    expected: &KnishIOError,
+) -> bool {
+    let passed =
+        matches!(result, Err(e) if std::mem::discriminant(e) == std::mem::discriminant(expected));
     if passed {
         Logger::test(name, true, None);
     } else {
@@ -58,7 +63,11 @@ fn expect_rejection(name: &str, result: &knishio_client::Result<bool>, expected:
             Ok(valid) => format!("Ok({valid})"),
             Err(e) => format!("Err({e:?})"),
         };
-        Logger::test(name, false, Some(&format!("expected Err({expected:?}), got {got}")));
+        Logger::test(
+            name,
+            false,
+            Some(&format!("expected Err({expected:?}), got {got}")),
+        );
     }
     passed
 }
@@ -78,10 +87,10 @@ fn create_fixed_remainder_wallet(secret: &str, token: &str) -> Result<Wallet> {
         Some(secret),
         Some(&bundle),
         Some(token),
-        None, // address
+        None,                                                                     // address
         Some("bbbb000000000000cccc111111111111dddd222222222222eeee333333333333"), // Fixed deterministic position
-        None, // batch_id
-        None, // characters
+        None,                                                                     // batch_id
+        None,                                                                     // characters
         None,
     )?)
 }
@@ -107,15 +116,38 @@ async fn run_negative_buffer_case(secret: &str, token: &str, tv: &Value) -> Resu
     let field = tamper["field"].as_str().unwrap_or("");
     let to = tamper["to"].as_str().unwrap_or("");
 
-    let mut source_wallet = Wallet::new(Some(secret), None, Some(token), None, None, None, Some("BASE64"), None)?;
+    let mut source_wallet = Wallet::new(
+        Some(secret),
+        None,
+        Some(token),
+        None,
+        None,
+        None,
+        Some("BASE64"),
+        None,
+    )?;
     source_wallet.set_balance_i128(balance);
     let verify_wallet = source_wallet.clone();
 
     let mut molecule = match build_from {
         "deposit" => {
-            let remainder_wallet = Wallet::new(Some(secret), None, Some(token), None, None, None, Some("BASE64"), None)?;
+            let remainder_wallet = Wallet::new(
+                Some(secret),
+                None,
+                Some(token),
+                None,
+                None,
+                None,
+                Some("BASE64"),
+                None,
+            )?;
             let mut m = Molecule::with_params(
-                Some(secret.to_string()), None, Some(source_wallet.clone()), Some(remainder_wallet), None, None,
+                Some(secret.to_string()),
+                None,
+                Some(source_wallet.clone()),
+                Some(remainder_wallet),
+                None,
+                None,
             );
             m.init_deposit_buffer(amount as f64, HashMap::new())?;
             m
@@ -124,7 +156,12 @@ async fn run_negative_buffer_case(secret: &str, token: &str, tv: &Value) -> Resu
             let recipient_bundle = source_wallet.bundle.clone().unwrap_or_default();
             // No remainder wallet: init_withdraw_buffer derives the fresh remainder (contract 9.6).
             let mut m = Molecule::with_params(
-                Some(secret.to_string()), None, Some(source_wallet.clone()), None, None, None,
+                Some(secret.to_string()),
+                None,
+                Some(source_wallet.clone()),
+                None,
+                None,
+                None,
             );
             let mut recipients = HashMap::new();
             recipients.insert(recipient_bundle, amount as f64);
@@ -142,14 +179,27 @@ async fn run_negative_buffer_case(secret: &str, token: &str, tv: &Value) -> Resu
         "firstB" | "lastB" => Isotope::B,
         other => return Err(anyhow::anyhow!("unknown tamper target '{other}'")),
     };
-    let matching: Vec<usize> = molecule.atoms.iter().enumerate()
+    let matching: Vec<usize> = molecule
+        .atoms
+        .iter()
+        .enumerate()
         .filter(|(_, a)| a.isotope == isotope)
         .map(|(i, _)| i)
         .collect();
     let idx = if target.starts_with("first") {
-        *matching.first().ok_or_else(|| anyhow::anyhow!("no {:?} atoms in molecule to tamper (target {target})", isotope))?
+        *matching.first().ok_or_else(|| {
+            anyhow::anyhow!(
+                "no {:?} atoms in molecule to tamper (target {target})",
+                isotope
+            )
+        })?
     } else {
-        *matching.last().ok_or_else(|| anyhow::anyhow!("no {:?} atoms in molecule to tamper (target {target})", isotope))?
+        *matching.last().ok_or_else(|| {
+            anyhow::anyhow!(
+                "no {:?} atoms in molecule to tamper (target {target})",
+                isotope
+            )
+        })?
     };
     match field {
         "value" => molecule.atoms[idx].value = Some(to.to_string()),
@@ -437,7 +487,9 @@ impl ConfigLoader {
     }
 
     fn get_string(&self, path: &str) -> Option<String> {
-        self.get_value(path)?.as_str().map(std::string::ToString::to_string)
+        self.get_value(path)?
+            .as_str()
+            .map(std::string::ToString::to_string)
     }
 
     fn get_i64(&self, path: &str) -> Option<i64> {
@@ -463,12 +515,18 @@ impl MoleculeInspector {
     fn inspect(molecule: &Molecule, name: &str) {
         println!("\n{}🔍 INSPECTING {}:{}", colors::BLUE, name, colors::RESET);
 
-        println!("  Molecular Hash: {}",
-                 molecule.molecular_hash.as_deref().unwrap_or("NOT_SET"));
-        println!("  Bundle: {}",
-                 molecule.bundle.as_deref().unwrap_or("NOT_SET"));
-        println!("  Cell Slug: {}",
-                 molecule.cell_slug.as_deref().unwrap_or("NOT_SET"));
+        println!(
+            "  Molecular Hash: {}",
+            molecule.molecular_hash.as_deref().unwrap_or("NOT_SET")
+        );
+        println!(
+            "  Bundle: {}",
+            molecule.bundle.as_deref().unwrap_or("NOT_SET")
+        );
+        println!(
+            "  Cell Slug: {}",
+            molecule.cell_slug.as_deref().unwrap_or("NOT_SET")
+        );
         println!("  Atoms ({}):", molecule.atoms.len());
 
         let mut total_value = 0.0;
@@ -479,37 +537,59 @@ impl MoleculeInspector {
                 }
             }
 
-            let address_preview = "unknown";  // Simplified for compilation
+            let address_preview = "unknown"; // Simplified for compilation
 
             let atom_index = atom.index.unwrap_or(i as u32);
-            println!("    [{}] {:?}: {} ({}...) index={}",
-                     i,
-                     atom.isotope,
-                     atom.value.as_deref().unwrap_or("null"),
-                     address_preview,
-                     atom_index);
+            println!(
+                "    [{}] {:?}: {} ({}...) index={}",
+                i,
+                atom.isotope,
+                atom.value.as_deref().unwrap_or("null"),
+                address_preview,
+                atom_index
+            );
         }
 
-        let balanced = if total_value.abs() < 0.01 { "✅ BALANCED" } else { "❌ UNBALANCED" };
+        let balanced = if total_value.abs() < 0.01 {
+            "✅ BALANCED"
+        } else {
+            "❌ UNBALANCED"
+        };
         println!("  Total Value: {total_value:.1} {balanced}");
-        println!("  Status: {}", molecule.status.as_deref().unwrap_or("NOT_SET"));
+        println!(
+            "  Status: {}",
+            molecule.status.as_deref().unwrap_or("NOT_SET")
+        );
     }
 
     fn diagnose_validation(molecule: &Molecule, name: &str) {
-        println!("\n{}🔬 VALIDATING {} STEP-BY-STEP:{}", colors::BLUE, name, colors::RESET);
+        println!(
+            "\n{}🔬 VALIDATING {} STEP-BY-STEP:{}",
+            colors::BLUE,
+            name,
+            colors::RESET
+        );
         println!("  Molecule has {} atoms", molecule.atoms.len());
 
         if let Some(first_atom) = molecule.atoms.first() {
             println!("  First atom isotope: {:?}", first_atom.isotope);
         }
 
-        println!("  Molecular hash present: {}", molecule.molecular_hash.is_some());
+        println!(
+            "  Molecular hash present: {}",
+            molecule.molecular_hash.is_some()
+        );
 
         // Check atom indices
         for (i, atom) in molecule.atoms.iter().enumerate() {
             let atom_index = atom.index.unwrap_or(i as u32);
-            println!("    {}✅ Atom {} index: {}{}",
-                     colors::GREEN, i, atom_index, colors::RESET);
+            println!(
+                "    {}✅ Atom {} index: {}{}",
+                colors::GREEN,
+                i,
+                atom_index,
+                colors::RESET
+            );
         }
     }
 }
@@ -616,7 +696,9 @@ impl SelfTestRunner {
             // early return out of test_cross_sdk_validation published a pass. A verdict
             // must be earned; the safe default for a check that has not run is "failed".
             cross_sdk_compatible: false,
-            run_id: std::env::var("KNISHIO_RUN_ID").ok().filter(|s| !s.is_empty()),
+            run_id: std::env::var("KNISHIO_RUN_ID")
+                .ok()
+                .filter(|s| !s.is_empty()),
             cross_validation: CrossValidationCoverage {
                 ran: false,
                 targets_expected: 0,
@@ -654,62 +736,100 @@ impl SelfTestRunner {
                                 if let Some(tests) = existing_data.get("tests") {
                                     // Preserve crypto test
                                     if let Some(crypto) = tests.get("crypto") {
-                                        if let Ok(crypto_result) = serde_json::from_value::<CryptoTestResult>(crypto.clone()) {
+                                        if let Ok(crypto_result) =
+                                            serde_json::from_value::<CryptoTestResult>(
+                                                crypto.clone(),
+                                            )
+                                        {
                                             self.results.tests.crypto = crypto_result;
                                         }
                                     }
                                     // Preserve metaCreation test
                                     if let Some(meta) = tests.get("metaCreation") {
-                                        if let Ok(meta_result) = serde_json::from_value::<MoleculeTestResult>(meta.clone()) {
+                                        if let Ok(meta_result) =
+                                            serde_json::from_value::<MoleculeTestResult>(
+                                                meta.clone(),
+                                            )
+                                        {
                                             self.results.tests.meta_creation = meta_result;
                                         }
                                     }
                                     // Preserve simpleTransfer test
                                     if let Some(simple) = tests.get("simpleTransfer") {
-                                        if let Ok(simple_result) = serde_json::from_value::<MoleculeTestResult>(simple.clone()) {
+                                        if let Ok(simple_result) =
+                                            serde_json::from_value::<MoleculeTestResult>(
+                                                simple.clone(),
+                                            )
+                                        {
                                             self.results.tests.simple_transfer = simple_result;
                                         }
                                     }
                                     // Preserve complexTransfer test
                                     if let Some(complex) = tests.get("complexTransfer") {
-                                        if let Ok(complex_result) = serde_json::from_value::<MoleculeTestResult>(complex.clone()) {
+                                        if let Ok(complex_result) =
+                                            serde_json::from_value::<MoleculeTestResult>(
+                                                complex.clone(),
+                                            )
+                                        {
                                             self.results.tests.complex_transfer = complex_result;
                                         }
                                     }
                                     // Preserve tokenCreation test
                                     if let Some(token) = tests.get("tokenCreation") {
-                                        if let Ok(token_result) = serde_json::from_value::<MoleculeTestResult>(token.clone()) {
+                                        if let Ok(token_result) =
+                                            serde_json::from_value::<MoleculeTestResult>(
+                                                token.clone(),
+                                            )
+                                        {
                                             self.results.tests.token_creation = token_result;
                                         }
                                     }
                                     // Preserve walletCreation test
                                     if let Some(wallet) = tests.get("walletCreation") {
-                                        if let Ok(wallet_result) = serde_json::from_value::<MoleculeTestResult>(wallet.clone()) {
+                                        if let Ok(wallet_result) =
+                                            serde_json::from_value::<MoleculeTestResult>(
+                                                wallet.clone(),
+                                            )
+                                        {
                                             self.results.tests.wallet_creation = wallet_result;
                                         }
                                     }
                                     // Preserve shadowWalletClaim test
                                     if let Some(shadow) = tests.get("shadowWalletClaim") {
-                                        if let Ok(shadow_result) = serde_json::from_value::<MoleculeTestResult>(shadow.clone()) {
+                                        if let Ok(shadow_result) =
+                                            serde_json::from_value::<MoleculeTestResult>(
+                                                shadow.clone(),
+                                            )
+                                        {
                                             self.results.tests.shadow_wallet_claim = shadow_result;
                                         }
                                     }
                                     // Preserve bufferFamily test (Round 2 must not clobber the
                                     // vector-driven deposit/withdraw coverage from Round 1)
                                     if let Some(buffer) = tests.get("bufferFamily") {
-                                        if let Ok(buffer_result) = serde_json::from_value::<BufferFamilyTestResult>(buffer.clone()) {
+                                        if let Ok(buffer_result) =
+                                            serde_json::from_value::<BufferFamilyTestResult>(
+                                                buffer.clone(),
+                                            )
+                                        {
                                             self.results.tests.buffer_family = buffer_result;
                                         }
                                     }
                                     // Preserve mlkem768 test
                                     if let Some(mlkem) = tests.get("mlkem768") {
-                                        if let Ok(mlkem_result) = serde_json::from_value::<MLKEMTestResult>(mlkem.clone()) {
+                                        if let Ok(mlkem_result) =
+                                            serde_json::from_value::<MLKEMTestResult>(mlkem.clone())
+                                        {
                                             self.results.tests.mlkem768 = mlkem_result;
                                         }
                                     }
                                     // Preserve negativeCases test
                                     if let Some(negative) = tests.get("negativeCases") {
-                                        if let Ok(negative_result) = serde_json::from_value::<NegativeTestResult>(negative.clone()) {
+                                        if let Ok(negative_result) =
+                                            serde_json::from_value::<NegativeTestResult>(
+                                                negative.clone(),
+                                            )
+                                        {
                                             self.results.tests.negative_cases = negative_result;
                                         }
                                     }
@@ -717,38 +837,63 @@ impl SelfTestRunner {
 
                                 // Preserve Round 1 molecules
                                 if let Some(molecules) = existing_data.get("molecules") {
-                                    if let Some(metadata) = molecules.get("metadata").and_then(|v| v.as_str()) {
+                                    if let Some(metadata) =
+                                        molecules.get("metadata").and_then(|v| v.as_str())
+                                    {
                                         self.results.molecules.metadata = metadata.to_string();
                                     }
-                                    if let Some(simple) = molecules.get("simpleTransfer").and_then(|v| v.as_str()) {
+                                    if let Some(simple) =
+                                        molecules.get("simpleTransfer").and_then(|v| v.as_str())
+                                    {
                                         self.results.molecules.simple_transfer = simple.to_string();
                                     }
-                                    if let Some(complex) = molecules.get("complexTransfer").and_then(|v| v.as_str()) {
-                                        self.results.molecules.complex_transfer = complex.to_string();
+                                    if let Some(complex) =
+                                        molecules.get("complexTransfer").and_then(|v| v.as_str())
+                                    {
+                                        self.results.molecules.complex_transfer =
+                                            complex.to_string();
                                     }
-                                    if let Some(token) = molecules.get("tokenCreation").and_then(|v| v.as_str()) {
+                                    if let Some(token) =
+                                        molecules.get("tokenCreation").and_then(|v| v.as_str())
+                                    {
                                         self.results.molecules.token_creation = token.to_string();
                                     }
-                                    if let Some(wallet) = molecules.get("walletCreation").and_then(|v| v.as_str()) {
+                                    if let Some(wallet) =
+                                        molecules.get("walletCreation").and_then(|v| v.as_str())
+                                    {
                                         self.results.molecules.wallet_creation = wallet.to_string();
                                     }
-                                    if let Some(shadow) = molecules.get("shadowWalletClaim").and_then(|v| v.as_str()) {
-                                        self.results.molecules.shadow_wallet_claim = shadow.to_string();
+                                    if let Some(shadow) =
+                                        molecules.get("shadowWalletClaim").and_then(|v| v.as_str())
+                                    {
+                                        self.results.molecules.shadow_wallet_claim =
+                                            shadow.to_string();
                                     }
-                                    if let Some(mlkem) = molecules.get("mlkem768").and_then(|v| v.as_str()) {
+                                    if let Some(mlkem) =
+                                        molecules.get("mlkem768").and_then(|v| v.as_str())
+                                    {
                                         self.results.molecules.mlkem768 = mlkem.to_string();
                                     }
                                 }
 
-                                Logger::message("✅ Preserved Round 1 molecules for cross-validation", colors::GREEN);
+                                Logger::message(
+                                    "✅ Preserved Round 1 molecules for cross-validation",
+                                    colors::GREEN,
+                                );
                             }
                             Err(e) => {
-                                Logger::message(&format!("⚠️  Could not parse existing results: {e}"), colors::YELLOW);
+                                Logger::message(
+                                    &format!("⚠️  Could not parse existing results: {e}"),
+                                    colors::YELLOW,
+                                );
                             }
                         }
                     }
                     Err(e) => {
-                        Logger::message(&format!("⚠️  Could not read existing results: {e}"), colors::YELLOW);
+                        Logger::message(
+                            &format!("⚠️  Could not read existing results: {e}"),
+                            colors::YELLOW,
+                        );
                     }
                 }
             }
@@ -758,12 +903,28 @@ impl SelfTestRunner {
 
             // Save results and print summary (cross-validation only)
             self.save_results().await?;
-            Logger::message("\n═══════════════════════════════════════════", colors::BLUE);
+            Logger::message(
+                "\n═══════════════════════════════════════════",
+                colors::BLUE,
+            );
             Logger::message("            CROSS-VALIDATION SUMMARY", colors::BLUE);
             Logger::message("═══════════════════════════════════════════", colors::BLUE);
-            let compat_status = if self.results.cross_sdk_compatible { "✅ YES" } else { "❌ NO" };
-            let compat_color = if self.results.cross_sdk_compatible { colors::GREEN } else { colors::RED };
-            println!("{}Cross-SDK Compatible: {}{}", compat_color, compat_status, colors::RESET);
+            let compat_status = if self.results.cross_sdk_compatible {
+                "✅ YES"
+            } else {
+                "❌ NO"
+            };
+            let compat_color = if self.results.cross_sdk_compatible {
+                colors::GREEN
+            } else {
+                colors::RED
+            };
+            println!(
+                "{}Cross-SDK Compatible: {}{}",
+                compat_color,
+                compat_status,
+                colors::RESET
+            );
             Logger::message("═══════════════════════════════════════════", colors::BLUE);
 
             // Exit based on cross-validation results only (`None` only under
@@ -801,13 +962,27 @@ impl SelfTestRunner {
 
         // Exit with appropriate code
         let total_tests = 10;
-        let passed_tests = [crypto_result, meta_result, simple_result, complex_result, token_creation_result, wallet_creation_result, shadow_wallet_claim_result, buffer_family_result, mlkem_result, negative_result]
-            .iter()
-            .filter(|&&x| x)
-            .count();
+        let passed_tests = [
+            crypto_result,
+            meta_result,
+            simple_result,
+            complex_result,
+            token_creation_result,
+            wallet_creation_result,
+            shadow_wallet_claim_result,
+            buffer_family_result,
+            mlkem_result,
+            negative_result,
+        ]
+        .iter()
+        .filter(|&&x| x)
+        .count();
 
         if cross_sdk_result == Some(false) {
-            Logger::message("\n❌ Cross-SDK validation ran and failed — the self-test fails", colors::RED);
+            Logger::message(
+                "\n❌ Cross-SDK validation ran and failed — the self-test fails",
+                colors::RED,
+            );
         }
 
         if passed_tests != total_tests || cross_sdk_result == Some(false) {
@@ -820,9 +995,18 @@ impl SelfTestRunner {
     async fn test_crypto(&mut self) -> Result<bool> {
         Logger::message("\n1. Crypto Test", colors::BLUE);
 
-        let seed = self.config.get_string("tests.crypto.seed").unwrap_or_else(|| "TESTSEED".to_string());
-        let expected_secret = self.config.get_string("tests.crypto.secret").unwrap_or_default();
-        let expected_bundle = self.config.get_string("tests.crypto.bundle").unwrap_or_default();
+        let seed = self
+            .config
+            .get_string("tests.crypto.seed")
+            .unwrap_or_else(|| "TESTSEED".to_string());
+        let expected_secret = self
+            .config
+            .get_string("tests.crypto.secret")
+            .unwrap_or_default();
+        let expected_bundle = self
+            .config
+            .get_string("tests.crypto.bundle")
+            .unwrap_or_default();
 
         // Generate secret from seed (matches JavaScript SDK)
         let generated_secret = generate_secret(&seed);
@@ -853,7 +1037,11 @@ impl SelfTestRunner {
             bundle: generated_bundle,
             expected_secret,
             expected_bundle,
-            error: if success { None } else { Some("Cryptographic mismatch".to_string()) },
+            error: if success {
+                None
+            } else {
+                Some("Cryptographic mismatch".to_string())
+            },
         };
 
         Ok(success)
@@ -862,11 +1050,26 @@ impl SelfTestRunner {
     async fn test_meta_creation(&mut self) -> Result<bool> {
         Logger::message("\n2. Metadata Creation Test", colors::BLUE);
 
-        let seed = self.config.get_string("tests.metaCreation.seed").unwrap_or_else(|| "TESTSEED".to_string());
-        let token = self.config.get_string("tests.metaCreation.token").unwrap_or_else(|| "USER".to_string());
-        let source_position = self.config.get_string("tests.metaCreation.sourcePosition").unwrap_or_default();
-        let meta_type = self.config.get_string("tests.metaCreation.metaType").unwrap_or_else(|| "TestMeta".to_string());
-        let meta_id = self.config.get_string("tests.metaCreation.metaId").unwrap_or_else(|| "TESTMETA123".to_string());
+        let seed = self
+            .config
+            .get_string("tests.metaCreation.seed")
+            .unwrap_or_else(|| "TESTSEED".to_string());
+        let token = self
+            .config
+            .get_string("tests.metaCreation.token")
+            .unwrap_or_else(|| "USER".to_string());
+        let source_position = self
+            .config
+            .get_string("tests.metaCreation.sourcePosition")
+            .unwrap_or_default();
+        let meta_type = self
+            .config
+            .get_string("tests.metaCreation.metaType")
+            .unwrap_or_else(|| "TestMeta".to_string());
+        let meta_id = self
+            .config
+            .get_string("tests.metaCreation.metaId")
+            .unwrap_or_else(|| "TESTMETA123".to_string());
 
         // Generate secret and create source wallet
         let secret = generate_secret(&seed);
@@ -879,7 +1082,8 @@ impl SelfTestRunner {
             None,
             Some("BASE64"),
             None,
-        ).context("Failed to create source wallet")?;
+        )
+        .context("Failed to create source wallet")?;
 
         Logger::test("Source wallet creation", true, None);
 
@@ -906,7 +1110,8 @@ impl SelfTestRunner {
         ];
 
         // Initialize metadata molecule (includes M + I atoms via add_continuid_atom)
-        molecule.init_meta(metadata, &meta_type, &meta_id, None)
+        molecule
+            .init_meta(metadata, &meta_type, &meta_id, None)
             .context("Failed to initialize metadata molecule")?;
 
         Logger::test("Metadata molecule initialization", true, None);
@@ -926,7 +1131,10 @@ impl SelfTestRunner {
         MoleculeInspector::diagnose_validation(&molecule, "METADATA MOLECULE");
 
         // Validate the molecule with source wallet (matching JavaScript SDK behavior)
-        let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
+        let (is_valid, validation_error) = match molecule
+            .verify_with_wallet(&source_wallet_for_validation)
+            .await
+        {
             Ok(valid) => (valid, None),
             Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
@@ -938,7 +1146,7 @@ impl SelfTestRunner {
             Ok(json) => json,
             Err(e) => {
                 eprintln!("ERROR: Failed to serialize metadata molecule: {e}");
-                "{}".to_string()  // Empty JSON object instead of empty string
+                "{}".to_string() // Empty JSON object instead of empty string
             }
         };
         self.results.molecules.metadata = molecule_json;
@@ -958,13 +1166,34 @@ impl SelfTestRunner {
     async fn test_simple_transfer(&mut self) -> Result<bool> {
         Logger::message("\n3. Simple Transfer Test", colors::BLUE);
 
-        let source_seed = self.config.get_string("tests.simpleTransfer.sourceSeed").unwrap_or_else(|| "TESTSEED".to_string());
-        let recipient_seed = self.config.get_string("tests.simpleTransfer.recipientSeed").unwrap_or_else(|| "TESTSEED2".to_string());
-        let token = self.config.get_string("tests.simpleTransfer.token").unwrap_or_else(|| "TEST".to_string());
-        let source_position = self.config.get_string("tests.simpleTransfer.sourcePosition").unwrap_or_default();
-        let recipient_position = self.config.get_string("tests.simpleTransfer.recipientPosition").unwrap_or_default();
-        let balance = self.config.get_i64("tests.simpleTransfer.balance").unwrap_or(1000) as f64;
-        let amount = self.config.get_i64("tests.simpleTransfer.amount").unwrap_or(1000) as f64;
+        let source_seed = self
+            .config
+            .get_string("tests.simpleTransfer.sourceSeed")
+            .unwrap_or_else(|| "TESTSEED".to_string());
+        let recipient_seed = self
+            .config
+            .get_string("tests.simpleTransfer.recipientSeed")
+            .unwrap_or_else(|| "TESTSEED2".to_string());
+        let token = self
+            .config
+            .get_string("tests.simpleTransfer.token")
+            .unwrap_or_else(|| "TEST".to_string());
+        let source_position = self
+            .config
+            .get_string("tests.simpleTransfer.sourcePosition")
+            .unwrap_or_default();
+        let recipient_position = self
+            .config
+            .get_string("tests.simpleTransfer.recipientPosition")
+            .unwrap_or_default();
+        let balance = self
+            .config
+            .get_i64("tests.simpleTransfer.balance")
+            .unwrap_or(1000) as f64;
+        let amount = self
+            .config
+            .get_i64("tests.simpleTransfer.amount")
+            .unwrap_or(1000) as f64;
 
         // Create source wallet
         let source_secret = generate_secret(&source_seed);
@@ -977,9 +1206,10 @@ impl SelfTestRunner {
             None,
             Some("BASE64"),
             None,
-        ).context("Failed to create source wallet")?;
+        )
+        .context("Failed to create source wallet")?;
 
-        source_wallet.set_balance_f64(balance);  // Set balance for testing
+        source_wallet.set_balance_f64(balance); // Set balance for testing
         Logger::test("Source wallet creation", true, None);
 
         // Create recipient wallet
@@ -993,7 +1223,8 @@ impl SelfTestRunner {
             None,
             Some("BASE64"),
             None,
-        ).context("Failed to create recipient wallet")?;
+        )
+        .context("Failed to create recipient wallet")?;
 
         Logger::test("Recipient wallet creation", true, None);
 
@@ -1014,7 +1245,8 @@ impl SelfTestRunner {
         );
 
         // Initialize value transfer (now uses JavaScript UTXO pattern)
-        molecule.init_value(&recipient_wallet, amount)
+        molecule
+            .init_value(&recipient_wallet, amount)
             .context("Failed to initialize value transfer")?;
 
         Logger::test("Value transfer initialization", true, None);
@@ -1031,7 +1263,10 @@ impl SelfTestRunner {
         MoleculeInspector::inspect(&molecule, "SIMPLE TRANSFER MOLECULE");
 
         // Validate the molecule with source wallet (matching JavaScript SDK behavior)
-        let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
+        let (is_valid, validation_error) = match molecule
+            .verify_with_wallet(&source_wallet_for_validation)
+            .await
+        {
             Ok(valid) => (valid, None),
             Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
@@ -1043,7 +1278,7 @@ impl SelfTestRunner {
             Ok(json) => json,
             Err(e) => {
                 eprintln!("ERROR: Failed to serialize simple transfer molecule: {e}");
-                "{}".to_string()  // Empty JSON object instead of empty string
+                "{}".to_string() // Empty JSON object instead of empty string
             }
         };
         self.results.molecules.simple_transfer = molecule_json;
@@ -1063,13 +1298,34 @@ impl SelfTestRunner {
     async fn test_complex_transfer(&mut self) -> Result<bool> {
         Logger::message("\n4. Complex Transfer Test", colors::BLUE);
 
-        let source_seed = self.config.get_string("tests.complexTransfer.sourceSeed").unwrap_or_else(|| "TESTSEED".to_string());
-        let recipient_seed = self.config.get_string("tests.complexTransfer.recipient1Seed").unwrap_or_else(|| "TESTSEED2".to_string());
-        let token = self.config.get_string("tests.complexTransfer.token").unwrap_or_else(|| "TEST".to_string());
-        let source_position = self.config.get_string("tests.complexTransfer.sourcePosition").unwrap_or_default();
-        let recipient_position = self.config.get_string("tests.complexTransfer.recipient1Position").unwrap_or_default();
-        let balance = self.config.get_i64("tests.complexTransfer.sourceBalance").unwrap_or(1000) as f64;
-        let amount = self.config.get_i64("tests.complexTransfer.amount1").unwrap_or(500) as f64;
+        let source_seed = self
+            .config
+            .get_string("tests.complexTransfer.sourceSeed")
+            .unwrap_or_else(|| "TESTSEED".to_string());
+        let recipient_seed = self
+            .config
+            .get_string("tests.complexTransfer.recipient1Seed")
+            .unwrap_or_else(|| "TESTSEED2".to_string());
+        let token = self
+            .config
+            .get_string("tests.complexTransfer.token")
+            .unwrap_or_else(|| "TEST".to_string());
+        let source_position = self
+            .config
+            .get_string("tests.complexTransfer.sourcePosition")
+            .unwrap_or_default();
+        let recipient_position = self
+            .config
+            .get_string("tests.complexTransfer.recipient1Position")
+            .unwrap_or_default();
+        let balance = self
+            .config
+            .get_i64("tests.complexTransfer.sourceBalance")
+            .unwrap_or(1000) as f64;
+        let amount = self
+            .config
+            .get_i64("tests.complexTransfer.amount1")
+            .unwrap_or(500) as f64;
 
         // Create source wallet
         let source_secret = generate_secret(&source_seed);
@@ -1082,7 +1338,8 @@ impl SelfTestRunner {
             None,
             Some("BASE64"),
             None,
-        ).context("Failed to create source wallet")?;
+        )
+        .context("Failed to create source wallet")?;
 
         source_wallet.set_balance_f64(balance);
         Logger::test("Source wallet creation", true, None);
@@ -1103,7 +1360,8 @@ impl SelfTestRunner {
             None,
             Some("BASE64"),
             None,
-        ).context("Failed to create recipient wallet")?;
+        )
+        .context("Failed to create recipient wallet")?;
 
         Logger::test("Recipient wallet creation", true, None);
 
@@ -1120,7 +1378,8 @@ impl SelfTestRunner {
         );
 
         // Initialize value transfer with remainder (JavaScript UTXO pattern)
-        molecule.init_value(&recipient_wallet, amount)
+        molecule
+            .init_value(&recipient_wallet, amount)
             .context("Failed to initialize value transfer")?;
 
         Logger::test("Value transfer with remainder initialization", true, None);
@@ -1140,7 +1399,10 @@ impl SelfTestRunner {
         MoleculeInspector::diagnose_validation(&molecule, "COMPLEX TRANSFER MOLECULE");
 
         // Validate the molecule with source wallet (matching JavaScript SDK behavior)
-        let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
+        let (is_valid, validation_error) = match molecule
+            .verify_with_wallet(&source_wallet_for_validation)
+            .await
+        {
             Ok(valid) => (valid, None),
             Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
@@ -1152,7 +1414,7 @@ impl SelfTestRunner {
             Ok(json) => json,
             Err(e) => {
                 eprintln!("ERROR: Failed to serialize complex transfer molecule: {e}");
-                "{}".to_string()  // Empty JSON object instead of empty string
+                "{}".to_string() // Empty JSON object instead of empty string
             }
         };
         self.results.molecules.complex_transfer = molecule_json;
@@ -1172,13 +1434,34 @@ impl SelfTestRunner {
     async fn test_token_creation(&mut self) -> Result<bool> {
         Logger::message("\nC1. Token Creation Test", colors::BLUE);
 
-        let source_seed = self.config.get_string("tests.tokenCreation.sourceSeed").unwrap_or_else(|| "TESTSEED".to_string());
-        let recipient_seed = self.config.get_string("tests.tokenCreation.recipientSeed").unwrap_or_else(|| "RECIPIENTSEED".to_string());
-        let source_token = self.config.get_string("tests.tokenCreation.sourceToken").unwrap_or_else(|| "USER".to_string());
-        let new_token = self.config.get_string("tests.tokenCreation.newToken").unwrap_or_else(|| "TESTTOKEN".to_string());
-        let source_position = self.config.get_string("tests.tokenCreation.sourcePosition").unwrap_or_default();
-        let recipient_position = self.config.get_string("tests.tokenCreation.recipientPosition").unwrap_or_default();
-        let amount = self.config.get_i64("tests.tokenCreation.amount").unwrap_or(1_000_000) as f64;
+        let source_seed = self
+            .config
+            .get_string("tests.tokenCreation.sourceSeed")
+            .unwrap_or_else(|| "TESTSEED".to_string());
+        let recipient_seed = self
+            .config
+            .get_string("tests.tokenCreation.recipientSeed")
+            .unwrap_or_else(|| "RECIPIENTSEED".to_string());
+        let source_token = self
+            .config
+            .get_string("tests.tokenCreation.sourceToken")
+            .unwrap_or_else(|| "USER".to_string());
+        let new_token = self
+            .config
+            .get_string("tests.tokenCreation.newToken")
+            .unwrap_or_else(|| "TESTTOKEN".to_string());
+        let source_position = self
+            .config
+            .get_string("tests.tokenCreation.sourcePosition")
+            .unwrap_or_default();
+        let recipient_position = self
+            .config
+            .get_string("tests.tokenCreation.recipientPosition")
+            .unwrap_or_default();
+        let amount = self
+            .config
+            .get_i64("tests.tokenCreation.amount")
+            .unwrap_or(1_000_000) as f64;
 
         // Create source wallet (USER token)
         let source_secret = generate_secret(&source_seed);
@@ -1191,7 +1474,8 @@ impl SelfTestRunner {
             None,
             Some("BASE64"),
             None,
-        ).context("Failed to create source wallet")?;
+        )
+        .context("Failed to create source wallet")?;
         Logger::test("Source wallet creation", true, None);
 
         // Create recipient wallet for the new token
@@ -1205,7 +1489,8 @@ impl SelfTestRunner {
             None,
             Some("BASE64"),
             None,
-        ).context("Failed to create recipient wallet")?;
+        )
+        .context("Failed to create recipient wallet")?;
         Logger::test("Recipient wallet creation", true, None);
 
         // USER-token remainder so add_continuid_atom's guard keeps the canonical bbbb... wallet
@@ -1230,7 +1515,8 @@ impl SelfTestRunner {
             MetaItem::new("decimals", "0"),
         ];
 
-        molecule.init_token_creation(&recipient_wallet, amount, user_meta)
+        molecule
+            .init_token_creation(&recipient_wallet, amount, user_meta)
             .context("Failed to initialize token creation")?;
         Logger::test("Token creation initialization", true, None);
 
@@ -1244,7 +1530,10 @@ impl SelfTestRunner {
         MoleculeInspector::inspect(&molecule, "TOKEN CREATION MOLECULE");
         MoleculeInspector::diagnose_validation(&molecule, "TOKEN CREATION MOLECULE");
 
-        let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
+        let (is_valid, validation_error) = match molecule
+            .verify_with_wallet(&source_wallet_for_validation)
+            .await
+        {
             Ok(valid) => (valid, None),
             Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
@@ -1273,23 +1562,57 @@ impl SelfTestRunner {
     async fn test_wallet_creation(&mut self) -> Result<bool> {
         Logger::message("\nC2. Wallet Creation Test", colors::BLUE);
 
-        let source_seed = self.config.get_string("tests.walletCreation.sourceSeed").unwrap_or_else(|| "TESTSEED".to_string());
-        let new_wallet_seed = self.config.get_string("tests.walletCreation.newWalletSeed").unwrap_or_else(|| "NEWWALLETSEED".to_string());
-        let source_token = self.config.get_string("tests.walletCreation.sourceToken").unwrap_or_else(|| "USER".to_string());
-        let new_token = self.config.get_string("tests.walletCreation.newToken").unwrap_or_else(|| "TESTTOKEN".to_string());
-        let source_position = self.config.get_string("tests.walletCreation.sourcePosition").unwrap_or_default();
-        let new_wallet_position = self.config.get_string("tests.walletCreation.newWalletPosition").unwrap_or_default();
+        let source_seed = self
+            .config
+            .get_string("tests.walletCreation.sourceSeed")
+            .unwrap_or_else(|| "TESTSEED".to_string());
+        let new_wallet_seed = self
+            .config
+            .get_string("tests.walletCreation.newWalletSeed")
+            .unwrap_or_else(|| "NEWWALLETSEED".to_string());
+        let source_token = self
+            .config
+            .get_string("tests.walletCreation.sourceToken")
+            .unwrap_or_else(|| "USER".to_string());
+        let new_token = self
+            .config
+            .get_string("tests.walletCreation.newToken")
+            .unwrap_or_else(|| "TESTTOKEN".to_string());
+        let source_position = self
+            .config
+            .get_string("tests.walletCreation.sourcePosition")
+            .unwrap_or_default();
+        let new_wallet_position = self
+            .config
+            .get_string("tests.walletCreation.newWalletPosition")
+            .unwrap_or_default();
 
         let source_secret = generate_secret(&source_seed);
         let source_wallet = Wallet::new(
-            Some(&source_secret), None, Some(&source_token), None, Some(&source_position), None, Some("BASE64"), None,
-        ).context("Failed to create source wallet")?;
+            Some(&source_secret),
+            None,
+            Some(&source_token),
+            None,
+            Some(&source_position),
+            None,
+            Some("BASE64"),
+            None,
+        )
+        .context("Failed to create source wallet")?;
         Logger::test("Source wallet creation", true, None);
 
         let new_secret = generate_secret(&new_wallet_seed);
         let new_wallet = Wallet::new(
-            Some(&new_secret), None, Some(&new_token), None, Some(&new_wallet_position), None, Some("BASE64"), None,
-        ).context("Failed to create new wallet")?;
+            Some(&new_secret),
+            None,
+            Some(&new_token),
+            None,
+            Some(&new_wallet_position),
+            None,
+            Some("BASE64"),
+            None,
+        )
+        .context("Failed to create new wallet")?;
         Logger::test("New wallet creation", true, None);
 
         let remainder_wallet = create_fixed_remainder_wallet(&source_secret, &source_token)?;
@@ -1297,10 +1620,16 @@ impl SelfTestRunner {
 
         let source_wallet_for_validation = source_wallet.clone();
         let mut molecule = Molecule::with_params(
-            Some(source_secret.clone()), None, Some(source_wallet), Some(remainder_wallet), None, None,
+            Some(source_secret.clone()),
+            None,
+            Some(source_wallet),
+            Some(remainder_wallet),
+            None,
+            None,
         );
 
-        molecule.init_wallet_creation(&new_wallet, vec![])
+        molecule
+            .init_wallet_creation(&new_wallet, vec![])
             .context("Failed to initialize wallet creation")?;
         Logger::test("Wallet creation initialization", true, None);
 
@@ -1313,7 +1642,10 @@ impl SelfTestRunner {
         MoleculeInspector::inspect(&molecule, "WALLET CREATION MOLECULE");
         MoleculeInspector::diagnose_validation(&molecule, "WALLET CREATION MOLECULE");
 
-        let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
+        let (is_valid, validation_error) = match molecule
+            .verify_with_wallet(&source_wallet_for_validation)
+            .await
+        {
             Ok(valid) => (valid, None),
             Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
@@ -1321,7 +1653,10 @@ impl SelfTestRunner {
 
         let molecule_json = match molecule.toJSON() {
             Ok(json) => json,
-            Err(e) => { eprintln!("ERROR: Failed to serialize wallet creation molecule: {e}"); "{}".to_string() }
+            Err(e) => {
+                eprintln!("ERROR: Failed to serialize wallet creation molecule: {e}");
+                "{}".to_string()
+            }
         };
         self.results.molecules.wallet_creation = molecule_json;
 
@@ -1339,23 +1674,57 @@ impl SelfTestRunner {
     async fn test_shadow_wallet_claim(&mut self) -> Result<bool> {
         Logger::message("\nC3. Shadow Wallet Claim Test", colors::BLUE);
 
-        let source_seed = self.config.get_string("tests.shadowWalletClaim.sourceSeed").unwrap_or_else(|| "TESTSEED".to_string());
-        let claim_seed = self.config.get_string("tests.shadowWalletClaim.claimSeed").unwrap_or_else(|| "CLAIMSEED".to_string());
-        let source_token = self.config.get_string("tests.shadowWalletClaim.sourceToken").unwrap_or_else(|| "USER".to_string());
-        let claim_token = self.config.get_string("tests.shadowWalletClaim.claimToken").unwrap_or_else(|| "TESTTOKEN".to_string());
-        let source_position = self.config.get_string("tests.shadowWalletClaim.sourcePosition").unwrap_or_default();
-        let claim_position = self.config.get_string("tests.shadowWalletClaim.claimPosition").unwrap_or_default();
+        let source_seed = self
+            .config
+            .get_string("tests.shadowWalletClaim.sourceSeed")
+            .unwrap_or_else(|| "TESTSEED".to_string());
+        let claim_seed = self
+            .config
+            .get_string("tests.shadowWalletClaim.claimSeed")
+            .unwrap_or_else(|| "CLAIMSEED".to_string());
+        let source_token = self
+            .config
+            .get_string("tests.shadowWalletClaim.sourceToken")
+            .unwrap_or_else(|| "USER".to_string());
+        let claim_token = self
+            .config
+            .get_string("tests.shadowWalletClaim.claimToken")
+            .unwrap_or_else(|| "TESTTOKEN".to_string());
+        let source_position = self
+            .config
+            .get_string("tests.shadowWalletClaim.sourcePosition")
+            .unwrap_or_default();
+        let claim_position = self
+            .config
+            .get_string("tests.shadowWalletClaim.claimPosition")
+            .unwrap_or_default();
 
         let source_secret = generate_secret(&source_seed);
         let source_wallet = Wallet::new(
-            Some(&source_secret), None, Some(&source_token), None, Some(&source_position), None, Some("BASE64"), None,
-        ).context("Failed to create source wallet")?;
+            Some(&source_secret),
+            None,
+            Some(&source_token),
+            None,
+            Some(&source_position),
+            None,
+            Some("BASE64"),
+            None,
+        )
+        .context("Failed to create source wallet")?;
         Logger::test("Source wallet creation", true, None);
 
         let claim_secret = generate_secret(&claim_seed);
         let claim_wallet = Wallet::new(
-            Some(&claim_secret), None, Some(&claim_token), None, Some(&claim_position), None, Some("BASE64"), None,
-        ).context("Failed to create claim wallet")?;
+            Some(&claim_secret),
+            None,
+            Some(&claim_token),
+            None,
+            Some(&claim_position),
+            None,
+            Some("BASE64"),
+            None,
+        )
+        .context("Failed to create claim wallet")?;
         Logger::test("Claim wallet creation", true, None);
 
         let remainder_wallet = create_fixed_remainder_wallet(&source_secret, &source_token)?;
@@ -1363,10 +1732,16 @@ impl SelfTestRunner {
 
         let source_wallet_for_validation = source_wallet.clone();
         let mut molecule = Molecule::with_params(
-            Some(source_secret.clone()), None, Some(source_wallet), Some(remainder_wallet), None, None,
+            Some(source_secret.clone()),
+            None,
+            Some(source_wallet),
+            Some(remainder_wallet),
+            None,
+            None,
         );
 
-        molecule.init_shadow_wallet_claim(&claim_wallet)
+        molecule
+            .init_shadow_wallet_claim(&claim_wallet)
             .context("Failed to initialize shadow wallet claim")?;
         Logger::test("Shadow wallet claim initialization", true, None);
 
@@ -1379,7 +1754,10 @@ impl SelfTestRunner {
         MoleculeInspector::inspect(&molecule, "SHADOW WALLET CLAIM MOLECULE");
         MoleculeInspector::diagnose_validation(&molecule, "SHADOW WALLET CLAIM MOLECULE");
 
-        let (is_valid, validation_error) = match molecule.verify_with_wallet(&source_wallet_for_validation).await {
+        let (is_valid, validation_error) = match molecule
+            .verify_with_wallet(&source_wallet_for_validation)
+            .await
+        {
             Ok(valid) => (valid, None),
             Err(e) => (false, Some(format!("Signature verification failed: {e}"))),
         };
@@ -1387,7 +1765,10 @@ impl SelfTestRunner {
 
         let molecule_json = match molecule.toJSON() {
             Ok(json) => json,
-            Err(e) => { eprintln!("ERROR: Failed to serialize shadow wallet claim molecule: {e}"); "{}".to_string() }
+            Err(e) => {
+                eprintln!("ERROR: Failed to serialize shadow wallet claim molecule: {e}");
+                "{}".to_string()
+            }
         };
         self.results.molecules.shadow_wallet_claim = molecule_json;
 
@@ -1412,10 +1793,15 @@ impl SelfTestRunner {
     // CI), or FAILS if KNISHIO_REQUIRE_VECTORS=true (an orchestrated cross-SDK run where the vectors
     // are mandatory — silently skipping parity coverage is the false-green this gate exists to stop).
     async fn test_buffer_family(&mut self) -> Result<bool> {
-        Logger::message("\nB1. Buffer Family Test (deposit + withdraw, vector-driven)", colors::BLUE);
+        Logger::message(
+            "\nB1. Buffer Family Test (deposit + withdraw, vector-driven)",
+            colors::BLUE,
+        );
 
         let mut candidates: Vec<String> = Vec::new();
-        if let Ok(p) = std::env::var("KNISHIO_CANONICAL_VECTORS") { candidates.push(p); }
+        if let Ok(p) = std::env::var("KNISHIO_CANONICAL_VECTORS") {
+            candidates.push(p);
+        }
         candidates.push("tests/fixtures/canonical-patent-vectors.json".to_string());
         if let Ok(sd) = std::env::var("KNISHIO_SHARED_RESULTS") {
             candidates.push(format!("{sd}/canonical-patent-vectors.json"));
@@ -1432,10 +1818,16 @@ impl SelfTestRunner {
                 validation_error: Some("canonical-patent-vectors.json absent".to_string()),
             };
             if must_have {
-                Logger::message("  FAILED: canonical-patent-vectors.json absent (KNISHIO_REQUIRE_VECTORS=true)", colors::RED);
+                Logger::message(
+                    "  FAILED: canonical-patent-vectors.json absent (KNISHIO_REQUIRE_VECTORS=true)",
+                    colors::RED,
+                );
                 return Ok(false);
             }
-            Logger::message("  SKIPPED: canonical-patent-vectors.json absent (standalone CI)", colors::YELLOW);
+            Logger::message(
+                "  SKIPPED: canonical-patent-vectors.json absent (standalone CI)",
+                colors::YELLOW,
+            );
             return Ok(true); // skip, not fail — recorded as skipped, never counted as a pass
         };
 
@@ -1450,7 +1842,8 @@ impl SelfTestRunner {
         let mut atom_total = 0usize;
 
         // ---- DEPOSIT: V (source -balance) -> B (buffer +amount) -> V (remainder +(balance-amount)) ----
-        let deposit_tests = v.get("buffer_deposit_conservation")
+        let deposit_tests = v
+            .get("buffer_deposit_conservation")
             .and_then(|d| d.get("tests"))
             .and_then(|t| t.as_array())
             .context("Missing buffer_deposit_conservation.tests")?;
@@ -1459,21 +1852,52 @@ impl SelfTestRunner {
             let balance = tv["sourceBalance"].as_i64().unwrap_or(0) as i128;
             let amount = tv["amount"].as_i64().unwrap_or(0);
 
-            let mut source_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"), None)?;
+            let mut source_wallet = Wallet::new(
+                Some(&secret),
+                None,
+                Some(token),
+                None,
+                None,
+                None,
+                Some("BASE64"),
+                None,
+            )?;
             source_wallet.set_balance_i128(balance);
             let source_wallet_for_validation = source_wallet.clone();
-            let remainder_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"), None)?;
+            let remainder_wallet = Wallet::new(
+                Some(&secret),
+                None,
+                Some(token),
+                None,
+                None,
+                None,
+                Some("BASE64"),
+                None,
+            )?;
 
             let mut molecule = Molecule::with_params(
-                Some(secret.clone()), None, Some(source_wallet), Some(remainder_wallet), None, None,
+                Some(secret.clone()),
+                None,
+                Some(source_wallet),
+                Some(remainder_wallet),
+                None,
+                None,
             );
             molecule.init_deposit_buffer(amount as f64, HashMap::new())?;
             set_fixed_timestamps(&mut molecule);
             molecule.sign(molecule.bundle.clone(), false, true)?;
 
-            let sum: i128 = molecule.atoms.iter()
+            let sum: i128 = molecule
+                .atoms
+                .iter()
                 .filter(|a| a.isotope == Isotope::V || a.isotope == Isotope::B)
-                .map(|a| a.value.as_deref().unwrap_or("0").parse::<i128>().unwrap_or(0))
+                .map(|a| {
+                    a.value
+                        .as_deref()
+                        .unwrap_or("0")
+                        .parse::<i128>()
+                        .unwrap_or(0)
+                })
                 .sum();
             let shape = molecule.atoms.len() == 3
                 && molecule.atoms[0].isotope == Isotope::V
@@ -1482,17 +1906,29 @@ impl SelfTestRunner {
                 && molecule.atoms[1].value.as_deref() == tv["expectedBufferValue"].as_str()
                 && molecule.atoms[2].isotope == Isotope::V
                 && molecule.atoms[2].value.as_deref() == tv["expectedRemainderValue"].as_str();
-            let expected_sum: i128 = tv["expectedSum"].as_str().unwrap_or("0").parse().unwrap_or(0);
-            let verified = molecule.verify_with_wallet(&source_wallet_for_validation).await.unwrap_or(false);
+            let expected_sum: i128 = tv["expectedSum"]
+                .as_str()
+                .unwrap_or("0")
+                .parse()
+                .unwrap_or(0);
+            let verified = molecule
+                .verify_with_wallet(&source_wallet_for_validation)
+                .await
+                .unwrap_or(false);
             let ok = shape && sum == expected_sum && verified;
-            Logger::test(&format!("deposit {name} conserves (V+B sum 0; cross-isotope bypass)"), ok, None);
+            Logger::test(
+                &format!("deposit {name} conserves (V+B sum 0; cross-isotope bypass)"),
+                ok,
+                None,
+            );
             all_pass = all_pass && ok;
             last_hash = molecule.molecular_hash.clone().unwrap_or_default();
             atom_total += molecule.atoms.len();
         }
 
         // ---- WITHDRAW: B (source -balance) -> V (recipient +amount) -> B (remainder +(balance-amount)) ----
-        let withdraw_tests = v.get("buffer_withdraw_conservation")
+        let withdraw_tests = v
+            .get("buffer_withdraw_conservation")
             .and_then(|d| d.get("tests"))
             .and_then(|t| t.as_array())
             .context("Missing buffer_withdraw_conservation.tests")?;
@@ -1504,12 +1940,26 @@ impl SelfTestRunner {
             // The buffer wallet is the B-isotope source; the leftover buffer balance goes to a
             // FRESH remainder position that init_withdraw_buffer derives (contract 9.6 — a
             // remainder at the source's own, consumed position is refused).
-            let mut source_wallet = Wallet::new(Some(&secret), None, Some(token), None, None, None, Some("BASE64"), None)?;
+            let mut source_wallet = Wallet::new(
+                Some(&secret),
+                None,
+                Some(token),
+                None,
+                None,
+                None,
+                Some("BASE64"),
+                None,
+            )?;
             source_wallet.set_balance_i128(balance);
             let recipient_bundle = source_wallet.bundle.clone().unwrap_or_default();
 
             let mut molecule = Molecule::with_params(
-                Some(secret.clone()), None, Some(source_wallet.clone()), None, None, None,
+                Some(secret.clone()),
+                None,
+                Some(source_wallet.clone()),
+                None,
+                None,
+                None,
             );
             let mut recipients = HashMap::new();
             recipients.insert(recipient_bundle, amount as f64);
@@ -1517,9 +1967,17 @@ impl SelfTestRunner {
             set_fixed_timestamps(&mut molecule);
             molecule.sign(molecule.bundle.clone(), false, true)?;
 
-            let sum: i128 = molecule.atoms.iter()
+            let sum: i128 = molecule
+                .atoms
+                .iter()
                 .filter(|a| a.isotope == Isotope::V || a.isotope == Isotope::B)
-                .map(|a| a.value.as_deref().unwrap_or("0").parse::<i128>().unwrap_or(0))
+                .map(|a| {
+                    a.value
+                        .as_deref()
+                        .unwrap_or("0")
+                        .parse::<i128>()
+                        .unwrap_or(0)
+                })
                 .sum();
             let shape = molecule.atoms.len() == 3
                 && molecule.atoms[0].isotope == Isotope::B
@@ -1528,7 +1986,11 @@ impl SelfTestRunner {
                 && molecule.atoms[1].value.as_deref() == tv["expectedRecipientValue"].as_str()
                 && molecule.atoms[2].isotope == Isotope::B
                 && molecule.atoms[2].value.as_deref() == tv["expectedRemainderValue"].as_str();
-            let expected_sum: i128 = tv["expectedSum"].as_str().unwrap_or("0").parse().unwrap_or(0);
+            let expected_sum: i128 = tv["expectedSum"]
+                .as_str()
+                .unwrap_or("0")
+                .parse()
+                .unwrap_or(0);
             // Keep the verifier's error rather than collapsing it to `false` — a bare
             // bool cannot distinguish "builder produced the wrong atoms" from "verifier
             // rejected correct atoms", and those have completely different owners.
@@ -1541,9 +2003,12 @@ impl SelfTestRunner {
                 Some(format!(
                     "shape mismatch: {} atoms [{}]",
                     molecule.atoms.len(),
-                    molecule.atoms.iter()
+                    molecule
+                        .atoms
+                        .iter()
                         .map(|a| format!("{:?}={}", a.isotope, a.value.as_deref().unwrap_or("-")))
-                        .collect::<Vec<_>>().join(", ")
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ))
             } else if sum != expected_sum {
                 Some(format!("V+B sum {sum} != expected {expected_sum}"))
@@ -1564,12 +2029,15 @@ impl SelfTestRunner {
             atom_total += molecule.atoms.len();
         }
 
-
         // ---- NEGATIVE: tampered buffer molecules the validator MUST reject. This
         // vector set exists to close a coverage hole: a positive-only suite never
         // observes rejection, so it can't tell a real conservation check apart from
         // an absent one (see buffer_conservation_negative.description). ----
-        match v.get("buffer_conservation_negative").and_then(|d| d.get("tests")).and_then(|t| t.as_array()) {
+        match v
+            .get("buffer_conservation_negative")
+            .and_then(|d| d.get("tests"))
+            .and_then(|t| t.as_array())
+        {
             Some(negative_tests) => {
                 for tv in negative_tests {
                     let name = tv["name"].as_str().unwrap_or("");
@@ -1578,18 +2046,26 @@ impl SelfTestRunner {
                     Logger::test(
                         &format!("negative {name} rejected"),
                         rejected,
-                        if rejected { None } else { Some(reason.as_str()) },
+                        if rejected {
+                            None
+                        } else {
+                            Some(reason.as_str())
+                        },
                     );
                     all_pass = all_pass && rejected;
                 }
             }
             None => {
-                let must_have = std::env::var("KNISHIO_REQUIRE_VECTORS").unwrap_or_default() == "true";
+                let must_have =
+                    std::env::var("KNISHIO_REQUIRE_VECTORS").unwrap_or_default() == "true";
                 if must_have {
                     Logger::message("  FAILED: buffer_conservation_negative absent (KNISHIO_REQUIRE_VECTORS=true)", colors::RED);
                     all_pass = false;
                 } else {
-                    Logger::message("  SKIPPED: buffer_conservation_negative absent (vector not yet vendored)", colors::YELLOW);
+                    Logger::message(
+                        "  SKIPPED: buffer_conservation_negative absent (vector not yet vendored)",
+                        colors::YELLOW,
+                    );
                 }
             }
         }
@@ -1620,10 +2096,22 @@ impl SelfTestRunner {
 
         // Test ML-KEM768 encryption functionality
         let result: Result<bool, anyhow::Error> = {
-            let seed = self.config.get_string("tests.mlkem768.seed").unwrap_or_else(|| "TESTSEED".to_string());
-            let token = self.config.get_string("tests.mlkem768.token").unwrap_or_else(|| "ENCRYPT".to_string());
-            let position = self.config.get_string("tests.mlkem768.position").unwrap_or_default();
-            let plaintext = self.config.get_string("tests.mlkem768.plaintext").unwrap_or_else(|| "Hello ML-KEM768 cross-platform test message!".to_string());
+            let seed = self
+                .config
+                .get_string("tests.mlkem768.seed")
+                .unwrap_or_else(|| "TESTSEED".to_string());
+            let token = self
+                .config
+                .get_string("tests.mlkem768.token")
+                .unwrap_or_else(|| "ENCRYPT".to_string());
+            let position = self
+                .config
+                .get_string("tests.mlkem768.position")
+                .unwrap_or_default();
+            let plaintext = self
+                .config
+                .get_string("tests.mlkem768.plaintext")
+                .unwrap_or_else(|| "Hello ML-KEM768 cross-platform test message!".to_string());
 
             // Create encryption wallet from seed
             let secret = generate_secret(&seed);
@@ -1638,24 +2126,33 @@ impl SelfTestRunner {
                 None,
                 Some("BASE64"),
                 Some(knishio_client::MlKemParameterSet::MlKem768),
-            ).context("Failed to create encryption wallet")?;
+            )
+            .context("Failed to create encryption wallet")?;
 
             Logger::test("Encryption wallet creation", true, None);
 
             // Get ML-KEM768 public key (non-deterministic)
             let public_key = encryption_wallet.pubkey.as_deref().unwrap_or("");
             let public_key_generated = !public_key.is_empty();
-            Logger::test("ML-KEM768 public key generation", public_key_generated, None);
+            Logger::test(
+                "ML-KEM768 public key generation",
+                public_key_generated,
+                None,
+            );
 
             // Encrypt plaintext message for ourselves (non-deterministic)
-            let encrypted_data = encryption_wallet.encrypt_message(
-                &serde_json::json!(plaintext),
-                public_key
-            ).await
+            let encrypted_data = encryption_wallet
+                .encrypt_message(&serde_json::json!(plaintext), public_key)
+                .await
                 .context("Failed to encrypt message")?;
 
-            let encryption_success = !encrypted_data.cipher_text.is_empty() && !encrypted_data.encrypted_message.is_empty();
-            Logger::test("Message encryption (self-encryption)", encryption_success, None);
+            let encryption_success = !encrypted_data.cipher_text.is_empty()
+                && !encrypted_data.encrypted_message.is_empty();
+            Logger::test(
+                "Message encryption (self-encryption)",
+                encryption_success,
+                None,
+            );
 
             // Decrypt the encrypted message
             let decrypted_result = encryption_wallet.decrypt_message(&encrypted_data).await;
@@ -1680,14 +2177,19 @@ impl SelfTestRunner {
                 "sdk": "Rust"
             });
 
-            self.results.molecules.mlkem768 = serde_json::to_string(&mlkem_data).unwrap_or_default();
+            self.results.molecules.mlkem768 =
+                serde_json::to_string(&mlkem_data).unwrap_or_default();
 
             self.results.tests.mlkem768 = MLKEMTestResult {
                 passed: test_passed,
                 public_key_generated,
                 encryption_success,
                 decryption_success: message_matches,
-                error: if test_passed { None } else { Some("ML-KEM768 test failed".to_string()) },
+                error: if test_passed {
+                    None
+                } else {
+                    Some("ML-KEM768 test failed".to_string())
+                },
             };
 
             Ok(test_passed)
@@ -1715,7 +2217,10 @@ impl SelfTestRunner {
     async fn test_negative_cases(&mut self) -> Result<bool> {
         Logger::message("\n6. Negative Test Cases (Anti-Cheating)", colors::BLUE);
 
-        let seed = self.config.get_string("tests.crypto.seed").unwrap_or_else(|| "TESTSEED".to_string());
+        let seed = self
+            .config
+            .get_string("tests.crypto.seed")
+            .unwrap_or_else(|| "TESTSEED".to_string());
         let mut all_negative_tests_passed = true;
 
         // Execute the negative test cases. Each case corrupts ONE property of a molecule that
@@ -1751,7 +2256,10 @@ impl SelfTestRunner {
 
             // A two-atom V transfer: debit the source, credit the recipient.
             let transfer = |debit: &str, credit: &str| -> Result<Molecule> {
-                let created_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_millis().to_string();
+                let created_at = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)?
+                    .as_millis()
+                    .to_string();
                 let mut molecule = Molecule::with_params(
                     Some(secret.clone()),
                     Some(bundle.clone()),
@@ -1760,7 +2268,11 @@ impl SelfTestRunner {
                     None,
                     None,
                 );
-                for (index, (wallet, value)) in [(&source_wallet, debit), (&recipient_wallet, credit)].into_iter().enumerate() {
+                for (index, (wallet, value)) in
+                    [(&source_wallet, debit), (&recipient_wallet, credit)]
+                        .into_iter()
+                        .enumerate()
+                {
                     molecule.add_atom(Atom {
                         position: wallet.position.clone().unwrap_or_default(),
                         wallet_address: wallet.address.clone().unwrap_or_default(),
@@ -1792,7 +2304,10 @@ impl SelfTestRunner {
             // Test 1: Missing Molecular Hash (should fail)
             {
                 let unsigned = transfer("-1000", "1000")?;
-                anyhow::ensure!(unsigned.molecular_hash.is_none(), "unsigned molecule already carries a molecular hash");
+                anyhow::ensure!(
+                    unsigned.molecular_hash.is_none(),
+                    "unsigned molecule already carries a molecular hash"
+                );
                 let validation_result = unsigned.verify().await;
                 all_negative_tests_passed &= expect_rejection(
                     "Missing molecular hash validation (should FAIL)",
@@ -1808,11 +2323,17 @@ impl SelfTestRunner {
 
                 // Then corrupt the molecular hash: one base17 digit changes, so the value keeps
                 // its shape and a parse error cannot stand in for the hash comparison.
-                let signed_hash = corrupted.molecular_hash.clone().context("signed molecule has no molecular hash")?;
+                let signed_hash = corrupted
+                    .molecular_hash
+                    .clone()
+                    .context("signed molecule has no molecular hash")?;
                 let first = signed_hash.chars().next().context("empty molecular hash")?;
                 let swapped = if first == '0' { '1' } else { '0' };
                 let corrupted_hash = format!("{swapped}{}", &signed_hash[first.len_utf8()..]);
-                anyhow::ensure!(corrupted_hash != signed_hash, "hash corruption changed nothing");
+                anyhow::ensure!(
+                    corrupted_hash != signed_hash,
+                    "hash corruption changed nothing"
+                );
                 corrupted.molecular_hash = Some(corrupted_hash);
 
                 let validation_result = corrupted.verify().await;
@@ -1837,7 +2358,8 @@ impl SelfTestRunner {
             }
 
             Ok::<bool, anyhow::Error>(all_negative_tests_passed)
-        }.await;
+        }
+        .await;
 
         // Handle any errors from the negative test cases
         match test_result {
@@ -1849,7 +2371,7 @@ impl SelfTestRunner {
                     error: None,
                 };
                 Ok(result)
-            },
+            }
             Err(error) => {
                 Logger::message(&format!("  ❌ ERROR: {error}"), colors::RED);
 
@@ -1875,7 +2397,10 @@ impl SelfTestRunner {
         // Round 1 generates molecules and does not cross-validate, so it holds no opinion
         // here and must not leave a verdict behind.
         if std::env::var("KNISHIO_DISABLE_CROSS_VALIDATION").unwrap_or_default() == "true" {
-            Logger::message("  ⏭️  Cross-validation disabled for Round 1 (molecule generation only)", colors::YELLOW);
+            Logger::message(
+                "  ⏭️  Cross-validation disabled for Round 1 (molecule generation only)",
+                colors::YELLOW,
+            );
             self.results.cross_validation = CrossValidationCoverage {
                 ran: false,
                 targets_expected: 0,
@@ -1886,12 +2411,24 @@ impl SelfTestRunner {
 
         // Canonical set mirrors requiredMoleculeKeys in sdks/canonical-test-keys.json.
         const REQUIRED_MOLECULE_TYPES: [&str; 7] = [
-            "metadata", "simpleTransfer", "complexTransfer", "tokenCreation",
-            "walletCreation", "shadowWalletClaim", "mlkem768",
+            "metadata",
+            "simpleTransfer",
+            "complexTransfer",
+            "tokenCreation",
+            "walletCreation",
+            "shadowWalletClaim",
+            "mlkem768",
         ];
         // the eight SDKs' results files (edge-kit/aggregate.mjs EXPECTED_LANES)
         const CANONICAL_RESULTS_FILES: [&str; 8] = [
-            "javascript", "typescript", "python", "php", "kotlin", "rust", "c", "cpp",
+            "javascript",
+            "typescript",
+            "python",
+            "php",
+            "kotlin",
+            "rust",
+            "c",
+            "cpp",
         ];
         const OWN_RESULTS_FILE: &str = "rust";
 
@@ -1899,7 +2436,8 @@ impl SelfTestRunner {
             std::env::var("KNISHIO_CROSS_VALIDATION_ONLY").unwrap_or_default() == "true";
         let results_dir = std::env::var("KNISHIO_SHARED_RESULTS")
             .unwrap_or_else(|_| "../shared-test-results".to_string());
-        let results_path = |name: &str| std::path::Path::new(&results_dir).join(format!("{name}-results.json"));
+        let results_path =
+            |name: &str| std::path::Path::new(&results_dir).join(format!("{name}-results.json"));
 
         // The expected peers are the seven canonical SDKs other than this one, whatever
         // else the directory holds: counting the files found let a missing peer shrink
@@ -1923,9 +2461,15 @@ impl SelfTestRunner {
                 // Zero peers in Round 2 means Round 2 did not happen: a hard failure. Absence
                 // of evidence must never be reported as evidence of compatibility.
                 if std::path::Path::new(&results_dir).exists() {
-                    Logger::message("  ❌ No peer SDK results found — nothing to cross-validate", colors::RED);
+                    Logger::message(
+                        "  ❌ No peer SDK results found — nothing to cross-validate",
+                        colors::RED,
+                    );
                 } else {
-                    Logger::message("  ❌ Shared results directory not found — cross-validation CANNOT run", colors::RED);
+                    Logger::message(
+                        "  ❌ Shared results directory not found — cross-validation CANNOT run",
+                        colors::RED,
+                    );
                 }
                 return Ok(Some(false));
             }
@@ -1948,20 +2492,34 @@ impl SelfTestRunner {
         for sdk_name in peers {
             let file_path = results_path(sdk_name);
             if !file_path.is_file() {
-                Logger::message(&format!("\n  ❌ {sdk_name}-results.json missing"), colors::RED);
+                Logger::message(
+                    &format!("\n  ❌ {sdk_name}-results.json missing"),
+                    colors::RED,
+                );
                 continue;
             }
 
-            Logger::message(&format!("\n  🧪 Validating {} SDK molecules:", sdk_name.to_uppercase()), colors::CYAN);
+            Logger::message(
+                &format!(
+                    "\n  🧪 Validating {} SDK molecules:",
+                    sdk_name.to_uppercase()
+                ),
+                colors::CYAN,
+            );
 
             // An unreadable peer file fails that peer; it must not abort the whole round.
             let parsed = fs::read_to_string(&file_path)
                 .map_err(anyhow::Error::from)
-                .and_then(|contents| serde_json::from_str::<Value>(&contents).map_err(anyhow::Error::from));
+                .and_then(|contents| {
+                    serde_json::from_str::<Value>(&contents).map_err(anyhow::Error::from)
+                });
             let other_results = match parsed {
                 Ok(value) => value,
                 Err(error) => {
-                    Logger::message(&format!("    ❌ Could not read {}: {error}", file_path.display()), colors::RED);
+                    Logger::message(
+                        &format!("    ❌ Could not read {}: {error}", file_path.display()),
+                        colors::RED,
+                    );
                     all_valid = false;
                     continue;
                 }
@@ -1985,7 +2543,11 @@ impl SelfTestRunner {
                 .collect();
             if !absent.is_empty() {
                 Logger::message(
-                    &format!("    ❌ {} published no molecule for: {}", sdk_name, absent.join(", ")),
+                    &format!(
+                        "    ❌ {} published no molecule for: {}",
+                        sdk_name,
+                        absent.join(", ")
+                    ),
                     colors::RED,
                 );
                 all_valid = false;
@@ -2001,13 +2563,20 @@ impl SelfTestRunner {
                 for (molecule_type, molecule_data) in molecules {
                     if molecule_type == "mlkem768" {
                         // Special handling for ML-KEM768 cross-SDK compatibility
-                        let validation_success = match self.validate_cross_sdk_mlkem768(molecule_data).await {
+                        let validation_success = match self
+                            .validate_cross_sdk_mlkem768(molecule_data)
+                            .await
+                        {
                             Ok(valid) => {
                                 Logger::test(&format!("{molecule_type} decryption"), valid, None);
                                 valid
                             }
                             Err(error) => {
-                                Logger::test(&format!("{molecule_type} decryption"), false, Some(&error.to_string()));
+                                Logger::test(
+                                    &format!("{molecule_type} decryption"),
+                                    false,
+                                    Some(&error.to_string()),
+                                );
                                 false
                             }
                         };
@@ -2018,13 +2587,20 @@ impl SelfTestRunner {
                         }
                     } else {
                         // Standard molecule validation for non-ML-KEM768 types
-                        let validation_success = match self.validate_cross_sdk_molecule(molecule_data, molecule_type).await {
+                        let validation_success = match self
+                            .validate_cross_sdk_molecule(molecule_data, molecule_type)
+                            .await
+                        {
                             Ok(valid) => {
                                 Logger::test(&format!("{molecule_type} molecule"), valid, None);
                                 valid
                             }
                             Err(error) => {
-                                Logger::test(&format!("{molecule_type} molecule"), false, Some(&error.to_string()));
+                                Logger::test(
+                                    &format!("{molecule_type} molecule"),
+                                    false,
+                                    Some(&error.to_string()),
+                                );
                                 false
                             }
                         };
@@ -2050,7 +2626,9 @@ impl SelfTestRunner {
 
         if !full_coverage {
             Logger::message(
-                &format!("\n  ❌ Incomplete coverage: validated {peers_validated}/{expected} peer SDKs"),
+                &format!(
+                    "\n  ❌ Incomplete coverage: validated {peers_validated}/{expected} peer SDKs"
+                ),
                 colors::RED,
             );
         }
@@ -2061,10 +2639,16 @@ impl SelfTestRunner {
 
         let compatible = all_valid && full_coverage;
         if compatible {
-            Logger::message("\n  ✅ All cross-SDK molecules validated successfully", colors::GREEN);
+            Logger::message(
+                "\n  ✅ All cross-SDK molecules validated successfully",
+                colors::GREEN,
+            );
             Logger::message("  ✅ Cross-SDK Compatible: YES", colors::GREEN);
         } else {
-            Logger::message("\n  ❌ Some cross-SDK molecules failed validation", colors::RED);
+            Logger::message(
+                "\n  ❌ Some cross-SDK molecules failed validation",
+                colors::RED,
+            );
             Logger::message("  ❌ Cross-SDK Compatible: NO", colors::RED);
         }
 
@@ -2076,20 +2660,27 @@ impl SelfTestRunner {
     ///
     /// This method reconstructs a Molecule from JSON and validates it using
     /// the Rust SDK's native validation methods, matching JavaScript SDK patterns.
-    async fn validate_cross_sdk_molecule(&self, molecule_data: &Value, molecule_type: &str) -> Result<bool> {
+    async fn validate_cross_sdk_molecule(
+        &self,
+        molecule_data: &Value,
+        molecule_type: &str,
+    ) -> Result<bool> {
         // Parse the JSON string containing the serialized molecule
-        let molecule_json_str = molecule_data.as_str()
+        let molecule_json_str = molecule_data
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("Molecule data is not a string"))?;
 
         // Use centralized fromJSON() method for clean deserialization (matching JavaScript SDK)
-        let molecule = Molecule::fromJSON(molecule_json_str)
-            .with_context(|| format!("Failed to deserialize {molecule_type} molecule using centralized fromJSON()"))?;
+        let molecule = Molecule::fromJSON(molecule_json_str).with_context(|| {
+            format!("Failed to deserialize {molecule_type} molecule using centralized fromJSON()")
+        })?;
 
         // Source wallet is automatically reconstructed by fromJSON() method
         let source_wallet = molecule.source_wallet.as_ref();
 
         // Use Rust SDK's native validation method
-        let is_valid = molecule.check(source_wallet)
+        let is_valid = molecule
+            .check(source_wallet)
             .with_context(|| format!("Validation failed for {molecule_type} molecule"))?;
 
         Ok(is_valid)
@@ -2101,14 +2692,16 @@ impl SelfTestRunner {
     /// data encrypted by other SDKs using our private key.
     async fn validate_cross_sdk_mlkem768(&self, mlkem_data: &Value) -> Result<bool> {
         // Parse the JSON string containing the ML-KEM768 data
-        let mlkem_json_str = mlkem_data.as_str()
+        let mlkem_json_str = mlkem_data
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("ML-KEM768 data is not a string"))?;
 
         let data: Value = serde_json::from_str(mlkem_json_str)
             .with_context(|| "Failed to parse ML-KEM768 data JSON")?;
 
         // Extract the original plaintext for comparison
-        let original_plaintext = data["originalPlaintext"].as_str()
+        let original_plaintext = data["originalPlaintext"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("Original plaintext missing"))?;
 
         // REAL CROSS-SDK CRYPTOGRAPHIC VALIDATION: Test actual encryption compatibility
@@ -2116,7 +2709,9 @@ impl SelfTestRunner {
         let test_config = self.config.get_value("tests.mlkem768").unwrap();
         let seed = test_config["seed"].as_str().unwrap_or("TESTSEED");
         let token = test_config["token"].as_str().unwrap_or("ENCRYPT");
-        let position = test_config["position"].as_str().unwrap_or("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+        let position = test_config["position"]
+            .as_str()
+            .unwrap_or("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
 
         let secret = generate_secret(seed);
         let our_wallet = Wallet::new(
@@ -2134,14 +2729,19 @@ impl SelfTestRunner {
         // wallet (all 8 SDKs share the keypair) and assert the plaintext — real decrypt-interop,
         // not the old weak encrypt-to-their-pubkey form.
         let enc = &data["encryptedData"];
-        let cipher_text = enc["cipherText"].as_str()
+        let cipher_text = enc["cipherText"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing cipherText in ML-KEM768 encryptedData"))?
             .to_string();
-        let encrypted_message = enc["encryptedMessage"].as_str()
+        let encrypted_message = enc["encryptedMessage"]
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing encryptedMessage in ML-KEM768 encryptedData"))?
             .to_string();
 
-        let em = EncryptedMessage { cipher_text, encrypted_message };
+        let em = EncryptedMessage {
+            cipher_text,
+            encrypted_message,
+        };
         match our_wallet.decrypt_message(&em).await {
             Ok(decrypted) => {
                 let valid = decrypted.as_str() == Some(original_plaintext);
@@ -2170,19 +2770,27 @@ impl SelfTestRunner {
         let results_path = format!("{shared_dir}/rust-results.json");
 
         // Create JSON structure matching other SDKs exactly
-        let json_output = serde_json::to_string_pretty(&self.results)
-            .context("Failed to serialize results")?;
+        let json_output =
+            serde_json::to_string_pretty(&self.results).context("Failed to serialize results")?;
 
         fs::write(&results_path, json_output)
             .with_context(|| format!("Cannot create results file: {results_path}"))?;
 
-        println!("\n{}📁 Results saved to: {}{}", colors::BLUE, results_path, colors::RESET);
+        println!(
+            "\n{}📁 Results saved to: {}{}",
+            colors::BLUE,
+            results_path,
+            colors::RESET
+        );
 
         Ok(())
     }
 
     fn display_summary(&self) {
-        Logger::message("\n═══════════════════════════════════════════", colors::BLUE);
+        Logger::message(
+            "\n═══════════════════════════════════════════",
+            colors::BLUE,
+        );
         Logger::message("            TEST SUMMARY REPORT", colors::BLUE);
         Logger::message("═══════════════════════════════════════════", colors::BLUE);
         Logger::message("", colors::RESET);
@@ -2195,28 +2803,70 @@ impl SelfTestRunner {
         let total_tests = 10;
         let mut passed_tests = 0;
         let mut skipped_tests = 0;
-        if self.results.tests.crypto.passed { passed_tests += 1; }
-        if self.results.tests.meta_creation.passed { passed_tests += 1; }
-        if self.results.tests.simple_transfer.passed { passed_tests += 1; }
-        if self.results.tests.complex_transfer.passed { passed_tests += 1; }
-        if self.results.tests.token_creation.passed { passed_tests += 1; }
-        if self.results.tests.wallet_creation.passed { passed_tests += 1; }
-        if self.results.tests.shadow_wallet_claim.passed { passed_tests += 1; }
+        if self.results.tests.crypto.passed {
+            passed_tests += 1;
+        }
+        if self.results.tests.meta_creation.passed {
+            passed_tests += 1;
+        }
+        if self.results.tests.simple_transfer.passed {
+            passed_tests += 1;
+        }
+        if self.results.tests.complex_transfer.passed {
+            passed_tests += 1;
+        }
+        if self.results.tests.token_creation.passed {
+            passed_tests += 1;
+        }
+        if self.results.tests.wallet_creation.passed {
+            passed_tests += 1;
+        }
+        if self.results.tests.shadow_wallet_claim.passed {
+            passed_tests += 1;
+        }
         if self.results.tests.buffer_family.passed {
             passed_tests += 1;
         } else if self.results.tests.buffer_family.skipped {
             skipped_tests += 1;
         }
-        if self.results.tests.mlkem768.passed { passed_tests += 1; }
-        if self.results.tests.negative_cases.passed { passed_tests += 1; }
+        if self.results.tests.mlkem768.passed {
+            passed_tests += 1;
+        }
+        if self.results.tests.negative_cases.passed {
+            passed_tests += 1;
+        }
 
         let failed_tests = total_tests - passed_tests - skipped_tests;
-        let color = if failed_tests == 0 { colors::GREEN } else { colors::RED };
-        println!("\n{}Tests Passed: {}/{}{}", color, passed_tests, total_tests, colors::RESET);
+        let color = if failed_tests == 0 {
+            colors::GREEN
+        } else {
+            colors::RED
+        };
+        println!(
+            "\n{}Tests Passed: {}/{}{}",
+            color,
+            passed_tests,
+            total_tests,
+            colors::RESET
+        );
         if skipped_tests > 0 {
-            println!("{}Tests Skipped: {}/{}{}", colors::YELLOW, skipped_tests, total_tests, colors::RESET);
+            println!(
+                "{}Tests Skipped: {}/{}{}",
+                colors::YELLOW,
+                skipped_tests,
+                total_tests,
+                colors::RESET
+            );
             if self.results.tests.buffer_family.skipped {
-                println!("  - bufferFamily: {}", self.results.tests.buffer_family.validation_error.as_deref().unwrap_or(""));
+                println!(
+                    "  - bufferFamily: {}",
+                    self.results
+                        .tests
+                        .buffer_family
+                        .validation_error
+                        .as_deref()
+                        .unwrap_or("")
+                );
             }
         }
 
@@ -2241,14 +2891,36 @@ impl SelfTestRunner {
             if !self.results.tests.shadow_wallet_claim.passed {
                 println!("  - shadowWalletClaim: Validation failed");
             }
-            if !self.results.tests.buffer_family.passed && !self.results.tests.buffer_family.skipped {
-                println!("  - bufferFamily: {}", self.results.tests.buffer_family.validation_error.as_deref().unwrap_or(""));
+            if !self.results.tests.buffer_family.passed && !self.results.tests.buffer_family.skipped
+            {
+                println!(
+                    "  - bufferFamily: {}",
+                    self.results
+                        .tests
+                        .buffer_family
+                        .validation_error
+                        .as_deref()
+                        .unwrap_or("")
+                );
             }
         }
 
-        let compat_color = if self.results.cross_sdk_compatible { colors::GREEN } else { colors::RED };
-        let compat_status = if self.results.cross_sdk_compatible { "✅ YES" } else { "❌ NO" };
-        println!("\n{}Cross-SDK Compatible: {}{}", compat_color, compat_status, colors::RESET);
+        let compat_color = if self.results.cross_sdk_compatible {
+            colors::GREEN
+        } else {
+            colors::RED
+        };
+        let compat_status = if self.results.cross_sdk_compatible {
+            "✅ YES"
+        } else {
+            "❌ NO"
+        };
+        println!(
+            "\n{}Cross-SDK Compatible: {}{}",
+            compat_color,
+            compat_status,
+            colors::RESET
+        );
 
         Logger::message("═══════════════════════════════════════════", colors::BLUE);
     }
@@ -2257,10 +2929,11 @@ impl SelfTestRunner {
 /* Modern Rust 2025 main function with proper error handling */
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut runner = SelfTestRunner::new()
-        .context("Failed to initialize test runner")?;
+    let mut runner = SelfTestRunner::new().context("Failed to initialize test runner")?;
 
-    runner.run_all_tests().await
+    runner
+        .run_all_tests()
+        .await
         .context("Test execution failed")?;
 
     Ok(())

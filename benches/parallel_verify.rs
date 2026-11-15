@@ -50,7 +50,11 @@ fn median(values: &[f64]) -> f64 {
     let mut v = values.to_vec();
     v.sort_by(f64::total_cmp);
     let n = v.len();
-    if n % 2 == 1 { v[n / 2] } else { (v[n / 2 - 1] + v[n / 2]) / 2.0 }
+    if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        (v[n / 2 - 1] + v[n / 2]) / 2.0
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -62,7 +66,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map_or("host", String::as_str)
         .to_string();
 
-    let fixture: Value = serde_json::from_str(include_str!("../tests/fixtures/served-molecules.json"))?;
+    let fixture: Value =
+        serde_json::from_str(include_str!("../tests/fixtures/served-molecules.json"))?;
     let sets = [("otsv1", &fixture["v1"]), ("otsv2", &fixture["v2"])];
 
     let nproc = std::thread::available_parallelism().map_or(1, |n| n.get());
@@ -71,10 +76,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     threads.dedup();
     let pools = threads
         .iter()
-        .map(|&t| ThreadPoolBuilder::new().num_threads(t).build().map(|p| (t, p)))
+        .map(|&t| {
+            ThreadPoolBuilder::new()
+                .num_threads(t)
+                .build()
+                .map(|p| (t, p))
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let backend = if knishio_client::kcore::available() { "kcore" } else { "pure" };
+    let backend = if knishio_client::kcore::available() {
+        "kcore"
+    } else {
+        "pure"
+    };
     println!(
         "PARBENCH-ENV label={label} backend={backend} nproc={nproc} utc={}",
         chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ")
@@ -85,7 +99,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             let refs = vec![molecule; m];
             let expected = sequential(&refs);
             let all_verified = expected.iter().all(|v| v.0);
-            let identical = pools.iter().all(|(_, pool)| pooled(pool, &refs) == expected);
+            let identical = pools
+                .iter()
+                .all(|(_, pool)| pooled(pool, &refs) == expected);
             if !all_verified || !identical {
                 println!("PARBENCH-CHECK identical=no ots={ots} M={m} verified={all_verified} parallel_equal={identical}");
                 std::process::exit(1);
@@ -95,7 +111,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("PARBENCH-CHECK identical=yes");
 
     // samples[set][m][0] = sequential, samples[set][m][1 + t] = pool t
-    let mut samples = vec![vec![vec![Vec::with_capacity(ROUNDS); 1 + pools.len()]; MOLECULES.len()]; sets.len()];
+    let mut samples =
+        vec![vec![vec![Vec::with_capacity(ROUNDS); 1 + pools.len()]; MOLECULES.len()]; sets.len()];
     for _ in 0..ROUNDS {
         for (s, (_, molecule)) in sets.iter().enumerate() {
             for (mi, &m) in MOLECULES.iter().enumerate() {

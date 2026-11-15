@@ -48,21 +48,21 @@ impl SecureEnclaveSecretStorageProvider {
     ///
     /// Fails closed if the Secure Enclave or Keychain is unavailable (e.g. non-Apple hardware,
     /// or process lacks the required keychain-access-groups entitlement).
-    pub fn new(
-        backend: Arc<dyn StorageBackend>,
-        alias: Option<&str>,
-    ) -> Result<Self> {
+    pub fn new(backend: Arc<dyn StorageBackend>, alias: Option<&str>) -> Result<Self> {
         let alias = alias.unwrap_or(DEFAULT_ALIAS).to_string();
         let record_key = format!("{RECORD_PREFIX}{alias}");
         let label = format!("{LABEL_PREFIX}{alias}");
 
         let (key, passphrase) = match backend.get_item(&record_key)? {
             Some(raw) => {
-                let record: SecureEnclaveKekRecord = serde_json::from_str(&raw)
-                    .map_err(|e| KnishIOError::SecretStorage(format!("Corrupted Secure Enclave KEK record: {e}")))?;
+                let record: SecureEnclaveKekRecord = serde_json::from_str(&raw).map_err(|e| {
+                    KnishIOError::SecretStorage(format!("Corrupted Secure Enclave KEK record: {e}"))
+                })?;
 
                 if record.wrapped_passphrase.is_empty() {
-                    return Err(KnishIOError::SecretStorage("Corrupted Secure Enclave KEK record".to_string()));
+                    return Err(KnishIOError::SecretStorage(
+                        "Corrupted Secure Enclave KEK record".to_string(),
+                    ));
                 }
 
                 // Look up key in DataProtectionKeychain by label
@@ -75,27 +75,40 @@ impl SecureEnclaveSecretStorageProvider {
                         KnishIOError::SecretStorage(format!("Secure Enclave unavailable: {e}"))
                     })?;
 
-                let found_key = search.into_iter().find_map(|r| {
-                    if let SearchResult::Ref(Reference::Key(k)) = r {
-                        Some(k)
-                    } else {
-                        None
-                    }
-                }).ok_or_else(|| {
-                    KnishIOError::SecretStorage(format!("Secure Enclave key not found in keychain for alias {alias}"))
+                let found_key = search
+                    .into_iter()
+                    .find_map(|r| {
+                        if let SearchResult::Ref(Reference::Key(k)) = r {
+                            Some(k)
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or_else(|| {
+                        KnishIOError::SecretStorage(format!(
+                            "Secure Enclave key not found in keychain for alias {alias}"
+                        ))
+                    })?;
+
+                let ct = BASE64.decode(&record.wrapped_passphrase).map_err(|e| {
+                    KnishIOError::DecryptionFailed(format!(
+                        "Corrupted wrapped passphrase base64: {e}"
+                    ))
                 })?;
 
-                let ct = BASE64.decode(&record.wrapped_passphrase)
-                    .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted wrapped passphrase base64: {e}")))?;
-
-                let pt = found_key.decrypt_data(
-                    Algorithm::ECIESEncryptionCofactorVariableIVX963SHA256AESGCM,
-                    &ct,
-                ).map_err(|e| KnishIOError::DecryptionFailed(format!("Secure Enclave unwrap failed: {e}")))?;
+                let pt = found_key
+                    .decrypt_data(
+                        Algorithm::ECIESEncryptionCofactorVariableIVX963SHA256AESGCM,
+                        &ct,
+                    )
+                    .map_err(|e| {
+                        KnishIOError::DecryptionFailed(format!("Secure Enclave unwrap failed: {e}"))
+                    })?;
 
                 let pass = with_secure_bytes(pt.to_vec(), |bytes| {
-                    String::from_utf8(bytes.to_vec())
-                        .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 passphrase: {e}")))
+                    String::from_utf8(bytes.to_vec()).map_err(|e| {
+                        KnishIOError::DecryptionFailed(format!("Invalid UTF-8 passphrase: {e}"))
+                    })
                 })?;
 
                 (found_key, Zeroizing::new(pass))
@@ -126,7 +139,9 @@ impl SecureEnclaveSecretStorageProvider {
                 })?;
 
                 let pub_key = key.public_key().ok_or_else(|| {
-                    KnishIOError::SecretStorage("Failed to extract Secure Enclave public key".to_string())
+                    KnishIOError::SecretStorage(
+                        "Failed to extract Secure Enclave public key".to_string(),
+                    )
                 })?;
 
                 // Generate random 32-byte passphrase
@@ -134,10 +149,16 @@ impl SecureEnclaveSecretStorageProvider {
                 rand::rng().fill_bytes(&mut random_bytes);
                 let pass = BASE64.encode(random_bytes);
 
-                let ct = pub_key.encrypt_data(
-                    Algorithm::ECIESEncryptionCofactorVariableIVX963SHA256AESGCM,
-                    pass.as_bytes(),
-                ).map_err(|e| KnishIOError::SecretStorage(format!("Secure Enclave encryption failed: {e}")))?;
+                let ct = pub_key
+                    .encrypt_data(
+                        Algorithm::ECIESEncryptionCofactorVariableIVX963SHA256AESGCM,
+                        pass.as_bytes(),
+                    )
+                    .map_err(|e| {
+                        KnishIOError::SecretStorage(format!(
+                            "Secure Enclave encryption failed: {e}"
+                        ))
+                    })?;
 
                 let record = SecureEnclaveKekRecord {
                     version: 1,
@@ -145,8 +166,9 @@ impl SecureEnclaveSecretStorageProvider {
                     wrapped_passphrase: BASE64.encode(ct),
                 };
 
-                let record_json = serde_json::to_string(&record)
-                    .map_err(|e| KnishIOError::SecretStorage(format!("Serialization failed: {e}")))?;
+                let record_json = serde_json::to_string(&record).map_err(|e| {
+                    KnishIOError::SecretStorage(format!("Serialization failed: {e}"))
+                })?;
 
                 backend.set_item(&record_key, record_json)?;
 
@@ -216,10 +238,14 @@ impl SecretStorageProvider for SecureEnclaveSecretStorageProvider {
         options: StorageOptions,
     ) -> Result<()> {
         if bundle_hash.is_empty() {
-            return Err(KnishIOError::SecretStorage("Bundle hash cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Bundle hash cannot be empty".to_string(),
+            ));
         }
         if secret.is_empty() {
-            return Err(KnishIOError::SecretStorage("Secret cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Secret cannot be empty".to_string(),
+            ));
         }
         Self::validate_store_options(&options)?;
 
@@ -246,11 +272,14 @@ impl SecretStorageProvider for SecureEnclaveSecretStorageProvider {
                 hardware_backed: false,
                 provider_type: "aes-gcm".to_string(),
             };
-            let recovery_payload = envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
+            let recovery_payload =
+                envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
             let recovery_json = serde_json::to_string(&recovery_payload)
                 .map_err(|e| KnishIOError::SecretStorage(format!("Serialization failed: {e}")))?;
-            self.backend
-                .set_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"), recovery_json)?;
+            self.backend.set_item(
+                &format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"),
+                recovery_json,
+            )?;
         }
 
         Ok(())
@@ -268,27 +297,35 @@ impl SecretStorageProvider for SecureEnclaveSecretStorageProvider {
             ));
         }
 
-        let raw = match self.backend.get_item(&format!("{KEY_PREFIX}{bundle_hash}"))? {
+        let raw = match self
+            .backend
+            .get_item(&format!("{KEY_PREFIX}{bundle_hash}"))?
+        {
             Some(val) => val,
             None => return Ok(None),
         };
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted payload format: {e}")))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted payload format: {e}"))
+        })?;
 
         let decrypted = envelope::open(&payload, &self.passphrase)?;
 
         with_secure_bytes(decrypted.to_vec(), |bytes| {
-            String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {e}")))
+            String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {e}"))
+            })
         })
         .map(Some)
     }
 
     async fn delete_secret(&self, bundle_hash: &str) -> Result<bool> {
-        let removed_primary = self.backend
+        let removed_primary = self
+            .backend
             .remove_item(&format!("{KEY_PREFIX}{bundle_hash}"))?;
-        let _ = self.backend.remove_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"));
+        let _ = self
+            .backend
+            .remove_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"));
         Ok(removed_primary)
     }
 
@@ -320,32 +357,44 @@ impl SecretStorageProvider for SecureEnclaveSecretStorageProvider {
         options: StorageOptions,
     ) -> Result<()> {
         if bundle_hash.is_empty() {
-            return Err(KnishIOError::SecretStorage("Bundle hash cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Bundle hash cannot be empty".to_string(),
+            ));
         }
         if recovery_passphrase.is_empty() {
-            return Err(KnishIOError::SecretStorage("Recovery passphrase cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Recovery passphrase cannot be empty".to_string(),
+            ));
         }
 
         let raw = self
             .backend
             .get_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"))?
-            .ok_or_else(|| KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}")))?;
+            .ok_or_else(|| {
+                KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}"))
+            })?;
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}")))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}"))
+        })?;
 
         let decrypted = envelope::open(&payload, recovery_passphrase)?;
 
         let secret_str = with_secure_bytes(decrypted.to_vec(), |bytes| {
-            String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext in recovery envelope: {e}")))
+            String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!(
+                    "Invalid UTF-8 plaintext in recovery envelope: {e}"
+                ))
+            })
         })?;
 
         let mut reenroll_options = options;
         if reenroll_options.recovery_passphrase.is_none() {
-            reenroll_options.recovery_passphrase = Some(Zeroizing::new(recovery_passphrase.to_string()));
+            reenroll_options.recovery_passphrase =
+                Some(Zeroizing::new(recovery_passphrase.to_string()));
         }
 
-        self.store_secret(bundle_hash, &secret_str, reenroll_options).await
+        self.store_secret(bundle_hash, &secret_str, reenroll_options)
+            .await
     }
 }

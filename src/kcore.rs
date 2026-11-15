@@ -161,26 +161,42 @@ mod tests {
     fn chains_hex_matches_the_sdk_loop() {
         for case in 0..20usize {
             let n = case % 16 + 1;
-            let chunks: String = (0..n).map(|j| hex_of(&format!("kcore-chain-{case}-{j}"), 512)).collect();
+            let chunks: String = (0..n)
+                .map(|j| hex_of(&format!("kcore-chain-{case}-{j}"), 512))
+                .collect();
             let counts: Vec<usize> = (0..n).map(|j| (case * 7 + j * 3) % 17).collect();
             let sdk = sdk_chains(&chunks, &counts);
-            assert_eq!(chains_hex(&chunks, &counts), Some(sdk), "case {case}: n={n} counts={counts:?}");
+            assert_eq!(
+                chains_hex(&chunks, &counts),
+                Some(sdk),
+                "case {case}: n={n} counts={counts:?}"
+            );
         }
     }
 
     #[test]
     fn chains_hex_accepts_the_boundary_count_and_chain_number() {
-        let chunks: String = (0..MAX_CHAINS).map(|j| hex_of(&format!("kcore-edge-{j}"), 512)).collect();
+        let chunks: String = (0..MAX_CHAINS)
+            .map(|j| hex_of(&format!("kcore-edge-{j}"), 512))
+            .collect();
         let mut counts = vec![0usize; MAX_CHAINS];
         counts[0] = MAX_COUNT;
-        assert_eq!(chains_hex(&chunks, &counts), Some(sdk_chains(&chunks, &counts)), "64 chains, count 64");
+        assert_eq!(
+            chains_hex(&chunks, &counts),
+            Some(sdk_chains(&chunks, &counts)),
+            "64 chains, count 64"
+        );
     }
 
     #[test]
     fn chains_hex_refuses_inputs_the_sdk_loop_must_handle() {
         let chunk = hex_of("kcore-refuse", 512);
         assert_eq!(chains_hex(&chunk[..127], &[1]), None, "127-character chunk");
-        assert_eq!(chains_hex(&chunk.to_uppercase(), &[1]), None, "uppercase hex");
+        assert_eq!(
+            chains_hex(&chunk.to_uppercase(), &[1]),
+            None,
+            "uppercase hex"
+        );
         let mut not_hex = chunk.clone();
         not_hex.replace_range(0..1, "g");
         assert_eq!(chains_hex(&not_hex, &[1]), None, "non-hex character");
@@ -197,14 +213,21 @@ mod tests {
         assert_eq!(chains_hex_signed(&chunk, [65]), None, "count 65");
         let many: String = std::iter::repeat_n(chunk.as_str(), 65).collect();
         assert_eq!(chains_hex_signed(&many, [1; 65]), None, "65 chains");
-        assert_eq!(chains_hex_signed(&chunk, [3]), Some(sdk_chains(&chunk, &[3])));
+        assert_eq!(
+            chains_hex_signed(&chunk, [3]),
+            Some(sdk_chains(&chunk, &[3]))
+        );
     }
 
     #[test]
     fn wots_address_matches_the_sdk_loop() {
         for case in 0..20 {
             let key = hex_of(&format!("kcore-key-{case}"), 8192);
-            assert_eq!(wots_address(&key), Some(wots_address_sdk(&key)), "case {case}");
+            assert_eq!(
+                wots_address(&key),
+                Some(wots_address_sdk(&key)),
+                "case {case}"
+            );
         }
     }
 
@@ -219,7 +242,11 @@ mod tests {
     fn wots_address_v2_matches_the_sdk_loop() {
         for case in 0..20 {
             let key = hex_of(&format!("kcore-key-v2-{case}"), 32768);
-            assert_eq!(wots_address_v2(&key), Some(wots_address_v2_sdk(&key)), "case {case}");
+            assert_eq!(
+                wots_address_v2(&key),
+                Some(wots_address_v2_sdk(&key)),
+                "case {case}"
+            );
         }
     }
 
@@ -229,6 +256,10 @@ mod tests {
         assert_eq!(wots_address_v2(&key[..8191]), None, "8191 characters");
         assert_eq!(wots_address_v2(&key.to_uppercase()), None, "uppercase hex");
         assert_eq!(wots_address_v2(&key[..2048]), None, "a 2048-character key");
-        assert_eq!(wots_address(&key), None, "an 8192-character key to the v1 entry point");
+        assert_eq!(
+            wots_address(&key),
+            None,
+            "an 8192-character key to the v1 entry point"
+        );
     }
 }

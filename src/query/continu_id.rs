@@ -146,7 +146,7 @@ mod tests {
     fn test_query_string() {
         let query = QueryContinuId::new("test-bundle");
         let query_string = query.get_query();
-        
+
         // Check that the query string contains expected fields
         assert!(query_string.contains("ContinuId(bundle: $bundle, token: $token)"));
         assert!(query_string.contains("address"));

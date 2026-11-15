@@ -2,10 +2,10 @@
 //!
 //! Equivalent to Condition.js in the JavaScript SDK
 
+use super::{FromJsonObject, RuleArgumentError, ToJsonObject};
+use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::error::Result;
-use super::{RuleArgumentError, FromJsonObject, ToJsonObject};
 
 /// Condition for rule evaluation
 ///
@@ -42,8 +42,9 @@ impl Condition {
         // Validate that all parameters are provided (equivalent to JS validation)
         if key.is_empty() || value.is_empty() || comparison.is_empty() {
             return Err(RuleArgumentError::new(
-                "Condition::new() - not all class parameters are initialised!"
-            ).into());
+                "Condition::new() - not all class parameters are initialised!",
+            )
+            .into());
         }
 
         Ok(Self {
@@ -65,17 +66,20 @@ impl Condition {
     ///
     /// New Condition instance
     pub fn from_object(object: &Value) -> Result<Self> {
-        let key = object.get("key")
+        let key = object
+            .get("key")
             .and_then(|v| v.as_str())
             .ok_or_else(|| RuleArgumentError::new("Missing or invalid 'key' field"))?
             .to_string();
 
-        let value = object.get("value")
+        let value = object
+            .get("value")
             .and_then(|v| v.as_str())
             .ok_or_else(|| RuleArgumentError::new("Missing or invalid 'value' field"))?
             .to_string();
 
-        let comparison = object.get("comparison")
+        let comparison = object
+            .get("comparison")
             .and_then(|v| v.as_str())
             .ok_or_else(|| RuleArgumentError::new("Missing or invalid 'comparison' field"))?
             .to_string();
@@ -118,11 +122,8 @@ mod tests {
 
     #[test]
     fn test_condition_new() {
-        let condition = Condition::new(
-            "balance".to_string(),
-            "100".to_string(),
-            ">=".to_string()
-        ).unwrap();
+        let condition =
+            Condition::new("balance".to_string(), "100".to_string(), ">=".to_string()).unwrap();
 
         assert_eq!(condition.key, "balance");
         assert_eq!(condition.value, "100");
@@ -131,38 +132,35 @@ mod tests {
 
     #[test]
     fn test_condition_new_empty_key() {
-        let result = Condition::new(
-            "".to_string(),
-            "100".to_string(),
-            ">=".to_string()
-        );
+        let result = Condition::new("".to_string(), "100".to_string(), ">=".to_string());
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not all class parameters are initialised"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("not all class parameters are initialised"));
     }
 
     #[test]
     fn test_condition_new_empty_value() {
-        let result = Condition::new(
-            "balance".to_string(),
-            "".to_string(),
-            ">=".to_string()
-        );
+        let result = Condition::new("balance".to_string(), "".to_string(), ">=".to_string());
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not all class parameters are initialised"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("not all class parameters are initialised"));
     }
 
     #[test]
     fn test_condition_new_empty_comparison() {
-        let result = Condition::new(
-            "balance".to_string(),
-            "100".to_string(),
-            "".to_string()
-        );
+        let result = Condition::new("balance".to_string(), "100".to_string(), "".to_string());
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not all class parameters are initialised"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("not all class parameters are initialised"));
     }
 
     #[test]
@@ -189,7 +187,10 @@ mod tests {
 
         let result = Condition::from_object(&object);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing or invalid 'key' field"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Missing or invalid 'key' field"));
     }
 
     #[test]
@@ -201,7 +202,10 @@ mod tests {
 
         let result = Condition::from_object(&object);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing or invalid 'value' field"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Missing or invalid 'value' field"));
     }
 
     #[test]
@@ -213,16 +217,16 @@ mod tests {
 
         let result = Condition::from_object(&object);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing or invalid 'comparison' field"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Missing or invalid 'comparison' field"));
     }
 
     #[test]
     fn test_condition_to_json() {
-        let condition = Condition::new(
-            "amount".to_string(),
-            "50".to_string(),
-            ">".to_string()
-        ).unwrap();
+        let condition =
+            Condition::new("amount".to_string(), "50".to_string(), ">".to_string()).unwrap();
 
         let json_value = condition.to_json();
 
@@ -233,11 +237,8 @@ mod tests {
 
     #[test]
     fn test_condition_serialization() {
-        let condition = Condition::new(
-            "status".to_string(),
-            "active".to_string(),
-            "==".to_string()
-        ).unwrap();
+        let condition =
+            Condition::new("status".to_string(), "active".to_string(), "==".to_string()).unwrap();
 
         // Test JSON serialization
         let json_str = serde_json::to_string(&condition).unwrap();
@@ -275,7 +276,7 @@ mod tests {
         let valid_condition = Condition::new(
             "test_key".to_string(),
             "test_value".to_string(),
-            "test_comparison".to_string()
+            "test_comparison".to_string(),
         );
         assert!(valid_condition.is_ok());
 

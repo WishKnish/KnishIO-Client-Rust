@@ -21,10 +21,10 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use tss_esapi::attributes::{ObjectAttributesBuilder, SessionAttributesBuilder};
 use tss_esapi::constants::{PropertyTag, SessionType};
+use tss_esapi::handles::SessionHandle;
 use tss_esapi::interface_types::algorithm::{HashingAlgorithm, PublicAlgorithm};
 use tss_esapi::interface_types::ecc::EccCurve;
 use tss_esapi::interface_types::resource_handles::Hierarchy;
-use tss_esapi::handles::SessionHandle;
 use tss_esapi::interface_types::session_handles::{AuthSession, PolicySession};
 use tss_esapi::structures::{
     Auth, Digest, EccPoint, EccScheme, KeyDerivationFunctionScheme, KeyedHashScheme,
@@ -86,17 +86,28 @@ impl Default for Tpm2Policy {
 impl Tpm2Policy {
     /// Create a new TPM 2.0 PCR policy
     pub fn new(pcr_bank: HashingAlgorithm, pcrs: Vec<u8>, auth: Option<Zeroizing<String>>) -> Self {
-        Self { pcr_bank, pcrs, auth }
+        Self {
+            pcr_bank,
+            pcrs,
+            auth,
+        }
     }
 
     /// Create a new TPM 2.0 PCR policy with specified PCR slots
     pub fn with_pcrs(pcr_bank: HashingAlgorithm, pcrs: Vec<u8>) -> Self {
-        Self { pcr_bank, pcrs, auth: None }
+        Self {
+            pcr_bank,
+            pcrs,
+            auth: None,
+        }
     }
 }
 
 /// Build a PcrSelectionList from a bank and PCR indices
-pub fn build_pcr_selection_list(pcr_bank: HashingAlgorithm, pcrs: &[u8]) -> Result<PcrSelectionList> {
+pub fn build_pcr_selection_list(
+    pcr_bank: HashingAlgorithm,
+    pcrs: &[u8],
+) -> Result<PcrSelectionList> {
     let mut slots = Vec::new();
     for &pcr in pcrs {
         if pcr >= 32 {
@@ -218,7 +229,9 @@ fn build_primary_template() -> Result<Public> {
         .with_restricted(true)
         .with_decrypt(true)
         .build()
-        .map_err(|e| KnishIOError::SecretStorage(format!("Primary ObjectAttributes failed: {e}")))?;
+        .map_err(|e| {
+            KnishIOError::SecretStorage(format!("Primary ObjectAttributes failed: {e}"))
+        })?;
 
     let ecc_params = PublicEccParametersBuilder::new()
         .with_ecc_scheme(EccScheme::Null)
@@ -247,7 +260,9 @@ fn build_keyed_hash_template(policy_digest: Option<Digest>, has_auth: bool) -> R
         .with_fixed_parent(true)
         .with_user_with_auth(policy_digest.is_none() || has_auth)
         .build()
-        .map_err(|e| KnishIOError::SecretStorage(format!("KeyedHash ObjectAttributes failed: {e}")))?;
+        .map_err(|e| {
+            KnishIOError::SecretStorage(format!("KeyedHash ObjectAttributes failed: {e}"))
+        })?;
 
     let mut builder = PublicBuilder::new()
         .with_public_algorithm(PublicAlgorithm::KeyedHash)
@@ -338,15 +353,19 @@ impl Tpm2SecretStorageProvider {
                 let primary_template = build_primary_template()?;
                 let primary_res = context
                     .create_primary(Hierarchy::Owner, primary_template, None, None, None, None)
-                    .map_err(|e| KnishIOError::SecretStorage(format!("TPM create_primary failed: {e}")))?;
+                    .map_err(|e| {
+                        KnishIOError::SecretStorage(format!("TPM create_primary failed: {e}"))
+                    })?;
                 let primary_handle = primary_res.key_handle;
 
                 let mut random_bytes = [0u8; 32];
                 rand::rng().fill_bytes(&mut random_bytes);
                 let passphrase = BASE64.encode(random_bytes);
 
-                let sensitive = SensitiveData::try_from(passphrase.as_bytes().to_vec())
-                    .map_err(|e| KnishIOError::SecretStorage(format!("SensitiveData failed: {e}")))?;
+                let sensitive =
+                    SensitiveData::try_from(passphrase.as_bytes().to_vec()).map_err(|e| {
+                        KnishIOError::SecretStorage(format!("SensitiveData failed: {e}"))
+                    })?;
 
                 let (keyed_hash_template, auth_value) = if let Some(policy) = &self.policy {
                     let pcrs = if policy.pcrs.is_empty() {
@@ -356,44 +375,80 @@ impl Tpm2SecretStorageProvider {
                     };
                     let pcr_selection_list = build_pcr_selection_list(policy.pcr_bank, pcrs)?;
 
-                    let policy_digest = context.execute_without_session(|ctx| -> Result<Digest> {
-                        let trial_auth_session = ctx
-                            .start_auth_session(
-                                None,
-                                None,
-                                None,
-                                SessionType::Trial,
-                                SymmetricDefinition::AES_256_CFB,
-                                policy.pcr_bank,
+                    let policy_digest =
+                        context.execute_without_session(|ctx| -> Result<Digest> {
+                            let trial_auth_session = ctx
+                                .start_auth_session(
+                                    None,
+                                    None,
+                                    None,
+                                    SessionType::Trial,
+                                    SymmetricDefinition::AES_256_CFB,
+                                    policy.pcr_bank,
+                                )
+                                .map_err(|e| {
+                                    KnishIOError::SecretStorage(format!(
+                                        "Start trial auth session failed: {e}"
+                                    ))
+                                })?
+                                .ok_or_else(|| {
+                                    KnishIOError::SecretStorage(
+                                        "Start trial auth session returned None".into(),
+                                    )
+                                })?;
+
+                            let (trial_attrs, trial_attrs_mask) = SessionAttributesBuilder::new()
+                                .with_decrypt(true)
+                                .with_encrypt(true)
+                                .build();
+                            let _ = ctx.tr_sess_set_attributes(
+                                trial_auth_session,
+                                trial_attrs,
+                                trial_attrs_mask,
+                            );
+
+                            let trial_policy_session = PolicySession::try_from(trial_auth_session)
+                                .map_err(|e| {
+                                    KnishIOError::SecretStorage(format!(
+                                        "Convert to PolicySession failed: {e}"
+                                    ))
+                                })?;
+
+                            ctx.policy_pcr(
+                                trial_policy_session,
+                                Digest::default(),
+                                pcr_selection_list,
                             )
-                            .map_err(|e| KnishIOError::SecretStorage(format!("Start trial auth session failed: {e}")))?
-                            .ok_or_else(|| KnishIOError::SecretStorage("Start trial auth session returned None".into()))?;
+                            .map_err(|e| {
+                                KnishIOError::SecretStorage(format!("Trial policy_pcr failed: {e}"))
+                            })?;
 
-                        let (trial_attrs, trial_attrs_mask) = SessionAttributesBuilder::new()
-                            .with_decrypt(true)
-                            .with_encrypt(true)
-                            .build();
-                        let _ = ctx.tr_sess_set_attributes(trial_auth_session, trial_attrs, trial_attrs_mask);
+                            let digest =
+                                ctx.policy_get_digest(trial_policy_session).map_err(|e| {
+                                    KnishIOError::SecretStorage(format!(
+                                        "Trial policy_get_digest failed: {e}"
+                                    ))
+                                })?;
 
-                        let trial_policy_session = PolicySession::try_from(trial_auth_session)
-                            .map_err(|e| KnishIOError::SecretStorage(format!("Convert to PolicySession failed: {e}")))?;
+                            let _ =
+                                ctx.flush_context(SessionHandle::from(trial_policy_session).into());
 
-                        ctx.policy_pcr(trial_policy_session, Digest::default(), pcr_selection_list)
-                            .map_err(|e| KnishIOError::SecretStorage(format!("Trial policy_pcr failed: {e}")))?;
+                            Ok(digest)
+                        })?;
 
-                        let digest = ctx
-                            .policy_get_digest(trial_policy_session)
-                            .map_err(|e| KnishIOError::SecretStorage(format!("Trial policy_get_digest failed: {e}")))?;
+                    let auth = policy
+                        .auth
+                        .as_ref()
+                        .map(|a| Auth::try_from(a.as_bytes().to_vec()))
+                        .transpose()
+                        .map_err(|e| {
+                            KnishIOError::SecretStorage(format!("Invalid auth value: {e}"))
+                        })?;
 
-                        let _ = ctx.flush_context(SessionHandle::from(trial_policy_session).into());
-
-                        Ok(digest)
-                    })?;
-
-                    let auth = policy.auth.as_ref().map(|a| Auth::try_from(a.as_bytes().to_vec())).transpose()
-                        .map_err(|e| KnishIOError::SecretStorage(format!("Invalid auth value: {e}")))?;
-
-                    (build_keyed_hash_template(Some(policy_digest), auth.is_some())?, auth)
+                    (
+                        build_keyed_hash_template(Some(policy_digest), auth.is_some())?,
+                        auth,
+                    )
                 } else {
                     (build_keyed_hash_template(None, false)?, None)
                 };
@@ -409,15 +464,13 @@ impl Tpm2SecretStorageProvider {
 
                 let _ = context.flush_context(primary_handle.into());
 
-                let create_res = create_res
-                    .map_err(|e| KnishIOError::SecretStorage(format!("TPM create sealed object failed: {e}")))?;
+                let create_res = create_res.map_err(|e| {
+                    KnishIOError::SecretStorage(format!("TPM create sealed object failed: {e}"))
+                })?;
 
-                let pub_b64 = BASE64.encode(
-                    create_res
-                        .out_public
-                        .marshall()
-                        .map_err(|e| KnishIOError::SecretStorage(format!("Marshall public failed: {e}")))?,
-                );
+                let pub_b64 = BASE64.encode(create_res.out_public.marshall().map_err(|e| {
+                    KnishIOError::SecretStorage(format!("Marshall public failed: {e}"))
+                })?);
                 let priv_b64 = BASE64.encode(create_res.out_private.value());
 
                 let mut record = serde_json::json!({
@@ -451,39 +504,45 @@ impl Tpm2SecretStorageProvider {
             }
             Some(raw) => {
                 // Subsequent use: load sealed object under deterministic primary, unseal
-                let json: serde_json::Value = serde_json::from_str(&raw)
-                    .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted TPM record format: {e}")))?;
+                let json: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+                    KnishIOError::DecryptionFailed(format!("Corrupted TPM record format: {e}"))
+                })?;
 
-                let pub_b64 = json["public"]
-                    .as_str()
-                    .ok_or_else(|| KnishIOError::DecryptionFailed("Missing public in TPM record".into()))?;
-                let priv_b64 = json["private"]
-                    .as_str()
-                    .ok_or_else(|| KnishIOError::DecryptionFailed("Missing private in TPM record".into()))?;
+                let pub_b64 = json["public"].as_str().ok_or_else(|| {
+                    KnishIOError::DecryptionFailed("Missing public in TPM record".into())
+                })?;
+                let priv_b64 = json["private"].as_str().ok_or_else(|| {
+                    KnishIOError::DecryptionFailed("Missing private in TPM record".into())
+                })?;
 
-                let pub_bytes = BASE64
-                    .decode(pub_b64)
-                    .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid public base64: {e}")))?;
-                let priv_bytes = BASE64
-                    .decode(priv_b64)
-                    .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid private base64: {e}")))?;
+                let pub_bytes = BASE64.decode(pub_b64).map_err(|e| {
+                    KnishIOError::DecryptionFailed(format!("Invalid public base64: {e}"))
+                })?;
+                let priv_bytes = BASE64.decode(priv_b64).map_err(|e| {
+                    KnishIOError::DecryptionFailed(format!("Invalid private base64: {e}"))
+                })?;
 
-                let public = Public::unmarshall(&pub_bytes)
-                    .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted public TPM data: {e}")))?;
-                let private = Private::try_from(priv_bytes)
-                    .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted private TPM data: {e}")))?;
+                let public = Public::unmarshall(&pub_bytes).map_err(|e| {
+                    KnishIOError::DecryptionFailed(format!("Corrupted public TPM data: {e}"))
+                })?;
+                let private = Private::try_from(priv_bytes).map_err(|e| {
+                    KnishIOError::DecryptionFailed(format!("Corrupted private TPM data: {e}"))
+                })?;
 
                 let primary_template = build_primary_template()?;
                 let primary_res = context
                     .create_primary(Hierarchy::Owner, primary_template, None, None, None, None)
-                    .map_err(|e| KnishIOError::SecretStorage(format!("TPM create_primary failed: {e}")))?;
+                    .map_err(|e| {
+                        KnishIOError::SecretStorage(format!("TPM create_primary failed: {e}"))
+                    })?;
                 let primary_handle = primary_res.key_handle;
 
                 let load_res = context.load(primary_handle, private, public);
                 let _ = context.flush_context(primary_handle.into());
 
-                let loaded_handle = load_res
-                    .map_err(|e| KnishIOError::DecryptionFailed(format!("TPM load sealed object failed: {e}")))?;
+                let loaded_handle = load_res.map_err(|e| {
+                    KnishIOError::DecryptionFailed(format!("TPM load sealed object failed: {e}"))
+                })?;
 
                 let policy_info = json.get("policy");
                 let unsealed = if let Some(p_val) = policy_info {
@@ -497,38 +556,64 @@ impl Tpm2SecretStorageProvider {
                     let pcrs: Vec<u8> = p_val
                         .get("pcrs")
                         .and_then(|p| p.as_array())
-                        .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|n| n as u8)).collect())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_u64().map(|n| n as u8))
+                                .collect()
+                        })
                         .unwrap_or_else(|| vec![7]);
 
                     let pcr_selection_list = build_pcr_selection_list(bank, &pcrs)?;
 
-                    let policy_session = context.execute_without_session(|ctx| -> Result<PolicySession> {
-                        let auth_session = ctx
-                            .start_auth_session(
-                                None,
-                                None,
-                                None,
-                                SessionType::Policy,
-                                SymmetricDefinition::AES_256_CFB,
-                                bank,
-                            )
-                            .map_err(|e| KnishIOError::SecretStorage(format!("Start policy session failed: {e}")))?
-                            .ok_or_else(|| KnishIOError::SecretStorage("Start policy session returned None".into()))?;
+                    let policy_session =
+                        context.execute_without_session(|ctx| -> Result<PolicySession> {
+                            let auth_session = ctx
+                                .start_auth_session(
+                                    None,
+                                    None,
+                                    None,
+                                    SessionType::Policy,
+                                    SymmetricDefinition::AES_256_CFB,
+                                    bank,
+                                )
+                                .map_err(|e| {
+                                    KnishIOError::SecretStorage(format!(
+                                        "Start policy session failed: {e}"
+                                    ))
+                                })?
+                                .ok_or_else(|| {
+                                    KnishIOError::SecretStorage(
+                                        "Start policy session returned None".into(),
+                                    )
+                                })?;
 
-                        let (session_attrs, session_attrs_mask) = SessionAttributesBuilder::new()
-                            .with_decrypt(true)
-                            .with_encrypt(true)
-                            .build();
-                        let _ = ctx.tr_sess_set_attributes(auth_session, session_attrs, session_attrs_mask);
+                            let (session_attrs, session_attrs_mask) =
+                                SessionAttributesBuilder::new()
+                                    .with_decrypt(true)
+                                    .with_encrypt(true)
+                                    .build();
+                            let _ = ctx.tr_sess_set_attributes(
+                                auth_session,
+                                session_attrs,
+                                session_attrs_mask,
+                            );
 
-                        let policy_session = PolicySession::try_from(auth_session)
-                            .map_err(|e| KnishIOError::SecretStorage(format!("Convert to PolicySession failed: {e}")))?;
+                            let policy_session =
+                                PolicySession::try_from(auth_session).map_err(|e| {
+                                    KnishIOError::SecretStorage(format!(
+                                        "Convert to PolicySession failed: {e}"
+                                    ))
+                                })?;
 
-                        ctx.policy_pcr(policy_session, Digest::default(), pcr_selection_list)
-                            .map_err(|e| KnishIOError::DecryptionFailed(format!("TPM policy_pcr failed: {e}")))?;
+                            ctx.policy_pcr(policy_session, Digest::default(), pcr_selection_list)
+                                .map_err(|e| {
+                                    KnishIOError::DecryptionFailed(format!(
+                                        "TPM policy_pcr failed: {e}"
+                                    ))
+                                })?;
 
-                        Ok(policy_session)
-                    });
+                            Ok(policy_session)
+                        });
 
                     let policy_session = match policy_session {
                         Ok(ps) => ps,
@@ -538,7 +623,11 @@ impl Tpm2SecretStorageProvider {
                         }
                     };
 
-                    context.set_sessions((Some(AuthSession::PolicySession(policy_session)), None, None));
+                    context.set_sessions((
+                        Some(AuthSession::PolicySession(policy_session)),
+                        None,
+                        None,
+                    ));
 
                     if let Some(policy) = &self.policy {
                         if let Some(auth_str) = &policy.auth {
@@ -553,14 +642,21 @@ impl Tpm2SecretStorageProvider {
                     let _ = context.flush_context(SessionHandle::from(policy_session).into());
                     context.set_sessions((Some(AuthSession::Password), None, None));
 
-                    unseal_res.map_err(|e| KnishIOError::DecryptionFailed(format!("TPM unseal failed: {e}")))?
+                    unseal_res.map_err(|e| {
+                        KnishIOError::DecryptionFailed(format!("TPM unseal failed: {e}"))
+                    })?
                 } else {
                     let unseal_res = context.unseal(loaded_handle.into());
                     let _ = context.flush_context(loaded_handle.into());
-                    unseal_res.map_err(|e| KnishIOError::DecryptionFailed(format!("TPM unseal failed: {e}")))?
+                    unseal_res.map_err(|e| {
+                        KnishIOError::DecryptionFailed(format!("TPM unseal failed: {e}"))
+                    })?
                 };
-                let passphrase_str = String::from_utf8(unsealed.value().to_vec())
-                    .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 passphrase from TPM: {e}")))?;
+                let passphrase_str = String::from_utf8(unsealed.value().to_vec()).map_err(|e| {
+                    KnishIOError::DecryptionFailed(format!(
+                        "Invalid UTF-8 passphrase from TPM: {e}"
+                    ))
+                })?;
 
                 Ok(Zeroizing::new(passphrase_str))
             }
@@ -592,14 +688,16 @@ impl Tpm2SecretStorageProvider {
             .get_item(&format!("{KEY_PREFIX}{bundle_hash}"))?
             .ok_or_else(|| KnishIOError::SecretNotFound(bundle_hash.to_string()))?;
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e)))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e))
+        })?;
 
         let decrypted = envelope::open(&payload, &passphrase)?;
 
         with_secure_bytes(decrypted.to_vec(), |bytes| {
-            let secret_string = String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e)))?;
+            let secret_string = String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e))
+            })?;
             f(&secret_string)
         })
     }
@@ -641,7 +739,10 @@ impl SecretStorageProvider for Tpm2SecretStorageProvider {
                     .to_string(),
             ));
         }
-        if self.policy.is_some() && options.recovery_passphrase.is_none() && !options.allow_unrecoverable {
+        if self.policy.is_some()
+            && options.recovery_passphrase.is_none()
+            && !options.allow_unrecoverable
+        {
             return Err(KnishIOError::SecretStorage(
                 "Tpm2SecretStorageProvider with PCR policy requires recovery_passphrase unless allow_unrecoverable is true"
                     .to_string(),
@@ -673,11 +774,14 @@ impl SecretStorageProvider for Tpm2SecretStorageProvider {
                 hardware_backed: false,
                 provider_type: "aes-gcm".to_string(),
             };
-            let recovery_payload = envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
+            let recovery_payload =
+                envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
             let recovery_json = serde_json::to_string(&recovery_payload)
                 .map_err(|e| KnishIOError::SecretStorage(format!("Serialization failed: {e}")))?;
-            self.backend
-                .set_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"), recovery_json)?;
+            self.backend.set_item(
+                &format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"),
+                recovery_json,
+            )?;
         }
 
         Ok(())
@@ -694,28 +798,36 @@ impl SecretStorageProvider for Tpm2SecretStorageProvider {
             ));
         }
 
-        let raw = match self.backend.get_item(&format!("{KEY_PREFIX}{bundle_hash}"))? {
+        let raw = match self
+            .backend
+            .get_item(&format!("{KEY_PREFIX}{bundle_hash}"))?
+        {
             Some(val) => val,
             None => return Ok(None),
         };
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e)))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e))
+        })?;
 
         let passphrase = self.get_or_create_passphrase()?;
         let decrypted = envelope::open(&payload, &passphrase)?;
 
         with_secure_bytes(decrypted.to_vec(), |bytes| {
-            String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e)))
+            String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e))
+            })
         })
         .map(Some)
     }
 
     async fn delete_secret(&self, bundle_hash: &str) -> Result<bool> {
-        let removed_primary = self.backend
+        let removed_primary = self
+            .backend
             .remove_item(&format!("{KEY_PREFIX}{bundle_hash}"))?;
-        let _ = self.backend.remove_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"));
+        let _ = self
+            .backend
+            .remove_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"));
         Ok(removed_primary)
     }
 
@@ -747,33 +859,45 @@ impl SecretStorageProvider for Tpm2SecretStorageProvider {
         options: StorageOptions,
     ) -> Result<()> {
         if bundle_hash.is_empty() {
-            return Err(KnishIOError::SecretStorage("Bundle hash cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Bundle hash cannot be empty".to_string(),
+            ));
         }
         if recovery_passphrase.is_empty() {
-            return Err(KnishIOError::SecretStorage("Recovery passphrase cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Recovery passphrase cannot be empty".to_string(),
+            ));
         }
 
         let raw = self
             .backend
             .get_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"))?
-            .ok_or_else(|| KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}")))?;
+            .ok_or_else(|| {
+                KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}"))
+            })?;
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}")))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}"))
+        })?;
 
         let decrypted = envelope::open(&payload, recovery_passphrase)?;
 
         let secret_str = with_secure_bytes(decrypted.to_vec(), |bytes| {
-            String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext in recovery envelope: {e}")))
+            String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!(
+                    "Invalid UTF-8 plaintext in recovery envelope: {e}"
+                ))
+            })
         })?;
 
         let mut reenroll_options = options;
         if reenroll_options.recovery_passphrase.is_none() {
-            reenroll_options.recovery_passphrase = Some(Zeroizing::new(recovery_passphrase.to_string()));
+            reenroll_options.recovery_passphrase =
+                Some(Zeroizing::new(recovery_passphrase.to_string()));
         }
 
-        self.store_secret(bundle_hash, &secret_str, reenroll_options).await
+        self.store_secret(bundle_hash, &secret_str, reenroll_options)
+            .await
     }
 }
 
@@ -785,16 +909,25 @@ mod tests {
     fn test_classify_tpm_identity_software_swtpm() {
         let ibm = u32::from_be_bytes(*b"IBM ");
         let sw0 = u32::from_be_bytes(*b"SW\0\0");
-        assert_eq!(classify_tpm_identity(ibm, [sw0, 0, 0, 0]), TpmIdentity::Software);
+        assert_eq!(
+            classify_tpm_identity(ibm, [sw0, 0, 0, 0]),
+            TpmIdentity::Software
+        );
 
         let swtpm = u32::from_be_bytes(*b"SWTP");
-        assert_eq!(classify_tpm_identity(ibm, [swtpm, 0, 0, 0]), TpmIdentity::Software);
+        assert_eq!(
+            classify_tpm_identity(ibm, [swtpm, 0, 0, 0]),
+            TpmIdentity::Software
+        );
     }
 
     #[test]
     fn test_classify_tpm_identity_software_msft() {
         let msft = u32::from_be_bytes(*b"MSFT");
-        assert_eq!(classify_tpm_identity(msft, [0, 0, 0, 0]), TpmIdentity::Software);
+        assert_eq!(
+            classify_tpm_identity(msft, [0, 0, 0, 0]),
+            TpmIdentity::Software
+        );
 
         let other_mfg = u32::from_be_bytes(*b"XXXX");
         let sim1 = u32::from_be_bytes(*b"SIMU");
@@ -809,13 +942,22 @@ mod tests {
     #[test]
     fn test_classify_tpm_identity_hardware() {
         let ifx = u32::from_be_bytes(*b"IFX ");
-        assert_eq!(classify_tpm_identity(ifx, [0, 0, 0, 0]), TpmIdentity::Hardware);
+        assert_eq!(
+            classify_tpm_identity(ifx, [0, 0, 0, 0]),
+            TpmIdentity::Hardware
+        );
 
         let ntc = u32::from_be_bytes(*b"NTC ");
-        assert_eq!(classify_tpm_identity(ntc, [0, 0, 0, 0]), TpmIdentity::Hardware);
+        assert_eq!(
+            classify_tpm_identity(ntc, [0, 0, 0, 0]),
+            TpmIdentity::Hardware
+        );
 
         let stm = u32::from_be_bytes(*b"STM ");
-        assert_eq!(classify_tpm_identity(stm, [0, 0, 0, 0]), TpmIdentity::Hardware);
+        assert_eq!(
+            classify_tpm_identity(stm, [0, 0, 0, 0]),
+            TpmIdentity::Hardware
+        );
     }
 
     #[test]
@@ -824,10 +966,16 @@ mod tests {
 
         // Unrecognized manufacturer ID must return Unknown, NOT Hardware (fail closed allowlist)
         let rand_mfg = u32::from_be_bytes(*b"RAND");
-        assert_eq!(classify_tpm_identity(rand_mfg, [0, 0, 0, 0]), TpmIdentity::Unknown);
+        assert_eq!(
+            classify_tpm_identity(rand_mfg, [0, 0, 0, 0]),
+            TpmIdentity::Unknown
+        );
 
         let unknown_mfg = u32::from_be_bytes(*b"UNKN");
-        assert_eq!(classify_tpm_identity(unknown_mfg, [0, 0, 0, 0]), TpmIdentity::Unknown);
+        assert_eq!(
+            classify_tpm_identity(unknown_mfg, [0, 0, 0, 0]),
+            TpmIdentity::Unknown
+        );
 
         // Fail-closed verification: Unknown does NOT claim hardware
         assert!(!matches!(TpmIdentity::Unknown, TpmIdentity::Hardware));

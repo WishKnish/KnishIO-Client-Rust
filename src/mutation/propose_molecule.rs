@@ -3,17 +3,17 @@
 //! Mutation for proposing a molecule to the network,
 //! equivalent to MutationProposeMolecule.js
 
+use crate::client::KnishIOClient;
+use crate::graphql::GraphQLClient;
+use crate::molecule::Molecule;
 use crate::mutation::Mutation;
 use crate::query::Query;
 use crate::response::{Response, ResponseProposeMolecule};
-use crate::molecule::Molecule;
-use crate::graphql::GraphQLClient;
-use crate::client::KnishIOClient;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
 /// Mutation for proposing a molecule to the network
-/// 
+///
 /// This is the most critical mutation as it handles all transaction submissions
 /// to the KnishIO distributed ledger. All other mutation types ultimately use
 /// this to submit their molecular transactions.
@@ -34,7 +34,11 @@ impl MutationProposeMolecule {
     /// Create a new MutationProposeMolecule instance (matches JS constructor)
     /// Takes graphQLClient, knishIOClient, molecule like JS constructor:
     /// constructor (graphQLClient, knishIOClient, molecule)
-    pub fn new(graph_ql_client: GraphQLClient, knish_io_client: KnishIOClient, molecule: Molecule) -> Self {
+    pub fn new(
+        graph_ql_client: GraphQLClient,
+        knish_io_client: KnishIOClient,
+        molecule: Molecule,
+    ) -> Self {
         MutationProposeMolecule {
             molecule,
             remainder_wallet: None,
@@ -42,7 +46,7 @@ impl MutationProposeMolecule {
             knish_io_client: Some(knish_io_client),
         }
     }
-    
+
     /// Create with just molecule (for backward compatibility)
     pub fn from_molecule(molecule: Molecule) -> Self {
         MutationProposeMolecule {
@@ -52,23 +56,23 @@ impl MutationProposeMolecule {
             knish_io_client: None,
         }
     }
-    
+
     /// Set the remainder wallet
     pub fn with_remainder_wallet(mut self, wallet: Value) -> Self {
         self.remainder_wallet = Some(wallet);
         self
     }
-    
+
     /// Get the molecule (matches JS molecule())
     pub fn molecule(&self) -> &Molecule {
         &self.molecule
     }
-    
+
     /// Get mutable access to molecule
     pub fn get_molecule_mut(&mut self) -> Option<&mut Molecule> {
         Some(&mut self.molecule)
     }
-    
+
     /// Get the remainder wallet
     pub fn remainder_wallet(&self) -> Option<&Value> {
         self.remainder_wallet.as_ref()
@@ -94,17 +98,20 @@ impl Query for MutationProposeMolecule {
           }
         }"#
     }
-    
+
     /// Compile variables for the mutation
     fn compiled_variables(&self, variables: Option<Value>) -> Option<Value> {
         let mut vars = variables.unwrap_or_else(|| json!({}));
-        
+
         // Add the molecule to variables
-        vars["molecule"] = self.molecule.to_json(crate::types::MoleculeJsonOptions::default()).unwrap_or_default();
-        
+        vars["molecule"] = self
+            .molecule
+            .to_json(crate::types::MoleculeJsonOptions::default())
+            .unwrap_or_default();
+
         Some(vars)
     }
-    
+
     /// Create a response from the JSON data
     fn create_response(&self, json: Value) -> Box<dyn Response> {
         // Using ResponseProposeMolecule for proper type safety
@@ -124,7 +131,7 @@ impl Mutation for MutationProposeMolecule {
     fn get_mutation(&self) -> &str {
         self.get_query()
     }
-    
+
     /// Execute the mutation with molecule included in variables
     async fn execute(
         &self,
@@ -134,13 +141,16 @@ impl Mutation for MutationProposeMolecule {
     ) -> crate::error::Result<Box<dyn Response>> {
         // Ensure molecule is in variables
         let mut vars = variables.unwrap_or_else(|| json!({}));
-        vars["molecule"] = self.molecule.to_json(crate::types::MoleculeJsonOptions::default()).unwrap_or_default();
-        
+        vars["molecule"] = self
+            .molecule
+            .to_json(crate::types::MoleculeJsonOptions::default())
+            .unwrap_or_default();
+
         // Use the default Mutation execute
         let request = self.create_mutation_request(Some(vars));
-        
+
         let response = client.mutate(request).await?;
-        
+
         // Re-wrap under "data" so the response classes' `data.<Field>` data_keys navigate
         // correctly (matches JS's full-envelope + Dot.get convention).
         let json_data = json!({ "data": response.data });
@@ -151,22 +161,22 @@ impl Mutation for MutationProposeMolecule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_mutation_propose_molecule_creation() {
         // Create a mock molecule
         let molecule = Molecule::new();
         let mutation = MutationProposeMolecule::from_molecule(molecule);
-        
+
         assert!(mutation.remainder_wallet().is_none());
     }
-    
+
     #[test]
     fn test_mutation_string() {
         let molecule = Molecule::new();
         let mutation = MutationProposeMolecule::from_molecule(molecule);
         let mutation_string = mutation.get_mutation();
-        
+
         // Check that the mutation string contains expected fields
         assert!(mutation_string.contains("mutation( $molecule: MoleculeInput! )"));
         assert!(mutation_string.contains("ProposeMolecule( molecule: $molecule )"));
@@ -175,22 +185,22 @@ mod tests {
         assert!(mutation_string.contains("reason"));
         assert!(mutation_string.contains("createdAt"));
     }
-    
+
     #[test]
     fn test_compiled_variables() {
         let molecule = Molecule::new();
         let mutation = MutationProposeMolecule::from_molecule(molecule);
-        
+
         let variables = mutation.compiled_variables(None).unwrap();
         assert!(variables.get("molecule").is_some());
     }
-    
+
     #[test]
     fn test_mutation_builder_pattern() {
         let molecule = Molecule::new();
         let mutation = MutationProposeMolecule::from_molecule(molecule)
             .with_remainder_wallet(json!({"test": "wallet"}));
-        
+
         assert!(mutation.remainder_wallet().is_some());
     }
 }

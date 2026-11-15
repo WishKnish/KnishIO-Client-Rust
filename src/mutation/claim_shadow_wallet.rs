@@ -3,13 +3,13 @@
 //! Mutation for claiming a shadow wallet,
 //! equivalent to MutationClaimShadowWallet.js
 
-use crate::mutation::{Mutation, propose_molecule::MutationProposeMolecule};
+use crate::client::KnishIOClient;
+use crate::graphql::GraphQLClient;
+use crate::molecule::Molecule;
+use crate::mutation::{propose_molecule::MutationProposeMolecule, Mutation};
 use crate::query::Query;
 use crate::response::{Response, ResponseClaimShadowWallet};
-use crate::molecule::Molecule;
 use crate::wallet::Wallet;
-use crate::graphql::GraphQLClient;
-use crate::client::KnishIOClient;
 use serde_json::Value;
 
 /// Parameters for claiming shadow wallets (matches JS fillMolecule parameters)
@@ -29,22 +29,34 @@ pub struct MutationClaimShadowWallet {
 
 impl MutationClaimShadowWallet {
     /// Create a new MutationClaimShadowWallet (matches JS constructor)
-    pub fn new(graph_ql_client: GraphQLClient, knish_io_client: KnishIOClient, molecule: Molecule) -> Self {
+    pub fn new(
+        graph_ql_client: GraphQLClient,
+        knish_io_client: KnishIOClient,
+        molecule: Molecule,
+    ) -> Self {
         MutationClaimShadowWallet {
-            propose_molecule: MutationProposeMolecule::new(graph_ql_client, knish_io_client, molecule),
+            propose_molecule: MutationProposeMolecule::new(
+                graph_ql_client,
+                knish_io_client,
+                molecule,
+            ),
         }
     }
-    
+
     /// Create with just molecule (for backward compatibility)
     pub fn from_molecule(molecule: Molecule) -> Self {
         MutationClaimShadowWallet {
             propose_molecule: MutationProposeMolecule::from_molecule(molecule),
         }
     }
-    
+
     /// Fill the molecule with shadow wallet claim data (matches JS fillMolecule exactly)
     /// JS: fillMolecule({ token, batchId })
-    pub fn fill_molecule(&mut self, params: ClaimShadowWalletParams, wallet: &Wallet) -> crate::error::Result<()> {
+    pub fn fill_molecule(
+        &mut self,
+        params: ClaimShadowWalletParams,
+        wallet: &Wallet,
+    ) -> crate::error::Result<()> {
         // Call molecule's init_shadow_wallet_claim method
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
             // NOTE: do NOT overwrite molecule.cell_slug with params.token — the token identifies
@@ -56,26 +68,26 @@ impl MutationClaimShadowWallet {
 
             // Initialize shadow wallet claim for the given wallet
             molecule.init_shadow_wallet_claim(wallet)?;
-            
+
             // Sign with empty params (matches JS: this.$__molecule.sign({}))
             molecule.sign(None, false, true)?;
-            
+
             // Check molecule (matches JS: this.$__molecule.check())
             molecule.check(None)?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Create from claim shadow wallet parameters
     pub fn from_params(_params: ClaimShadowWalletParams, _secret: &str) -> Self {
         let molecule = Molecule::new();
-        
+
         // Initialize shadow wallet claim in molecule
         // molecule.init_shadow_wallet_claim(wallet);
         // molecule.sign(None);
         // molecule.check(None);
-        
+
         Self::from_molecule(molecule)
     }
 }
@@ -86,12 +98,12 @@ impl Query for MutationClaimShadowWallet {
     fn get_query(&self) -> &str {
         self.propose_molecule.get_query()
     }
-    
+
     /// Delegate compiled variables
     fn compiled_variables(&self, variables: Option<Value>) -> Option<Value> {
         self.propose_molecule.compiled_variables(variables)
     }
-    
+
     /// Create a response from the JSON data
     fn create_response(&self, json: Value) -> Box<dyn Response> {
         match ResponseClaimShadowWallet::new(json, None) {
@@ -123,23 +135,23 @@ impl MutationClaimShadowWallet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_mutation_claim_shadow_wallet_creation() {
         let molecule = Molecule::new();
         let mutation = MutationClaimShadowWallet::from_molecule(molecule);
-        
+
         // Test basic creation
         assert!(mutation.propose_molecule.remainder_wallet().is_none());
     }
-    
+
     #[test]
     fn test_claim_shadow_wallet_params() {
         let params = ClaimShadowWalletParams {
             token: "TEST".to_string(),
             batch_id: Some("batch123".to_string()),
         };
-        
+
         assert_eq!(params.token, "TEST");
         assert_eq!(params.batch_id, Some("batch123".to_string()));
     }

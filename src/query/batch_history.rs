@@ -92,7 +92,6 @@ impl QueryBatchHistory {
                 value
             }"#
     }
-
 }
 
 impl Default for QueryBatchHistory {
@@ -265,7 +264,7 @@ mod tests {
     fn test_query_string() {
         let query = QueryBatchHistory::new();
         let query_string = query.get_query();
-        
+
         // Check that the query string contains expected fields
         assert!(query_string.contains("BatchHistory( batchId: $batchId )"));
         assert!(query_string.contains("batchId"));

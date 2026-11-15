@@ -4,13 +4,12 @@
 //! GraphQL client, including queries, mutations, retry policies,
 //! and connection configuration.
 
-use knishio_client::{
-    GraphQLClient, SocketConfig, RetryPolicy, RetryStrategy,
-    RetryCondition, ClientConfig, execute_with_retry,
-    create_query_request, create_mutation_request, create_subscription_request,
-    KnishIOError,
-};
 use knishio_client::graphql::RetryConfig;
+use knishio_client::{
+    create_mutation_request, create_query_request, create_subscription_request, execute_with_retry,
+    ClientConfig, GraphQLClient, KnishIOError, RetryCondition, RetryPolicy, RetryStrategy,
+    SocketConfig,
+};
 use serde_json::json;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -41,11 +40,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Note: with_config() returns a GraphQLClient directly (not a builder)
-    let mut client = GraphQLClient::with_config(
-        "https://api.knish.io/graphql",
-        client_config,
-        retry_config,
-    );
+    let mut client =
+        GraphQLClient::with_config("https://api.knish.io/graphql", client_config, retry_config);
 
     // Set authentication (in a real app, you'd get this from the auth flow, which
     // also supplies the AUTH wallet that the CipherHash transport encrypts with).
@@ -142,7 +138,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Add custom timeout and headers
     create_wallet_mutation.timeout = Some(Duration::from_secs(45));
-    create_wallet_mutation.headers.insert("X-Custom-Header".to_string(), "demo-value".to_string());
+    create_wallet_mutation
+        .headers
+        .insert("X-Custom-Header".to_string(), "demo-value".to_string());
 
     match client.mutate(create_wallet_mutation).await {
         Ok(response) => {
@@ -199,9 +197,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // subscribe() returns Result<()> — the callback receives GraphQLResponse values
-    match ws_client.subscribe(subscription_request, |response| {
-        println!("Subscription update: {:?}", response);
-    }).await {
+    match ws_client
+        .subscribe(subscription_request, |response| {
+            println!("Subscription update: {:?}", response);
+        })
+        .await
+    {
         Ok(()) => {
             println!("Subscription started");
 
@@ -238,10 +239,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Use the retry executor directly
     let mut executor = custom_retry_policy.executor(true);
-    let result = executor.execute(|| async {
-        // Simulate an operation that might need retries
-        Ok::<&str, KnishIOError>("success")
-    }).await;
+    let result = executor
+        .execute(|| async {
+            // Simulate an operation that might need retries
+            Ok::<&str, KnishIOError>("success")
+        })
+        .await;
 
     println!("Retry executor result: {:?}", result);
     println!("Custom retry policy configured\n");
@@ -324,7 +327,8 @@ async fn retry_example() -> Result<(), Box<dyn std::error::Error>> {
     let result = execute_with_retry(policy, true, || async {
         // Simulate an operation that might fail
         Ok::<&str, KnishIOError>("Success after retries!")
-    }).await?;
+    })
+    .await?;
 
     println!("Retry result: {}", result);
     Ok(())

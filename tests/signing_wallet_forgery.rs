@@ -13,7 +13,10 @@ use std::error::Error;
 type TestResult = Result<(), Box<dyn Error>>;
 
 fn fixture() -> Result<Value, Box<dyn Error>> {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/signing-wallet-forgery.json");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/signing-wallet-forgery.json"
+    );
     Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?)
 }
 
@@ -25,7 +28,10 @@ fn load(fixture: &Value, name: &str) -> Result<Molecule, Box<dyn Error>> {
 fn genuine_molecule_verifies() -> TestResult {
     let genuine = load(&fixture()?, "genuine")?;
     let result = genuine.check(None);
-    assert!(matches!(result, Ok(true)), "genuine molecule must verify, got {result:?}");
+    assert!(
+        matches!(result, Ok(true)),
+        "genuine molecule must verify, got {result:?}"
+    );
     Ok(())
 }
 

@@ -1,3 +1,4 @@
+use knishio_client::atom::Atom;
 /// Compute test vectors for patent Appendix B
 /// Run with: cargo test --test compute_patent_vectors -- --ignored --nocapture
 ///
@@ -5,9 +6,7 @@
 /// test vector appendix, replacing [TO BE COMPUTED] placeholders. It asserts no
 /// canonical expectation, so every test is ignored by default; the canonical values
 /// are asserted by `patent_vector_verification.rs`.
-
-use knishio_client::crypto::{generate_key, generate_address, generate_ots_signature};
-use knishio_client::atom::Atom;
+use knishio_client::crypto::{generate_address, generate_key, generate_ots_signature};
 use knishio_client::types::Isotope;
 
 #[test]
@@ -248,18 +247,29 @@ fn compute_tv7_wots_signature() {
     let signature = generate_ots_signature(&key, &base17_hash).unwrap();
 
     println!("Signature fragment count: {}", signature.len());
-    println!("Fragment 0 ({} hex chars): {}", signature[0].len(), signature[0]);
+    println!(
+        "Fragment 0 ({} hex chars): {}",
+        signature[0].len(),
+        signature[0]
+    );
     println!("TV1 wallet_address: {}", address);
     println!();
 
     assert_eq!(signature.len(), 16, "Must have 16 OTS fragments");
-    assert_eq!(signature[0].len(), 128, "Each fragment must be 128 hex chars");
+    assert_eq!(
+        signature[0].len(),
+        128,
+        "Each fragment must be 128 hex chars"
+    );
 
     // Verify the signature recovers the correct address (two-pass; matches generate_address)
     use knishio_client::crypto::verify_ots_signature;
     let verified = verify_ots_signature(&signature, &base17_hash, &address);
     println!("Signature verification against TV1 address: {}", verified);
-    assert!(verified, "verify_ots_signature must recover the TV1 wallet address (two-pass)");
+    assert!(
+        verified,
+        "verify_ots_signature must recover the TV1 wallet address (two-pass)"
+    );
 }
 
 /// Print all test vectors in a consolidated summary
@@ -281,7 +291,11 @@ fn compute_all_vectors_summary() {
     println!("  wallet_addr:  {}", a1);
 
     // TV2
-    let k2 = generate_key("my_secret_passphrase", "KNISH", "0000000000000000000000000000000000000000000000000000000000000001");
+    let k2 = generate_key(
+        "my_secret_passphrase",
+        "KNISH",
+        "0000000000000000000000000000000000000000000000000000000000000001",
+    );
     let a2 = generate_address(&k2).unwrap();
     println!("TV2 — Non-Hex Secret Normalization");
     println!("  K_k first 64: {}", &k2[..64]);
@@ -295,14 +309,22 @@ fn compute_all_vectors_summary() {
     println!("  wallet_addr:  {}", a3);
 
     // TV4
-    let k4 = generate_key(s1, "KNISH", "0000000000000000000000000000000000000000000000000000000000000000");
+    let k4 = generate_key(
+        s1,
+        "KNISH",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+    );
     let a4 = generate_address(&k4).unwrap();
     println!("TV4 — Leading Zeros Position");
     println!("  K_k first 64: {}", &k4[..64]);
     println!("  wallet_addr:  {}", a4);
 
     // TV5
-    let k5 = generate_key("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "KNISH", "0000000000000000000000000000000000000000000000000000000000000001");
+    let k5 = generate_key(
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "KNISH",
+        "0000000000000000000000000000000000000000000000000000000000000001",
+    );
     let a5 = generate_address(&k5).unwrap();
     println!("TV5 — BigInt Carry");
     println!("  K_k first 64: {}", &k5[..64]);
@@ -311,28 +333,49 @@ fn compute_all_vectors_summary() {
     // TV6 — Molecular hash
     let atoms = vec![
         Atom {
-            position: "aa".repeat(32), wallet_address: "bb".repeat(32),
-            isotope: Isotope::V, token: "KNISH".to_string(),
-            value: Some("-100".to_string()), batch_id: None,
-            meta_type: None, meta_id: None, meta: vec![],
-            ots_fragment: None, index: Some(0),
-            created_at: "1700000000000".to_string(), version: None,
+            position: "aa".repeat(32),
+            wallet_address: "bb".repeat(32),
+            isotope: Isotope::V,
+            token: "KNISH".to_string(),
+            value: Some("-100".to_string()),
+            batch_id: None,
+            meta_type: None,
+            meta_id: None,
+            meta: vec![],
+            ots_fragment: None,
+            index: Some(0),
+            created_at: "1700000000000".to_string(),
+            version: None,
         },
         Atom {
-            position: "cc".repeat(32), wallet_address: "dd".repeat(32),
-            isotope: Isotope::V, token: "KNISH".to_string(),
-            value: Some("100".to_string()), batch_id: None,
-            meta_type: None, meta_id: None, meta: vec![],
-            ots_fragment: None, index: Some(1),
-            created_at: "1700000000000".to_string(), version: None,
+            position: "cc".repeat(32),
+            wallet_address: "dd".repeat(32),
+            isotope: Isotope::V,
+            token: "KNISH".to_string(),
+            value: Some("100".to_string()),
+            batch_id: None,
+            meta_type: None,
+            meta_id: None,
+            meta: vec![],
+            ots_fragment: None,
+            index: Some(1),
+            created_at: "1700000000000".to_string(),
+            version: None,
         },
         Atom {
-            position: "ee".repeat(32), wallet_address: "bb".repeat(32),
-            isotope: Isotope::V, token: "KNISH".to_string(),
-            value: Some("0".to_string()), batch_id: None,
-            meta_type: None, meta_id: None, meta: vec![],
-            ots_fragment: None, index: Some(2),
-            created_at: "1700000000000".to_string(), version: None,
+            position: "ee".repeat(32),
+            wallet_address: "bb".repeat(32),
+            isotope: Isotope::V,
+            token: "KNISH".to_string(),
+            value: Some("0".to_string()),
+            batch_id: None,
+            meta_type: None,
+            meta_id: None,
+            meta: vec![],
+            ots_fragment: None,
+            index: Some(2),
+            created_at: "1700000000000".to_string(),
+            version: None,
         },
     ];
     let hex_hash = Atom::hash_atoms(&atoms, "hex").unwrap();
@@ -349,7 +392,10 @@ fn compute_all_vectors_summary() {
 
     let verified = knishio_client::crypto::verify_ots_signature(&sig, &base17_hash, &a1);
     println!("  verified:     {}", verified);
-    assert!(verified, "verify_ots_signature must recover the TV1 wallet address (two-pass)");
+    assert!(
+        verified,
+        "verify_ots_signature must recover the TV1 wallet address (two-pass)"
+    );
 
     println!("\n============================================================");
 }

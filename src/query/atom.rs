@@ -519,7 +519,7 @@ mod tests {
     fn test_query_string() {
         let query = QueryAtom::new();
         let query_string = query.get_query();
-        
+
         // Check that the query string contains expected fields
         assert!(query_string.contains("Atom("));
         assert!(query_string.contains("molecularHashes"));

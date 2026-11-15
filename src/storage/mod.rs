@@ -1,10 +1,10 @@
 //! Envelope encryption and secure master-secret storage
 
-pub mod secure_memory;
-pub mod memory;
 pub mod aes_gcm;
 pub mod envelope;
 pub mod file;
+pub mod memory;
+pub mod secure_memory;
 pub use file::FileStorageBackend;
 #[cfg(feature = "keyring")]
 pub mod os_keychain;
@@ -16,10 +16,10 @@ pub mod tpm2;
 pub use tpm2::{Tpm2Policy, Tpm2SecretStorageProvider, TpmIdentity};
 #[cfg(all(feature = "secure-enclave", target_os = "macos"))]
 pub mod secure_enclave;
+pub use aes_gcm::AesGcmSecretStorageProvider;
+pub use memory::MemorySecretStorageProvider;
 #[cfg(all(feature = "secure-enclave", target_os = "macos"))]
 pub use secure_enclave::SecureEnclaveSecretStorageProvider;
-pub use memory::MemorySecretStorageProvider;
-pub use aes_gcm::AesGcmSecretStorageProvider;
 
 use crate::error::{KnishIOError, Result};
 use async_trait::async_trait;
@@ -103,8 +103,14 @@ impl std::fmt::Debug for StorageOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StorageOptions")
             .field("label", &self.label)
-            .field("passphrase", &self.passphrase.as_ref().map(|_| "[REDACTED]"))
-            .field("recovery_passphrase", &self.recovery_passphrase.as_ref().map(|_| "[REDACTED]"))
+            .field(
+                "passphrase",
+                &self.passphrase.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "recovery_passphrase",
+                &self.recovery_passphrase.as_ref().map(|_| "[REDACTED]"),
+            )
             .field("allow_unrecoverable", &self.allow_unrecoverable)
             .finish()
     }
@@ -228,10 +234,19 @@ pub trait SecretStorageProvider: Send + Sync {
     async fn is_available(&self) -> bool;
 
     /// Store and encrypt a master secret for the given bundle hash
-    async fn store_secret(&self, bundle_hash: &str, secret: &str, options: StorageOptions) -> Result<()>;
+    async fn store_secret(
+        &self,
+        bundle_hash: &str,
+        secret: &str,
+        options: StorageOptions,
+    ) -> Result<()>;
 
     /// Retrieve and decrypt the master secret for the given bundle hash
-    async fn retrieve_secret(&self, bundle_hash: &str, options: StorageOptions) -> Result<Option<String>>;
+    async fn retrieve_secret(
+        &self,
+        bundle_hash: &str,
+        options: StorageOptions,
+    ) -> Result<Option<String>>;
 
     /// Delete a stored secret
     async fn delete_secret(&self, bundle_hash: &str) -> Result<bool>;

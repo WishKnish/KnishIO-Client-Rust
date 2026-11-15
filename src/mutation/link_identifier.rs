@@ -9,8 +9,7 @@ use crate::response::{Response, ResponseLinkIdentifier};
 use serde_json::Value;
 
 /// Mutation for linking an Identifier to a Wallet Bundle
-pub struct MutationLinkIdentifier {
-}
+pub struct MutationLinkIdentifier {}
 
 impl Default for MutationLinkIdentifier {
     fn default() -> Self {
@@ -39,12 +38,12 @@ impl Query for MutationLinkIdentifier {
           }
         }"#
     }
-    
+
     /// Compile variables for the mutation (pass through)
     fn compiled_variables(&self, variables: Option<Value>) -> Option<Value> {
         variables
     }
-    
+
     /// Create a response from the JSON data
     fn create_response(&self, json: Value) -> Box<dyn Response> {
         match ResponseLinkIdentifier::new(json, None) {
@@ -68,15 +67,17 @@ impl Mutation for MutationLinkIdentifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_mutation_link_identifier_creation() {
         let mutation = MutationLinkIdentifier::new();
         let mutation_string = mutation.get_mutation();
-        
+
         // Check that the mutation string contains expected fields
-        assert!(mutation_string.contains("mutation( $bundle: String!, $type: String!, $content: String! )"));
-        assert!(mutation_string.contains("LinkIdentifier( bundle: $bundle, type: $type, content: $content )"));
+        assert!(mutation_string
+            .contains("mutation( $bundle: String!, $type: String!, $content: String! )"));
+        assert!(mutation_string
+            .contains("LinkIdentifier( bundle: $bundle, type: $type, content: $content )"));
         assert!(mutation_string.contains("type"));
         assert!(mutation_string.contains("bundle"));
         assert!(mutation_string.contains("content"));

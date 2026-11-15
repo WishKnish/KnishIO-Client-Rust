@@ -4,15 +4,14 @@
 //! Each example shows the complete workflow from setup to execution.
 
 use knishio_client::{
-    KnishIOClient, GraphQLClient, Wallet, Molecule, MetaItem,
     mutation::{
-        Mutation,
-        MutationProposeMolecule, MutationCreateWallet, MutationCreateToken,
-        MutationTransferTokens, MutationRequestTokens, MutationClaimShadowWallet,
-        MutationRequestAuthorization, MutationActiveSession,
-        CreateTokenParams, TransferTokensParams, RequestTokensParams,
-        ClaimShadowWalletParams, RequestAuthorizationParams
+        ClaimShadowWalletParams, CreateTokenParams, Mutation, MutationActiveSession,
+        MutationClaimShadowWallet, MutationCreateToken, MutationCreateWallet,
+        MutationProposeMolecule, MutationRequestAuthorization, MutationRequestTokens,
+        MutationTransferTokens, RequestAuthorizationParams, RequestTokensParams,
+        TransferTokensParams,
     },
+    GraphQLClient, KnishIOClient, MetaItem, Molecule, Wallet,
 };
 use serde_json::json;
 
@@ -23,7 +22,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let graphql_client = GraphQLClient::new("https://api.knish.io/graphql");
     let knish_client = KnishIOClient::new(
         vec!["https://api.knish.io".to_string()],
-        None, None, None, None, None
+        None,
+        None,
+        None,
+        None,
+        None,
     );
 
     // Run all examples
@@ -54,11 +57,8 @@ async fn example_propose_molecule(
     // molecule.check(...);
 
     // Create the mutation
-    let mutation = MutationProposeMolecule::new(
-        graphql_client.clone(),
-        knish_client.clone(),
-        molecule
-    );
+    let mutation =
+        MutationProposeMolecule::new(graphql_client.clone(), knish_client.clone(), molecule);
 
     // Execute the mutation
     let response = mutation.execute(graphql_client, None, None).await?;
@@ -75,14 +75,7 @@ async fn example_create_wallet(
     println!("\n=== CreateWallet Example ===");
 
     // Create a wallet to be created on the ledger
-    let wallet = Wallet::create(
-        Some("test-secret-12345"),
-        None,
-        "TEST",
-        None,
-        None,
-        None,
-    )?;
+    let wallet = Wallet::create(Some("test-secret-12345"), None, "TEST", None, None, None)?;
 
     // Create a molecule for the wallet creation
     let molecule = Molecule::with_params(
@@ -91,15 +84,12 @@ async fn example_create_wallet(
         None,
         None,
         None,
-        None
+        None,
     );
 
     // Create the mutation
-    let mut mutation = MutationCreateWallet::new(
-        graphql_client.clone(),
-        knish_client.clone(),
-        molecule
-    );
+    let mut mutation =
+        MutationCreateWallet::new(graphql_client.clone(), knish_client.clone(), molecule);
 
     // Fill the molecule with wallet creation data
     // Note: This will fail until molecule methods are implemented
@@ -156,15 +146,12 @@ async fn example_create_token(
         None,
         None,
         None,
-        None
+        None,
     );
 
     // Create the mutation
-    let mut mutation = MutationCreateToken::new(
-        graphql_client.clone(),
-        knish_client.clone(),
-        molecule
-    );
+    let mut mutation =
+        MutationCreateToken::new(graphql_client.clone(), knish_client.clone(), molecule);
 
     // Fill the molecule with token creation data
     match mutation.fill_molecule(params) {
@@ -189,14 +176,8 @@ async fn example_transfer_tokens(
     println!("\n=== TransferTokens Example ===");
 
     // Create source wallet
-    let source_wallet = Wallet::create(
-        Some("source-secret-12345"),
-        None,
-        "TEST",
-        None,
-        None,
-        None,
-    )?;
+    let source_wallet =
+        Wallet::create(Some("source-secret-12345"), None, "TEST", None, None, None)?;
 
     // Create recipient wallet
     let recipient_wallet = Wallet::create(
@@ -221,15 +202,12 @@ async fn example_transfer_tokens(
         Some(source_wallet.clone()),
         None,
         None,
-        None
+        None,
     );
 
     // Create the mutation
-    let mut mutation = MutationTransferTokens::new(
-        graphql_client.clone(),
-        knish_client.clone(),
-        molecule
-    );
+    let mut mutation =
+        MutationTransferTokens::new(graphql_client.clone(), knish_client.clone(), molecule);
 
     // Fill the molecule with transfer data
     match mutation.fill_molecule(params) {
@@ -276,15 +254,12 @@ async fn example_request_tokens(
         None,
         None,
         None,
-        None
+        None,
     );
 
     // Create the mutation
-    let mut mutation = MutationRequestTokens::new(
-        graphql_client.clone(),
-        knish_client.clone(),
-        molecule
-    );
+    let mut mutation =
+        MutationRequestTokens::new(graphql_client.clone(), knish_client.clone(), molecule);
 
     // Fill the molecule with request data
     match mutation.fill_molecule(params) {
@@ -321,25 +296,16 @@ async fn example_claim_shadow_wallet(
         None,
         None,
         None,
-        None
+        None,
     );
 
     // Create the mutation
-    let mut mutation = MutationClaimShadowWallet::new(
-        graphql_client.clone(),
-        knish_client.clone(),
-        molecule
-    );
+    let mut mutation =
+        MutationClaimShadowWallet::new(graphql_client.clone(), knish_client.clone(), molecule);
 
     // Create a wallet to claim
-    let claim_wallet = Wallet::create(
-        Some("claimer-secret-12345"),
-        None,
-        "TEST",
-        None,
-        None,
-        None,
-    )?;
+    let claim_wallet =
+        Wallet::create(Some("claimer-secret-12345"), None, "TEST", None, None, None)?;
 
     // Fill the molecule with claim data (requires both params and wallet)
     match mutation.fill_molecule(params, &claim_wallet) {
@@ -371,9 +337,7 @@ async fn example_request_authorization(
     ];
 
     // Create parameters
-    let params = RequestAuthorizationParams {
-        meta,
-    };
+    let params = RequestAuthorizationParams { meta };
 
     // Create a molecule for the authorization request
     let molecule = Molecule::with_params(
@@ -382,15 +346,12 @@ async fn example_request_authorization(
         None,
         None,
         None,
-        None
+        None,
     );
 
     // Create the mutation
-    let mut mutation = MutationRequestAuthorization::new(
-        graphql_client.clone(),
-        knish_client.clone(),
-        molecule
-    );
+    let mut mutation =
+        MutationRequestAuthorization::new(graphql_client.clone(), knish_client.clone(), molecule);
 
     // Fill the molecule with authorization data
     match mutation.fill_molecule(params) {
@@ -434,7 +395,9 @@ async fn example_active_session(
     });
 
     // Execute the mutation
-    let response = mutation.execute(graphql_client, Some(variables), None).await?;
+    let response = mutation
+        .execute(graphql_client, Some(variables), None)
+        .await?;
     println!("ActiveSession response: {}", response.data());
 
     Ok(())
@@ -481,31 +444,14 @@ async fn example_helper_functions() -> Result<(), Box<dyn std::error::Error>> {
     use knishio_client::mutation::helpers;
 
     // Create wallets
-    let source_wallet = Wallet::create(
-        Some("source-secret"),
-        None,
-        "TEST",
-        None,
-        None,
-        None,
-    )?;
+    let source_wallet = Wallet::create(Some("source-secret"), None, "TEST", None, None, None)?;
 
-    let recipient_wallet = Wallet::create(
-        Some("recipient-secret"),
-        None,
-        "TEST",
-        None,
-        None,
-        None,
-    )?;
+    let recipient_wallet =
+        Wallet::create(Some("recipient-secret"), None, "TEST", None, None, None)?;
 
     // Use helper to create value transfer
-    match helpers::create_value_transfer(
-        "source-secret",
-        &source_wallet,
-        &recipient_wallet,
-        100.0,
-    ) {
+    match helpers::create_value_transfer("source-secret", &source_wallet, &recipient_wallet, 100.0)
+    {
         Ok(_mutation) => {
             println!("Created value transfer mutation using helper");
             println!("Mutation type: TransferTokens, Amount: 100.0");
@@ -529,12 +475,7 @@ async fn example_helper_functions() -> Result<(), Box<dyn std::error::Error>> {
     // Use helper to create token creation
     let metadata = vec![MetaItem::new("name", "Helper Token")];
 
-    match helpers::create_token_creation(
-        "creator-secret",
-        &recipient_wallet,
-        1000.0,
-        metadata,
-    ) {
+    match helpers::create_token_creation("creator-secret", &recipient_wallet, 1000.0, metadata) {
         Ok(_mutation) => {
             println!("Created token creation mutation using helper");
         }
@@ -563,13 +504,16 @@ async fn example_error_handling(
         "metaId": "test"
     });
 
-    match mutation.execute(graphql_client, Some(invalid_variables), None).await {
+    match mutation
+        .execute(graphql_client, Some(invalid_variables), None)
+        .await
+    {
         Ok(response) => {
             println!("Unexpected success: {}", response.data());
         }
         Err(e) => {
             println!("Expected error: {:?}", e);
-            
+
             // Categorize the error using helper methods
             if e.is_network_error() {
                 println!("Network error: {}", e);

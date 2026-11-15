@@ -3,10 +3,10 @@
 //! This module provides structures for handling various types of metadata
 //! in the KnishIO distributed ledger system.
 
+use crate::error::Result;
+use crate::types::{MetaItem, PolicyMap};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use crate::types::{MetaItem, PolicyMap};
-use crate::error::Result;
 
 // Re-export PolicyMeta from the dedicated policy_meta module
 pub use crate::policy_meta::PolicyMeta;
@@ -28,17 +28,17 @@ impl Meta {
             meta: Vec::new(),
         }
     }
-    
+
     /// Add a metadata item
     pub fn add_item(&mut self, key: impl Into<String>, value: impl Into<String>) {
         self.meta.push(MetaItem::new(key, value));
     }
-    
+
     /// Convert to HashMap; items whose value is null are left out
     pub fn to_map(&self) -> HashMap<String, String> {
         Self::aggregate_meta(&self.meta)
     }
-    
+
     /// Aggregate metadata from a vector of MetaItems into a HashMap; items whose value is
     /// null are left out
     ///
@@ -82,7 +82,7 @@ impl AtomMeta {
             .into_iter()
             .map(|(key, value)| MetaItem::new(key, value))
             .collect();
-        
+
         AtomMeta { meta: meta_items }
     }
 
@@ -95,16 +95,16 @@ impl AtomMeta {
     /// * `new_meta` - Additional metadata to merge
     pub fn merge(&mut self, new_meta: Vec<MetaItem>) -> &mut Self {
         // Use HashSet to deduplicate based on key
-        let mut existing_keys: HashSet<String> = 
+        let mut existing_keys: HashSet<String> =
             self.meta.iter().map(|item| item.key.clone()).collect();
-        
+
         for item in new_meta {
             if !existing_keys.contains(&item.key) {
                 existing_keys.insert(item.key.clone());
                 self.meta.push(item);
             }
         }
-        
+
         self
     }
 
@@ -118,7 +118,7 @@ impl AtomMeta {
             .into_iter()
             .map(|(key, value)| MetaItem::new(key, value))
             .collect();
-        
+
         self.merge(new_meta)
     }
 
@@ -213,7 +213,10 @@ impl AtomMeta {
     /// * `shadow_wallet_claim` - Shadow wallet claim amount
     pub fn set_shadow_wallet_claim(&mut self, shadow_wallet_claim: f64) -> &mut Self {
         let mut claim_meta = HashMap::new();
-        claim_meta.insert("shadowWalletClaim".to_string(), shadow_wallet_claim.to_string());
+        claim_meta.insert(
+            "shadowWalletClaim".to_string(),
+            shadow_wallet_claim.to_string(),
+        );
         self.merge_map(claim_meta)
     }
 
@@ -228,7 +231,9 @@ impl AtomMeta {
     ///
     /// * `policy` - Policy data to add
     pub fn add_policy(&mut self, policy: PolicyMap) -> Result<&mut Self> {
-        let meta_keys: Vec<String> = (0..self.meta.len()).map(|index| index.to_string()).collect();
+        let meta_keys: Vec<String> = (0..self.meta.len())
+            .map(|index| index.to_string())
+            .collect();
 
         let policy_json = PolicyMeta::new(policy, meta_keys).to_json()?;
         self.merge(vec![MetaItem::new("policy", policy_json)]);
@@ -256,4 +261,3 @@ impl AtomMeta {
         Meta::aggregate_meta(&self.meta)
     }
 }
-

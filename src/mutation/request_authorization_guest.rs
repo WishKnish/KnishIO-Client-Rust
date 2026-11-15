@@ -9,8 +9,7 @@ use crate::response::{Response, ResponseRequestAuthorizationGuest};
 use serde_json::Value;
 
 /// Mutation for requesting guest authorization tokens
-pub struct MutationRequestAuthorizationGuest {
-}
+pub struct MutationRequestAuthorizationGuest {}
 
 impl MutationRequestAuthorizationGuest {
     /// Create a new MutationRequestAuthorizationGuest instance
@@ -37,18 +36,21 @@ impl Query for MutationRequestAuthorizationGuest {
           }
         }"#
     }
-    
+
     /// Compile variables for the mutation (pass through)
     fn compiled_variables(&self, variables: Option<Value>) -> Option<Value> {
         variables
     }
-    
+
     /// Create a response from the JSON data
     fn create_response(&self, json: Value) -> Box<dyn Response> {
         match ResponseRequestAuthorizationGuest::new(json, None) {
             Ok(resp) => Box::new(resp),
             Err(e) => {
-                eprintln!("ResponseRequestAuthorizationGuest construction failed: {}", e);
+                eprintln!(
+                    "ResponseRequestAuthorizationGuest construction failed: {}",
+                    e
+                );
                 Box::new(crate::response::BaseResponse::empty())
             }
         }
@@ -66,15 +68,17 @@ impl Mutation for MutationRequestAuthorizationGuest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_mutation_request_authorization_guest_creation() {
         let mutation = MutationRequestAuthorizationGuest::new();
         let mutation_string = mutation.get_mutation();
-        
+
         // Check that the mutation string contains expected fields
-        assert!(mutation_string.contains("mutation( $cellSlug: String, $pubkey: String, $encrypt: Boolean )"));
-        assert!(mutation_string.contains("AccessToken( cellSlug: $cellSlug, pubkey: $pubkey, encrypt: $encrypt )"));
+        assert!(mutation_string
+            .contains("mutation( $cellSlug: String, $pubkey: String, $encrypt: Boolean )"));
+        assert!(mutation_string
+            .contains("AccessToken( cellSlug: $cellSlug, pubkey: $pubkey, encrypt: $encrypt )"));
         assert!(mutation_string.contains("token"));
         assert!(mutation_string.contains("pubkey"));
         assert!(mutation_string.contains("expiresAt"));

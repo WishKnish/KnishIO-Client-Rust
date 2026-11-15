@@ -9,8 +9,7 @@ use crate::response::{Response, ResponseActiveSession};
 use serde_json::Value;
 
 /// Mutation for declaring an active User Session
-pub struct MutationActiveSession {
-}
+pub struct MutationActiveSession {}
 
 impl MutationActiveSession {
     /// Create a new MutationActiveSession instance
@@ -60,12 +59,12 @@ impl Query for MutationActiveSession {
           }
         }"#
     }
-    
+
     /// Compile variables for the mutation (pass through)
     fn compiled_variables(&self, variables: Option<Value>) -> Option<Value> {
         variables
     }
-    
+
     /// Create a response from the JSON data
     fn create_response(&self, json: Value) -> Box<dyn Response> {
         match ResponseActiveSession::new(json, None) {
@@ -89,12 +88,12 @@ impl Mutation for MutationActiveSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_mutation_active_session_creation() {
         let mutation = MutationActiveSession::new();
         let mutation_string = mutation.get_mutation();
-        
+
         // Check that the mutation string contains expected fields
         assert!(mutation_string.contains("mutation("));
         assert!(mutation_string.contains("$bundleHash: String!"));

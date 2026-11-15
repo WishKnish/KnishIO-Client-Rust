@@ -3,12 +3,12 @@
 //! Mutation for requesting an authorization token from the node,
 //! equivalent to MutationRequestAuthorization.js
 
-use crate::mutation::{Mutation, propose_molecule::MutationProposeMolecule};
+use crate::client::KnishIOClient;
+use crate::graphql::GraphQLClient;
+use crate::molecule::Molecule;
+use crate::mutation::{propose_molecule::MutationProposeMolecule, Mutation};
 use crate::query::Query;
 use crate::response::{Response, ResponseRequestAuthorization};
-use crate::molecule::Molecule;
-use crate::graphql::GraphQLClient;
-use crate::client::KnishIOClient;
 use crate::types::MetaItem;
 use serde_json::Value;
 
@@ -27,48 +27,60 @@ pub struct MutationRequestAuthorization {
 
 impl MutationRequestAuthorization {
     /// Create a new MutationRequestAuthorization (matches JS constructor)
-    pub fn new(graph_ql_client: GraphQLClient, knish_io_client: KnishIOClient, molecule: Molecule) -> Self {
+    pub fn new(
+        graph_ql_client: GraphQLClient,
+        knish_io_client: KnishIOClient,
+        molecule: Molecule,
+    ) -> Self {
         MutationRequestAuthorization {
-            propose_molecule: MutationProposeMolecule::new(graph_ql_client, knish_io_client, molecule),
+            propose_molecule: MutationProposeMolecule::new(
+                graph_ql_client,
+                knish_io_client,
+                molecule,
+            ),
         }
     }
-    
+
     /// Create with just molecule (for backward compatibility)
     pub fn from_molecule(molecule: Molecule) -> Self {
         MutationRequestAuthorization {
             propose_molecule: MutationProposeMolecule::from_molecule(molecule),
         }
     }
-    
+
     /// Fill the molecule with authorization request data (matches JS fillMolecule exactly)
     /// JS: fillMolecule({ meta })
-    pub fn fill_molecule(&mut self, params: RequestAuthorizationParams) -> crate::error::Result<()> {
+    pub fn fill_molecule(
+        &mut self,
+        params: RequestAuthorizationParams,
+    ) -> crate::error::Result<()> {
         // Call molecule's initAuthorization method (matches JS: this.$__molecule.initAuthorization({ meta }))
         if let Some(ref mut molecule) = self.propose_molecule.get_molecule_mut() {
             molecule.init_authorization(params.meta)?;
-            
+
             // Sign with empty params (matches JS: this.$__molecule.sign({}))
             molecule.sign(None, false, true)?;
-            
+
             // Check molecule (matches JS: this.$__molecule.check())
             molecule.check(None)?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Create from authorization parameters (JavaScript API pattern)
     pub fn from_params(params: RequestAuthorizationParams, _secret: &str) -> Self {
         let mut molecule = Molecule::new();
-        
+
         // Apply JavaScript authorization parameters
         if !params.meta.is_empty() {
             // Initialize authorization metadata like JavaScript SDK
-            if let Err(_e) = molecule.init_meta(params.meta, "authorization", "auth_request", None) {
+            if let Err(_e) = molecule.init_meta(params.meta, "authorization", "auth_request", None)
+            {
                 // Handle initialization error gracefully
             }
         }
-        
+
         Self::from_molecule(molecule)
     }
 }
@@ -79,12 +91,12 @@ impl Query for MutationRequestAuthorization {
     fn get_query(&self) -> &str {
         self.propose_molecule.get_query()
     }
-    
+
     /// Delegate compiled variables
     fn compiled_variables(&self, variables: Option<Value>) -> Option<Value> {
         self.propose_molecule.compiled_variables(variables)
     }
-    
+
     /// Create a response from the JSON data
     fn create_response(&self, json: Value) -> Box<dyn Response> {
         Box::new(ResponseRequestAuthorization::new(json))
@@ -110,7 +122,7 @@ impl MutationRequestAuthorization {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_mutation_request_authorization_creation() {
         let molecule = Molecule::new();
@@ -119,10 +131,10 @@ mod tests {
             KnishIOClient::new(
                 "http://localhost:4000/graphql",
                 Some("TEST_CELL".to_string()),
-                None,  // socket
-                None,  // client
-                None,  // server_sdk_version
-                None   // logging
+                None, // socket
+                None, // client
+                None, // server_sdk_version
+                None, // logging
             ),
             molecule,
         );
@@ -130,18 +142,16 @@ mod tests {
         // Test basic creation
         assert!(mutation.propose_molecule.remainder_wallet().is_none());
     }
-    
+
     #[test]
     fn test_request_authorization_params() {
         let meta = vec![
             MetaItem::new("purpose", "api_access"),
             MetaItem::from_json("permissions", &serde_json::json!(["read", "write"])),
         ];
-        
-        let params = RequestAuthorizationParams {
-            meta,
-        };
-        
+
+        let params = RequestAuthorizationParams { meta };
+
         assert_eq!(params.meta.len(), 2);
     }
 
@@ -153,7 +163,17 @@ mod tests {
         use crate::wallet::Wallet;
 
         let secret = crate::crypto::generate_secret("auth-meta-parity");
-        let wallet = Wallet::new(Some(&secret), None, Some("AUTH"), None, None, None, None, None).unwrap();
+        let wallet = Wallet::new(
+            Some(&secret),
+            None,
+            Some("AUTH"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         let pubkey = wallet.pubkey.clone().expect("AUTH wallet ML-KEM pubkey");
 
         let mut molecule = Molecule::new();
@@ -162,10 +182,15 @@ mod tests {
         molecule.remainder_wallet =
             Some(Wallet::create(Some(&secret), None, "USER", None, None, None).unwrap());
 
-        let meta = vec![MetaItem::new("encrypt", true.to_string()), MetaItem::new("walletPubkey", pubkey.clone())];
+        let meta = vec![
+            MetaItem::new("encrypt", true.to_string()),
+            MetaItem::new("walletPubkey", pubkey.clone()),
+        ];
 
         let mut mutation = MutationRequestAuthorization::from_molecule(molecule);
-        mutation.fill_molecule(RequestAuthorizationParams { meta }).unwrap();
+        mutation
+            .fill_molecule(RequestAuthorizationParams { meta })
+            .unwrap();
 
         let u_atom = mutation
             .molecule()

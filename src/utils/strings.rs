@@ -3,8 +3,8 @@
 //! This module provides string manipulation functions that match the
 //! JavaScript SDK's libraries/strings.js functionality.
 
-use base64::{Engine as _, engine::general_purpose};
 use crate::error::{KnishIOError, Result};
+use base64::{engine::general_purpose, Engine as _};
 
 /// Convert a Base64 string to hexadecimal
 ///
@@ -32,8 +32,8 @@ pub fn base64_to_hex(base64: &str) -> Result<String> {
 ///
 /// The Base64-encoded representation
 pub fn hex_to_base64(hex_str: &str) -> Result<String> {
-    let bytes = hex::decode(hex_str)
-        .map_err(|e| KnishIOError::custom(format!("Invalid hex: {}", e)))?;
+    let bytes =
+        hex::decode(hex_str).map_err(|e| KnishIOError::custom(format!("Invalid hex: {}", e)))?;
     Ok(general_purpose::STANDARD.encode(bytes))
 }
 
@@ -60,7 +60,7 @@ pub fn chunk_substr(input: &str, chunk_size: usize) -> Vec<String> {
     if chunk_size == 0 {
         return vec![input.to_string()];
     }
-    
+
     input
         .chars()
         .collect::<Vec<_>>()
@@ -93,11 +93,11 @@ pub fn chunk_substr(input: &str, chunk_size: usize) -> Vec<String> {
 /// ```
 pub fn random_string(length: usize, alphabet: Option<&str>) -> String {
     use rand::RngExt;
-    
+
     let charset = alphabet.unwrap_or("abcdef0123456789");
     let charset_bytes: Vec<u8> = charset.bytes().collect();
     let mut rng = rand::rng();
-    
+
     (0..length)
         .map(|_| {
             let idx = rng.random_range(0..charset_bytes.len());
@@ -151,20 +151,20 @@ pub fn charset_base_convert(
     dest_symbol_table: Option<&str>,
 ) -> Option<String> {
     const BASE_SYMBOLS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz~`!@#$%^&*()-_=+[{]}\\|;:'\",<.>/?¿¡";
-    
+
     let src_table = src_symbol_table.unwrap_or(BASE_SYMBOLS);
     let dest_table = dest_symbol_table.unwrap_or(src_table);
-    
+
     if from_base as usize > src_table.len() || to_base as usize > dest_table.len() {
         eprintln!("charset_base_convert() - Can't convert {} to base {} greater than symbol table length. src-table: {}, dest-table: {}", 
                   src, to_base, src_table.len(), dest_table.len());
         return None;
     }
-    
+
     if src.is_empty() {
         return Some("0".to_string());
     }
-    
+
     // Convert from the source base to an arbitrary-precision integer (JS uses BigInt), so a
     // 256-bit hash converts instead of overflowing.
     use num_bigint::BigUint;
@@ -216,8 +216,7 @@ pub fn buffer_to_hex_string(buffer: &[u8]) -> String {
 ///
 /// The byte buffer
 pub fn hex_string_to_buffer(hex_str: &str) -> Result<Vec<u8>> {
-    hex::decode(hex_str)
-        .map_err(|e| KnishIOError::custom(format!("Invalid hex string: {}", e)))
+    hex::decode(hex_str).map_err(|e| KnishIOError::custom(format!("Invalid hex string: {}", e)))
 }
 
 /// Convert a hexadecimal string to base17 format
@@ -250,25 +249,23 @@ pub fn hex_to_base17(hex_str: &str) -> Result<String> {
 /// A normalized vector of key-value pairs
 pub fn normalize_meta(meta: &serde_json::Value) -> Vec<(String, String)> {
     match meta {
-        serde_json::Value::Array(arr) => {
-            arr.iter()
-                .filter_map(|item| {
-                    if let (Some(key), Some(value)) = (
-                        item.get("key").and_then(|k| k.as_str()),
-                        item.get("value").and_then(|v| v.as_str()),
-                    ) {
-                        Some((key.to_string(), value.to_string()))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        }
-        serde_json::Value::Object(obj) => {
-            obj.iter()
-                .map(|(k, v)| (k.clone(), v.to_string()))
-                .collect()
-        }
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|item| {
+                if let (Some(key), Some(value)) = (
+                    item.get("key").and_then(|k| k.as_str()),
+                    item.get("value").and_then(|v| v.as_str()),
+                ) {
+                    Some((key.to_string(), value.to_string()))
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        serde_json::Value::Object(obj) => obj
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_string()))
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -296,7 +293,7 @@ pub fn normalize_meta(meta: &serde_json::Value) -> Vec<(String, String)> {
 pub fn to_camel_case(input: &str) -> String {
     let mut result = String::new();
     let mut capitalize_next = false;
-    
+
     for ch in input.chars() {
         if ch.is_ascii_alphanumeric() {
             if capitalize_next {
@@ -309,7 +306,7 @@ pub fn to_camel_case(input: &str) -> String {
             capitalize_next = true;
         }
     }
-    
+
     result
 }
 
@@ -335,7 +332,7 @@ pub fn to_camel_case(input: &str) -> String {
 /// ```
 pub fn to_snake_case(input: &str) -> String {
     let mut result = String::new();
-    
+
     for ch in input.chars() {
         if ch.is_ascii_uppercase() {
             if !result.is_empty() {
@@ -346,7 +343,7 @@ pub fn to_snake_case(input: &str) -> String {
             result.push(ch);
         }
     }
-    
+
     result
 }
 
@@ -380,7 +377,11 @@ pub fn is_numeric(input: &str) -> bool {
 
     // Match JS isNumeric: `!isNaN(str)` rejects "NaN" (Rust's f64 parser would
     // otherwise accept it). JS accepts "Infinity", so we only exclude NaN.
-    input.trim().parse::<f64>().map(|n| !n.is_nan()).unwrap_or(false)
+    input
+        .trim()
+        .parse::<f64>()
+        .map(|n| !n.is_nan())
+        .unwrap_or(false)
 }
 
 /// Trim whitespace from a string (convenience function)
@@ -413,10 +414,10 @@ mod tests {
         let input = "abcdefghijklmnop";
         let chunks = chunk_substr(input, 4);
         assert_eq!(chunks, vec!["abcd", "efgh", "ijkl", "mnop"]);
-        
+
         let chunks = chunk_substr(input, 5);
         assert_eq!(chunks, vec!["abcde", "fghij", "klmno", "p"]);
-        
+
         let chunks = chunk_substr("", 4);
         assert!(chunks.is_empty() || chunks == vec![""]);
     }
@@ -429,12 +430,12 @@ mod tests {
         assert_eq!(s2.len(), 10);
         assert_ne!(s1, s2); // Should be different (with high probability)
         assert!(s1.chars().all(|c| "abcdef0123456789".contains(c)));
-        
+
         // Test with custom alphabet
         let hex_string = random_string(16, Some("0123456789abcdef"));
         assert_eq!(hex_string.len(), 16);
         assert!(hex_string.chars().all(|c| "0123456789abcdef".contains(c)));
-        
+
         // Test with different alphabet
         let alpha_string = random_string(8, Some("ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
         assert_eq!(alpha_string.len(), 8);
@@ -461,7 +462,10 @@ mod tests {
     #[test]
     fn test_to_camel_case() {
         assert_eq!(to_camel_case("hello-world_test"), "helloWorldTest");
-        assert_eq!(to_camel_case("some_long_variable_name"), "someLongVariableName");
+        assert_eq!(
+            to_camel_case("some_long_variable_name"),
+            "someLongVariableName"
+        );
         assert_eq!(to_camel_case("already-camelCase"), "alreadyCamelcase");
         assert_eq!(to_camel_case("simple"), "simple");
         assert_eq!(to_camel_case(""), "");
@@ -487,7 +491,7 @@ mod tests {
         assert!(is_numeric("0"));
         assert!(is_numeric("0.0"));
         assert!(is_numeric("  123  ")); // With whitespace
-        
+
         assert!(!is_numeric("abc"));
         assert!(!is_numeric(""));
         assert!(!is_numeric("   "));
@@ -501,26 +505,26 @@ mod tests {
         // Test hex to decimal conversion
         let result = charset_base_convert("FF", 16, 10, None, None);
         assert_eq!(result, Some("255".to_string()));
-        
+
         // Test decimal to hex conversion
         let result = charset_base_convert("255", 10, 16, None, None);
         assert_eq!(result, Some("FF".to_string()));
-        
+
         // Test binary to decimal conversion
         let result = charset_base_convert("1010", 2, 10, None, None);
         assert_eq!(result, Some("10".to_string()));
-        
+
         // Test with custom symbol tables
         let result = charset_base_convert("10", 2, 10, Some("01"), Some("0123456789"));
         assert_eq!(result, Some("2".to_string()));
-        
+
         // Test edge cases
         let result = charset_base_convert("0", 10, 16, None, None);
         assert_eq!(result, Some("0".to_string()));
-        
+
         let result = charset_base_convert("", 10, 16, None, None);
         assert_eq!(result, Some("0".to_string()));
-        
+
         // Test invalid base (too large)
         let result = charset_base_convert("123", 100, 10, None, None);
         assert_eq!(result, None);
@@ -538,20 +542,20 @@ mod tests {
     #[test]
     fn test_js_compatibility() {
         // Test that our implementations match JavaScript behavior
-        
+
         // chunkSubstr("abcdefghijklmnop", 4) should return ["abcd", "efgh", "ijkl", "mnop"]
         let result = chunk_substr("abcdefghijklmnop", 4);
         assert_eq!(result, vec!["abcd", "efgh", "ijkl", "mnop"]);
-        
+
         // isHex should match JavaScript regex behavior
         assert!(is_hex("ABCDEF123"));
         assert!(is_hex("abcdef123"));
         assert!(!is_hex("xyz"));
-        
+
         // String case conversions should match JavaScript
         assert_eq!(to_camel_case("hello-world"), "helloWorld");
         assert_eq!(to_snake_case("HelloWorld"), "hello_world");
-        
+
         // isNumeric should match JavaScript isNaN behavior (inverted)
         assert!(is_numeric("123"));
         assert!(is_numeric("123.45"));

@@ -28,7 +28,10 @@ const CASES: [&str; 9] = [
 const LEGACY_CASES: [&str; 2] = ["legacy-empty-strings", "legacy-nulls"];
 
 fn fixture() -> Result<Value, Box<dyn Error>> {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/version4-hash-vectors.json");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/version4-hash-vectors.json"
+    );
     Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?)
 }
 
@@ -57,7 +60,9 @@ fn check(group: &str, name: &str) -> Result<Vec<Atom>, Box<dyn Error>> {
         .iter()
         .map(|json| Atom::from_json(json, AtomFromJsonOptions::default()))
         .collect::<Result<Vec<_>, _>>()?;
-    let expected = vector["expectedHash"].as_str().ok_or("expectedHash missing")?;
+    let expected = vector["expectedHash"]
+        .as_str()
+        .ok_or("expectedHash missing")?;
     assert_eq!(Atom::hash_atoms(&atoms, "base17")?, expected, "case {name}");
     Ok(atoms)
 }
@@ -69,7 +74,10 @@ fn case(name: &str) -> TestResult {
 
 fn legacy_case(name: &str) -> TestResult {
     let atoms = check("legacyCases", name)?;
-    assert!(atoms.iter().all(|a| a.version.is_none()), "{name}: legacy atoms carry no version");
+    assert!(
+        atoms.iter().all(|a| a.version.is_none()),
+        "{name}: legacy atoms carry no version"
+    );
     Ok(())
 }
 

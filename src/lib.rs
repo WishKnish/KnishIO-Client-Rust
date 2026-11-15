@@ -58,16 +58,16 @@ pub struct ReadmeDoctests;
 // Core modules
 pub mod atom;
 pub mod crypto;
-pub mod kcore;
 pub mod error;
+pub mod kcore;
 pub mod molecule;
 pub mod types;
 pub mod wallet;
 
 // GraphQL communication modules
 pub mod graphql;
-pub mod query;
 pub mod mutation;
+pub mod query;
 pub mod response;
 
 // Client module
@@ -75,12 +75,12 @@ pub mod client;
 
 // Additional modules
 pub mod auth;
-pub mod subscribe;
 pub mod meta;
-pub mod rules;
-pub mod versions;
-pub mod token_unit;
 pub mod policy_meta;
+pub mod rules;
+pub mod subscribe;
+pub mod token_unit;
+pub mod versions;
 
 pub mod storage;
 // Utility modules
@@ -91,58 +91,61 @@ pub mod check_molecule;
 
 // Re-exports for convenience
 pub use atom::Atom;
-pub use error::{KnishIOError, Result};
-pub use molecule::{Molecule, TypeSafeMoleculeBuilder, ValueAtomParams, MetaAtomParams, IdentityAtomParams, TokenRequestAtomParams, BufferDepositAtomParams, BufferWithdrawAtomParams, FusionAtomParams, StackableTransferParams};
-pub use types::{Isotope, MetaItem, OrderedMap, OrderedValue, PolicyMap};
-pub use wallet::{Wallet, MlKemParameterSet, OtsVersion};
-pub use client::{KnishIOClient, TransferRecipient, builder::ClientBuilder};
 pub use check_molecule::{CheckMolecule, IntegrityReport, MoleculeIntegrityResult};
-pub use token_unit::TokenUnit;
+pub use client::{builder::ClientBuilder, KnishIOClient, TransferRecipient};
+pub use error::{KnishIOError, Result};
+pub use molecule::{
+    BufferDepositAtomParams, BufferWithdrawAtomParams, FusionAtomParams, IdentityAtomParams,
+    MetaAtomParams, Molecule, StackableTransferParams, TokenRequestAtomParams,
+    TypeSafeMoleculeBuilder, ValueAtomParams,
+};
 pub use policy_meta::PolicyMeta;
-
+pub use token_unit::TokenUnit;
+pub use types::{Isotope, MetaItem, OrderedMap, OrderedValue, PolicyMap};
+pub use wallet::{MlKemParameterSet, OtsVersion, Wallet};
 
 // Secret storage re-exports
-pub use storage::{
-    SecretStorageProvider, SecretStorageMetadata, EncryptedSecretPayload,
-    StorageOptions, StorageBackend, MemoryStorageBackend, FileStorageBackend,
-    MemorySecretStorageProvider, AesGcmSecretStorageProvider, RECOVERY_KEY_PREFIX,
-};
 #[cfg(feature = "keyring")]
 pub use storage::OsKeychainSecretStorageProvider;
-#[cfg(feature = "tpm")]
-pub use storage::{Tpm2Policy, Tpm2SecretStorageProvider, TpmIdentity};
 #[cfg(all(feature = "secure-enclave", target_os = "macos"))]
 pub use storage::SecureEnclaveSecretStorageProvider;
+pub use storage::{
+    AesGcmSecretStorageProvider, EncryptedSecretPayload, FileStorageBackend,
+    MemorySecretStorageProvider, MemoryStorageBackend, SecretStorageMetadata,
+    SecretStorageProvider, StorageBackend, StorageOptions, RECOVERY_KEY_PREFIX,
+};
+#[cfg(feature = "tpm")]
+pub use storage::{Tpm2Policy, Tpm2SecretStorageProvider, TpmIdentity};
 // Rules system re-exports
-pub use rules::{Rule, Callback, Condition};
+pub use rules::{Callback, Condition, Rule};
 
 // Version utilities re-exports
-pub use versions::{HashAtom, Version4, AtomVersion, StructureUtils};
+pub use versions::{AtomVersion, HashAtom, StructureUtils, Version4};
 
 // GraphQL re-exports - Production-Ready Client
 pub use graphql::{
-    GraphQLClient, GraphQLRequest, GraphQLResponse, GraphQLError, ErrorLocation,
-    SocketConfig, GraphQLConnectionStats, RetryPolicy, RetryStrategy, RetryCondition,
-    RetryExecutor, ClientConfig, ConnectionPoolConfig, PoolStats, WebSocketManager, ConnectionState,
-    WebSocketReconnectConfig, global_pool, execute_with_retry,
-    create_query_request, create_mutation_request, create_subscription_request
+    create_mutation_request, create_query_request, create_subscription_request, execute_with_retry,
+    global_pool, ClientConfig, ConnectionPoolConfig, ConnectionState, ErrorLocation, GraphQLClient,
+    GraphQLConnectionStats, GraphQLError, GraphQLRequest, GraphQLResponse, PoolStats,
+    RetryCondition, RetryExecutor, RetryPolicy, RetryStrategy, SocketConfig, WebSocketManager,
+    WebSocketReconnectConfig,
 };
-pub use query::{Query, BaseQuery};
-pub use mutation::{Mutation, BaseMutation};
-pub use response::{Response, BaseResponse};
+pub use mutation::{BaseMutation, Mutation};
+pub use query::{BaseQuery, Query};
+pub use response::{BaseResponse, Response};
 
 /// Cryptographic operations module
 ///
 /// Provides all cryptographic primitives used by the KnishIO SDK including
 /// SHAKE256 hashing, secret generation, and bundle hash computation.
-pub use crypto::{generate_bundle_hash, generate_secret, generate_batch_id, shake256};
+pub use crypto::{generate_batch_id, generate_bundle_hash, generate_secret, shake256};
 
 /// Molecule transaction builder utilities
 ///
 /// Helper functions for constructing common molecular transaction patterns.
 pub mod builders {
-    pub use crate::molecule::Molecule;
     pub use crate::atom::{Atom, AtomCreateParams};
+    pub use crate::molecule::Molecule;
     pub use crate::types::{Isotope, MetaItem};
 }
 
@@ -152,9 +155,9 @@ pub mod builders {
 /// across different SDK implementations.
 pub mod validation {
     pub use crate::atom::Atom;
-    pub use crate::molecule::Molecule;
-    pub use crate::crypto::{shake256, generate_secret};
+    pub use crate::crypto::{generate_secret, shake256};
     pub use crate::error::{KnishIOError, Result};
+    pub use crate::molecule::Molecule;
 }
 
 #[cfg(test)]
@@ -171,17 +174,10 @@ mod integration_tests {
     #[test]
     fn test_basic_workflow() {
         // Test that we can create basic SDK objects
-        let wallet = Wallet::create(
-            Some("test-secret-12345"),
-            None,
-            "TEST",
-            None,
-            None,
-            None,
-        );
-        
+        let wallet = Wallet::create(Some("test-secret-12345"), None, "TEST", None, None, None);
+
         assert!(wallet.is_ok());
-        
+
         let wallet = wallet.unwrap();
         assert_eq!(wallet.token, "TEST");
         assert!(wallet.bundle.is_some());
@@ -191,14 +187,8 @@ mod integration_tests {
     #[test]
     fn test_molecular_transaction() {
         // Test that we can create a basic molecule
-        let wallet = Wallet::create(
-            Some("test-secret-12345"),
-            None,
-            "TEST",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let wallet =
+            Wallet::create(Some("test-secret-12345"), None, "TEST", None, None, None).unwrap();
 
         let molecule = Molecule::with_params(
             Some("test-secret-12345".to_string()),
@@ -223,7 +213,7 @@ mod integration_tests {
         // Test secret generation
         let secret = generate_secret("test-seed");
         assert_eq!(secret.len(), 2048); // Should be 2048 characters
-        
+
         // Test batch ID generation
         let batch_id = generate_batch_id();
         assert_eq!(batch_id.len(), 64); // Should be 64 hex characters
@@ -232,7 +222,7 @@ mod integration_tests {
     #[test]
     fn test_atom_creation() {
         let atom = Atom::new("W1", "test-address", Isotope::V, "TEST");
-        
+
         assert_eq!(atom.position, "W1");
         assert_eq!(atom.wallet_address, "test-address");
         assert_eq!(atom.isotope, Isotope::V);
@@ -240,7 +230,7 @@ mod integration_tests {
         assert!(atom.value.is_none());
         assert!(atom.ots_fragment.is_none());
     }
-    
+
     #[test]
     fn test_client_creation() {
         let client = KnishIOClient::new(
@@ -251,7 +241,7 @@ mod integration_tests {
             Some(3),
             Some(false),
         );
-        
+
         assert_eq!(client.get_server_sdk_version(), 3);
         assert!(!client.has_secret());
         assert!(!client.has_bundle());

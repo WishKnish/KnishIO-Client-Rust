@@ -18,7 +18,10 @@ mod fixtures;
 mod phase_b_vectors {
     use super::fixtures::PHASE_B_VECTORS_JSON;
     use knishio_client::types::MoleculeFromJsonOptions;
-    use knishio_client::{generate_bundle_hash, generate_secret, Atom, Isotope, KnishIOClient, KnishIOError, MetaItem, Molecule, TokenUnit, Wallet};
+    use knishio_client::{
+        generate_bundle_hash, generate_secret, Atom, Isotope, KnishIOClient, KnishIOError,
+        MetaItem, Molecule, TokenUnit, Wallet,
+    };
     use serde_json::{json, Value};
     use std::collections::HashMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -33,11 +36,17 @@ mod phase_b_vectors {
 
     fn section(name: &str) -> TestResult<Vec<Value>> {
         let vectors: Value = serde_json::from_str(PHASE_B_VECTORS_JSON)?;
-        Ok(vectors[name]["tests"].as_array().ok_or("tests array")?.clone())
+        Ok(vectors[name]["tests"]
+            .as_array()
+            .ok_or("tests array")?
+            .clone())
     }
 
     fn meta<'a>(atom: &'a Atom, key: &str) -> Option<&'a str> {
-        atom.meta.iter().find(|m| m.key == key).and_then(|m| m.value.as_deref())
+        atom.meta
+            .iter()
+            .find(|m| m.key == key)
+            .and_then(|m| m.value.as_deref())
     }
 
     /// The unit ids of an atom's `tokenUnits` meta; an absent meta is the empty list.
@@ -46,30 +55,53 @@ mod phase_b_vectors {
             Some(json) => serde_json::from_str(json)?,
             None => Vec::new(),
         };
-        units.iter().map(|unit| Ok(unit[0].as_str().ok_or("unit id")?.to_string())).collect()
+        units
+            .iter()
+            .map(|unit| Ok(unit[0].as_str().ok_or("unit id")?.to_string()))
+            .collect()
     }
 
     fn strings(value: &Value) -> TestResult<Vec<String>> {
-        value.as_array().ok_or("string array")?.iter().map(|v| Ok(v.as_str().ok_or("string")?.to_string())).collect()
+        value
+            .as_array()
+            .ok_or("string array")?
+            .iter()
+            .map(|v| Ok(v.as_str().ok_or("string")?.to_string()))
+            .collect()
     }
 
     fn isotopes(molecule: &Molecule) -> Vec<String> {
-        molecule.atoms.iter().map(|a| a.isotope.as_str().to_string()).collect()
+        molecule
+            .atoms
+            .iter()
+            .map(|a| a.isotope.as_str().to_string())
+            .collect()
     }
 
     fn value_sum(molecule: &Molecule) -> TestResult<i128> {
-        molecule.atoms.iter()
+        molecule
+            .atoms
+            .iter()
             .filter(|a| matches!(a.isotope, Isotope::V | Isotope::B | Isotope::F))
             .map(|a| Ok(a.value.as_deref().ok_or("value")?.parse::<i128>()?))
             .sum()
     }
 
     fn units(ids: &[String]) -> Vec<TokenUnit> {
-        ids.iter().map(|id| TokenUnit::new(id.clone(), id.clone(), None)).collect()
+        ids.iter()
+            .map(|id| TokenUnit::new(id.clone(), id.clone(), None))
+            .collect()
     }
 
     fn user_source() -> TestResult<Wallet> {
-        Ok(Wallet::create(Some(SECRET), None, "USER", Some(POSITION), None, None)?)
+        Ok(Wallet::create(
+            Some(SECRET),
+            None,
+            "USER",
+            Some(POSITION),
+            None,
+            None,
+        )?)
     }
 
     #[test]
@@ -77,12 +109,19 @@ mod phase_b_vectors {
         for test in section("token_replenish")? {
             let name = test["name"].as_str().unwrap_or_default();
             let token = test["token"].as_str().ok_or("token")?;
-            let new_units: Vec<TokenUnit> = test["units"].as_array().ok_or("units")?.iter()
+            let new_units: Vec<TokenUnit> = test["units"]
+                .as_array()
+                .ok_or("units")?
+                .iter()
                 .map(|triple| -> TestResult<TokenUnit> {
                     Ok(TokenUnit::new(
                         triple[0].as_str().ok_or("id")?.to_string(),
                         triple[1].as_str().ok_or("name")?.to_string(),
-                        triple[2].as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone().into())).collect()),
+                        triple[2].as_object().map(|m| {
+                            m.iter()
+                                .map(|(k, v)| (k.clone(), v.clone().into()))
+                                .collect()
+                        }),
                     ))
                 })
                 .collect::<TestResult<_>>()?;
@@ -91,20 +130,59 @@ mod phase_b_vectors {
                 let mut credited = Wallet::create(Some(SECRET), None, token, None, None, None)?;
                 credited.batch_id = batch_id.map(str::to_string);
                 let mut molecule = Molecule::with_params(
-                    Some(SECRET.to_string()), Some(generate_bundle_hash(SECRET)), Some(user_source()?), None, None, None,
+                    Some(SECRET.to_string()),
+                    Some(generate_bundle_hash(SECRET)),
+                    Some(user_source()?),
+                    None,
+                    None,
+                    None,
                 );
-                molecule.replenish_token(&credited, test["amount"].as_f64().unwrap_or(0.0), new_units.clone())
+                molecule
+                    .replenish_token(
+                        &credited,
+                        test["amount"].as_f64().unwrap_or(0.0),
+                        new_units.clone(),
+                    )
                     .map_err(|e| format!("[{name}] replenish_token: {e}"))?;
 
-                assert_eq!(isotopes(&molecule), strings(&test["expectedIsotopes"])?, "[{name}] isotopes");
+                assert_eq!(
+                    isotopes(&molecule),
+                    strings(&test["expectedIsotopes"])?,
+                    "[{name}] isotopes"
+                );
                 let c = &molecule.atoms[0];
-                assert_eq!(c.token, "USER", "[{name}] the C atom is signed by the USER wallet");
-                assert_eq!(c.position, POSITION, "[{name}] signed at the source position");
-                assert_eq!(c.value.as_deref(), test["expectedCValue"].as_str(), "[{name}] C value");
-                assert_eq!(c.meta_type.as_deref(), test["expectedMetaType"].as_str(), "[{name}] metaType");
-                assert_eq!(c.meta_id.as_deref(), test["expectedMetaId"].as_str(), "[{name}] metaId");
-                assert_eq!(meta(c, "action"), test["expectedAction"].as_str(), "[{name}] action");
-                assert_eq!(c.batch_id, credited.batch_id, "[{name}] the atom carries the credited wallet's batch id");
+                assert_eq!(
+                    c.token, "USER",
+                    "[{name}] the C atom is signed by the USER wallet"
+                );
+                assert_eq!(
+                    c.position, POSITION,
+                    "[{name}] signed at the source position"
+                );
+                assert_eq!(
+                    c.value.as_deref(),
+                    test["expectedCValue"].as_str(),
+                    "[{name}] C value"
+                );
+                assert_eq!(
+                    c.meta_type.as_deref(),
+                    test["expectedMetaType"].as_str(),
+                    "[{name}] metaType"
+                );
+                assert_eq!(
+                    c.meta_id.as_deref(),
+                    test["expectedMetaId"].as_str(),
+                    "[{name}] metaId"
+                );
+                assert_eq!(
+                    meta(c, "action"),
+                    test["expectedAction"].as_str(),
+                    "[{name}] action"
+                );
+                assert_eq!(
+                    c.batch_id, credited.batch_id,
+                    "[{name}] the atom carries the credited wallet's batch id"
+                );
 
                 let mut expected_keys = vec!["action", "address", "position", "pubkey"];
                 if batch_id.is_some() {
@@ -116,21 +194,51 @@ mod phase_b_vectors {
                 }
                 let keys: Vec<&str> = c.meta.iter().map(|m| m.key.as_str()).collect();
                 assert_eq!(keys, expected_keys, "[{name}] C metas and their order");
-                assert_eq!(meta(c, "address"), credited.address.as_deref(), "[{name}] credited address");
-                assert_eq!(meta(c, "position"), credited.position.as_deref(), "[{name}] credited position");
-                assert_eq!(meta(c, "pubkey"), credited.pubkey.as_deref(), "[{name}] credited pubkey");
+                assert_eq!(
+                    meta(c, "address"),
+                    credited.address.as_deref(),
+                    "[{name}] credited address"
+                );
+                assert_eq!(
+                    meta(c, "position"),
+                    credited.position.as_deref(),
+                    "[{name}] credited position"
+                );
+                assert_eq!(
+                    meta(c, "pubkey"),
+                    credited.pubkey.as_deref(),
+                    "[{name}] credited pubkey"
+                );
                 assert_eq!(meta(c, "batchId"), batch_id, "[{name}] batchId meta");
                 if expected_unit_ids.is_null() {
-                    assert!(unit_ids(c)?.is_empty(), "[{name}] a fungible replenish carries no tokenUnits");
+                    assert!(
+                        unit_ids(c)?.is_empty(),
+                        "[{name}] a fungible replenish carries no tokenUnits"
+                    );
                 } else {
-                    assert_eq!(unit_ids(c)?, strings(expected_unit_ids)?, "[{name}] tokenUnits ids");
+                    assert_eq!(
+                        unit_ids(c)?,
+                        strings(expected_unit_ids)?,
+                        "[{name}] tokenUnits ids"
+                    );
                     let compact = serde_json::to_string(&test["units"])?;
-                    assert_eq!(meta(c, "tokenUnits"), Some(compact.as_str()), "[{name}] compact triples, as JS JSON.stringify");
+                    assert_eq!(
+                        meta(c, "tokenUnits"),
+                        Some(compact.as_str()),
+                        "[{name}] compact triples, as JS JSON.stringify"
+                    );
                 }
-                assert_eq!(molecule.atoms[1].token, "USER", "[{name}] the I atom continues the USER chain");
+                assert_eq!(
+                    molecule.atoms[1].token, "USER",
+                    "[{name}] the I atom continues the USER chain"
+                );
 
-                molecule.sign(None, false, true).map_err(|e| format!("[{name}] sign: {e}"))?;
-                molecule.check(None).map_err(|e| format!("[{name}] check: {e}"))?;
+                molecule
+                    .sign(None, false, true)
+                    .map_err(|e| format!("[{name}] sign: {e}"))?;
+                molecule
+                    .check(None)
+                    .map_err(|e| format!("[{name}] check: {e}"))?;
             }
         }
         Ok(())
@@ -145,76 +253,181 @@ mod phase_b_vectors {
             let new_unit_id = test["newUnitId"].as_str().ok_or("newUnitId")?;
 
             for source_batch in [None, Some("source-batch")] {
-                let mut source = Wallet::create(Some(SECRET), None, "STK", Some(POSITION), None, None)?;
+                let mut source =
+                    Wallet::create(Some(SECRET), None, "STK", Some(POSITION), None, None)?;
                 source.token_units = units(&source_units);
                 source.balance = source_units.len().to_string();
                 source.batch_id = source_batch.map(str::to_string);
                 let mut recipient = Wallet::create(Some(SECRET), None, "STK", None, None, None)?;
                 recipient.init_batch_id(Some(&source), false);
-                recipient.token_units = vec![TokenUnit::new(new_unit_id.to_string(), new_unit_id.to_string(), None)];
+                recipient.token_units = vec![TokenUnit::new(
+                    new_unit_id.to_string(),
+                    new_unit_id.to_string(),
+                    None,
+                )];
 
                 let mut molecule = Molecule::with_params(
-                    Some(SECRET.to_string()), Some(generate_bundle_hash(SECRET)), Some(source.clone()), None, None, None,
+                    Some(SECRET.to_string()),
+                    Some(generate_bundle_hash(SECRET)),
+                    Some(source.clone()),
+                    None,
+                    None,
+                    None,
                 );
                 let result = molecule.fuse_token(fuse.clone(), &recipient);
 
                 if test["mustReject"].as_bool() == Some(true) {
-                    let expected = test["expectedErrorContains"].as_str().ok_or("expectedErrorContains")?;
+                    let expected = test["expectedErrorContains"]
+                        .as_str()
+                        .ok_or("expectedErrorContains")?;
                     assert!(
                         matches!(&result, Err(KnishIOError::TransferBalanceReason(m)) if m.contains(expected)),
                         "[{name}] must be refused with {expected:?}, got {result:?}"
                     );
-                    assert!(molecule.atoms.is_empty(), "[{name}] a refused fusion adds no atom");
+                    assert!(
+                        molecule.atoms.is_empty(),
+                        "[{name}] a refused fusion adds no atom"
+                    );
                     continue;
                 }
                 result.map_err(|e| format!("[{name}] fuse_token: {e}"))?;
 
-                assert_eq!(isotopes(&molecule), strings(&test["expectedIsotopes"])?, "[{name}] isotopes");
-                let [src, burn, fusion, remainder] = &molecule.atoms[..] else { return Err(format!("[{name}] four atoms").into()) };
+                assert_eq!(
+                    isotopes(&molecule),
+                    strings(&test["expectedIsotopes"])?,
+                    "[{name}] isotopes"
+                );
+                let [src, burn, fusion, remainder] = &molecule.atoms[..] else {
+                    return Err(format!("[{name}] four atoms").into());
+                };
                 let own_bundle = generate_bundle_hash(SECRET);
 
-                assert_eq!(src.value.as_deref(), test["expectedSourceValue"].as_str(), "[{name}] source value");
-                assert_eq!(src.position, POSITION, "[{name}] signed by S at its position");
-                assert_eq!(unit_ids(src)?, strings(&test["expectedSourceUnitIds"])?, "[{name}] source (SENT) units");
+                assert_eq!(
+                    src.value.as_deref(),
+                    test["expectedSourceValue"].as_str(),
+                    "[{name}] source value"
+                );
+                assert_eq!(
+                    src.position, POSITION,
+                    "[{name}] signed by S at its position"
+                );
+                assert_eq!(
+                    unit_ids(src)?,
+                    strings(&test["expectedSourceUnitIds"])?,
+                    "[{name}] source (SENT) units"
+                );
 
-                assert_eq!(burn.value.as_deref(), test["expectedBurnValue"].as_str(), "[{name}] burn value");
-                assert_eq!((burn.meta_type.as_deref(), burn.meta_id.as_deref()), (Some("walletBundle"), Some(ZERO_BUNDLE)), "[{name}] burn target");
-                assert_eq!(unit_ids(burn)?, strings(&test["expectedBurnUnitIds"])?, "[{name}] burned units");
+                assert_eq!(
+                    burn.value.as_deref(),
+                    test["expectedBurnValue"].as_str(),
+                    "[{name}] burn value"
+                );
+                assert_eq!(
+                    (burn.meta_type.as_deref(), burn.meta_id.as_deref()),
+                    (Some("walletBundle"), Some(ZERO_BUNDLE)),
+                    "[{name}] burn target"
+                );
+                assert_eq!(
+                    unit_ids(burn)?,
+                    strings(&test["expectedBurnUnitIds"])?,
+                    "[{name}] burned units"
+                );
 
-                assert_eq!(fusion.value.as_deref(), test["expectedFusionValue"].as_str(), "[{name}] F value");
-                assert_eq!((fusion.meta_type.as_deref(), fusion.meta_id.as_deref()), (Some("walletBundle"), Some(own_bundle.as_str())), "[{name}] F recipient");
-                let new_units: Vec<Value> = serde_json::from_str(meta(fusion, "tokenUnits").ok_or("F tokenUnits")?)?;
+                assert_eq!(
+                    fusion.value.as_deref(),
+                    test["expectedFusionValue"].as_str(),
+                    "[{name}] F value"
+                );
+                assert_eq!(
+                    (fusion.meta_type.as_deref(), fusion.meta_id.as_deref()),
+                    (Some("walletBundle"), Some(own_bundle.as_str())),
+                    "[{name}] F recipient"
+                );
+                let new_units: Vec<Value> =
+                    serde_json::from_str(meta(fusion, "tokenUnits").ok_or("F tokenUnits")?)?;
                 assert_eq!(new_units.len(), 1, "[{name}] F creates exactly one unit");
                 assert_eq!(new_units[0][0], new_unit_id, "[{name}] F unit id");
-                let fused_triples = new_units[0][2]["fusedTokenUnits"].as_array().ok_or("fusedTokenUnits")?;
-                let fused_ids = strings(&Value::from(fused_triples.iter().map(|t| t[0].clone()).collect::<Vec<_>>()))?;
-                assert_eq!(fused_ids, strings(&test["expectedFusedTokenUnitIds"])?, "[{name}] fusedTokenUnits ids");
+                let fused_triples = new_units[0][2]["fusedTokenUnits"]
+                    .as_array()
+                    .ok_or("fusedTokenUnits")?;
+                let fused_ids = strings(&Value::from(
+                    fused_triples
+                        .iter()
+                        .map(|t| t[0].clone())
+                        .collect::<Vec<_>>(),
+                ))?;
+                assert_eq!(
+                    fused_ids,
+                    strings(&test["expectedFusedTokenUnitIds"])?,
+                    "[{name}] fusedTokenUnits ids"
+                );
                 for triple in fused_triples {
-                    assert_eq!(triple, &serde_json::json!([triple[0], triple[0], {}]), "[{name}] full source triples");
+                    assert_eq!(
+                        triple,
+                        &serde_json::json!([triple[0], triple[0], {}]),
+                        "[{name}] full source triples"
+                    );
                 }
 
-                assert_eq!(remainder.value.as_deref(), test["expectedRemainderValue"].as_str(), "[{name}] remainder value");
-                assert_eq!((remainder.meta_type.as_deref(), remainder.meta_id.as_deref()), (Some("walletBundle"), Some(own_bundle.as_str())), "[{name}] remainder bundle");
-                assert_eq!(unit_ids(remainder)?, strings(&test["expectedRemainderUnitIds"])?, "[{name}] kept units");
-                assert_ne!(remainder.position, POSITION, "[{name}] the remainder is a fresh position");
+                assert_eq!(
+                    remainder.value.as_deref(),
+                    test["expectedRemainderValue"].as_str(),
+                    "[{name}] remainder value"
+                );
+                assert_eq!(
+                    (remainder.meta_type.as_deref(), remainder.meta_id.as_deref()),
+                    (Some("walletBundle"), Some(own_bundle.as_str())),
+                    "[{name}] remainder bundle"
+                );
+                assert_eq!(
+                    unit_ids(remainder)?,
+                    strings(&test["expectedRemainderUnitIds"])?,
+                    "[{name}] kept units"
+                );
+                assert_ne!(
+                    remainder.position, POSITION,
+                    "[{name}] the remainder is a fresh position"
+                );
 
-                assert_eq!(value_sum(&molecule)?.to_string(), test["expectedSum"].as_str().unwrap_or_default(), "[{name}] V+F sum");
+                assert_eq!(
+                    value_sum(&molecule)?.to_string(),
+                    test["expectedSum"].as_str().unwrap_or_default(),
+                    "[{name}] V+F sum"
+                );
 
                 // Batch ids: none anywhere without one on S; otherwise the remainder keeps S's,
                 // and the burn and F atoms carry fresh ones (every V atom needs one).
                 match source_batch {
-                    None => assert!(molecule.atoms.iter().all(|a| a.batch_id.is_none()), "[{name}] no batch ids"),
+                    None => assert!(
+                        molecule.atoms.iter().all(|a| a.batch_id.is_none()),
+                        "[{name}] no batch ids"
+                    ),
                     Some(batch) => {
-                        assert_eq!(src.batch_id.as_deref(), Some(batch), "[{name}] source batch");
-                        assert_eq!(remainder.batch_id.as_deref(), Some(batch), "[{name}] remainder keeps S's batch");
+                        assert_eq!(
+                            src.batch_id.as_deref(),
+                            Some(batch),
+                            "[{name}] source batch"
+                        );
+                        assert_eq!(
+                            remainder.batch_id.as_deref(),
+                            Some(batch),
+                            "[{name}] remainder keeps S's batch"
+                        );
                         for (label, atom) in [("burn", burn), ("F", fusion)] {
-                            assert!(atom.batch_id.is_some() && atom.batch_id.as_deref() != Some(batch), "[{name}] {label} gets a fresh batch id");
+                            assert!(
+                                atom.batch_id.is_some() && atom.batch_id.as_deref() != Some(batch),
+                                "[{name}] {label} gets a fresh batch id"
+                            );
                         }
                     }
                 }
 
-                molecule.sign(None, false, true).map_err(|e| format!("[{name}] sign: {e}"))?;
-                molecule.check(Some(&source)).map_err(|e| format!("[{name}] check (batch {source_batch:?}): {e}"))?;
+                molecule
+                    .sign(None, false, true)
+                    .map_err(|e| format!("[{name}] sign: {e}"))?;
+                molecule
+                    .check(Some(&source))
+                    .map_err(|e| format!("[{name}] check (batch {source_batch:?}): {e}"))?;
             }
         }
         Ok(())
@@ -225,34 +438,87 @@ mod phase_b_vectors {
         let bundle = generate_bundle_hash(SECRET);
         for test in section("buffer_withdraw_fresh_remainder")? {
             let name = test["name"].as_str().unwrap_or_default();
-            let mut source = Wallet::create(Some(SECRET), None, "BUFTOK", Some(POSITION), None, None)?;
-            source.balance = test["sourceBalance"].as_i64().ok_or("sourceBalance")?.to_string();
+            let mut source =
+                Wallet::create(Some(SECRET), None, "BUFTOK", Some(POSITION), None, None)?;
+            source.balance = test["sourceBalance"]
+                .as_i64()
+                .ok_or("sourceBalance")?
+                .to_string();
 
             // No remainder wallet set: the builder derives the fresh remainder itself.
             let mut molecule = Molecule::new();
             molecule.secret = Some(SECRET.to_string());
             molecule.bundle = Some(bundle.clone());
             molecule.source_wallet = Some(source.clone());
-            let recipients = HashMap::from([(bundle.clone(), test["amount"].as_f64().ok_or("amount")?)]);
-            molecule.init_withdraw_buffer(recipients).map_err(|e| format!("[{name}] init_withdraw_buffer: {e}"))?;
+            let recipients =
+                HashMap::from([(bundle.clone(), test["amount"].as_f64().ok_or("amount")?)]);
+            molecule
+                .init_withdraw_buffer(recipients)
+                .map_err(|e| format!("[{name}] init_withdraw_buffer: {e}"))?;
 
-            assert_eq!(isotopes(&molecule), strings(&test["expectedIsotopes"])?, "[{name}] isotopes");
-            let [src, recipient, remainder] = &molecule.atoms[..] else { return Err(format!("[{name}] three atoms").into()) };
-            assert_eq!(src.value.as_deref(), test["expectedSourceValue"].as_str(), "[{name}] source B value");
-            assert_eq!(src.position, POSITION, "[{name}] signed by the buffer wallet");
-            assert_eq!(recipient.value.as_deref(), test["expectedRecipientValue"].as_str(), "[{name}] recipient V value");
-            assert!(recipient.position.is_empty() && recipient.wallet_address.is_empty(), "[{name}] the recipient is addressless");
-            assert_eq!(recipient.meta_id.as_deref(), Some(bundle.as_str()), "[{name}] recipient bundle");
-            assert_eq!(remainder.value.as_deref(), test["expectedRemainderValue"].as_str(), "[{name}] remainder B value");
-            assert_eq!(remainder.meta_type.as_deref(), Some("walletBundle"), "[{name}] remainder metaType");
+            assert_eq!(
+                isotopes(&molecule),
+                strings(&test["expectedIsotopes"])?,
+                "[{name}] isotopes"
+            );
+            let [src, recipient, remainder] = &molecule.atoms[..] else {
+                return Err(format!("[{name}] three atoms").into());
+            };
+            assert_eq!(
+                src.value.as_deref(),
+                test["expectedSourceValue"].as_str(),
+                "[{name}] source B value"
+            );
+            assert_eq!(
+                src.position, POSITION,
+                "[{name}] signed by the buffer wallet"
+            );
+            assert_eq!(
+                recipient.value.as_deref(),
+                test["expectedRecipientValue"].as_str(),
+                "[{name}] recipient V value"
+            );
+            assert!(
+                recipient.position.is_empty() && recipient.wallet_address.is_empty(),
+                "[{name}] the recipient is addressless"
+            );
+            assert_eq!(
+                recipient.meta_id.as_deref(),
+                Some(bundle.as_str()),
+                "[{name}] recipient bundle"
+            );
+            assert_eq!(
+                remainder.value.as_deref(),
+                test["expectedRemainderValue"].as_str(),
+                "[{name}] remainder B value"
+            );
+            assert_eq!(
+                remainder.meta_type.as_deref(),
+                Some("walletBundle"),
+                "[{name}] remainder metaType"
+            );
             if test["expectedRemainderPositionDistinctFromSource"].as_bool() == Some(true) {
-                assert!(!remainder.position.is_empty() && remainder.position != POSITION, "[{name}] fresh remainder position");
+                assert!(
+                    !remainder.position.is_empty() && remainder.position != POSITION,
+                    "[{name}] fresh remainder position"
+                );
             }
-            assert_eq!(value_sum(&molecule)?.to_string(), test["expectedSum"].as_str().unwrap_or_default(), "[{name}] V+B sum");
-            assert!(molecule.atoms.iter().all(|a| a.isotope != Isotope::I), "[{name}] no I atom");
+            assert_eq!(
+                value_sum(&molecule)?.to_string(),
+                test["expectedSum"].as_str().unwrap_or_default(),
+                "[{name}] V+B sum"
+            );
+            assert!(
+                molecule.atoms.iter().all(|a| a.isotope != Isotope::I),
+                "[{name}] no I atom"
+            );
 
-            molecule.sign(None, false, true).map_err(|e| format!("[{name}] sign: {e}"))?;
-            molecule.check(Some(&source)).map_err(|e| format!("[{name}] check: {e}"))?;
+            molecule
+                .sign(None, false, true)
+                .map_err(|e| format!("[{name}] sign: {e}"))?;
+            molecule
+                .check(Some(&source))
+                .map_err(|e| format!("[{name}] check: {e}"))?;
 
             // A remainder at the source's own position is refused before any atom is built.
             let mut at_source = Molecule::new();
@@ -260,7 +526,10 @@ mod phase_b_vectors {
             at_source.source_wallet = Some(source.clone());
             at_source.remainder_wallet = Some(source.clone());
             let refused = at_source.init_withdraw_buffer(HashMap::from([(bundle.clone(), 1.0)]));
-            assert!(matches!(refused, Err(KnishIOError::TransferRemainder)), "[{name}] remainder at S refused: {refused:?}");
+            assert!(
+                matches!(refused, Err(KnishIOError::TransferRemainder)),
+                "[{name}] remainder at S refused: {refused:?}"
+            );
             assert!(at_source.atoms.is_empty(), "[{name}] nothing built");
         }
         Ok(())
@@ -274,7 +543,8 @@ mod phase_b_vectors {
         loop {
             if let Some(end) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
                 let head = String::from_utf8_lossy(&buffer[..end]).to_ascii_lowercase();
-                let length: usize = head.lines()
+                let length: usize = head
+                    .lines()
                     .find_map(|l| l.strip_prefix("content-length:"))
                     .and_then(|v| v.trim().parse().ok())
                     .unwrap_or(0);
@@ -290,9 +560,16 @@ mod phase_b_vectors {
         }
     }
 
-    async fn answer(mut socket: TcpStream, recorder: &tokio::sync::mpsc::UnboundedSender<Value>) -> StubResult<()> {
+    async fn answer(
+        mut socket: TcpStream,
+        recorder: &tokio::sync::mpsc::UnboundedSender<Value>,
+    ) -> StubResult<()> {
         let request = read_json_body(&mut socket).await?;
-        let reply = if request["query"].as_str().unwrap_or_default().contains("ContinuId") {
+        let reply = if request["query"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("ContinuId")
+        {
             json!({ "data": { "ContinuId": null } })
         } else {
             json!({ "data": { "ProposeMolecule": {
@@ -338,31 +615,81 @@ mod phase_b_vectors {
         for test in section("create_token_units")? {
             let name = test["name"].as_str().unwrap_or_default();
             let (url, mut received) = loopback_validator().await?;
-            let mut client = KnishIOClient::new(url.as_str(), Some("public".to_string()), None, None, None, Some(false));
+            let mut client = KnishIOClient::new(
+                url.as_str(),
+                Some("public".to_string()),
+                None,
+                None,
+                None,
+                Some(false),
+            );
             client.set_secret(secret.as_str());
             let meta = vec![MetaItem::new("fungibility", "stackable")];
-            client.create_token(test["token"].as_str().ok_or("token")?, None, meta, None, strings(&test["units"])?).await
+            client
+                .create_token(
+                    test["token"].as_str().ok_or("token")?,
+                    None,
+                    meta,
+                    None,
+                    strings(&test["units"])?,
+                )
+                .await
                 .map_err(|e| format!("[{name}] create_token: {e}"))?;
 
             let mut proposals = Vec::new();
             while let Ok(request) = received.try_recv() {
-                if request["query"].as_str().unwrap_or_default().contains("ProposeMolecule") {
+                if request["query"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("ProposeMolecule")
+                {
                     proposals.push(request["variables"]["molecule"].clone());
                 }
             }
             let sent = proposals.last().ok_or("no molecule proposed")?;
             let c = &sent["atoms"][0];
-            let wire_meta = |key: &str| c["meta"].as_array()?.iter().find(|m| m["key"] == key)?["value"].as_str();
-            assert_eq!(c["isotope"], "C", "[{name}] the token creation C atom comes first");
-            assert_eq!(wire_meta("tokenUnits"), test["expectedTokenUnits"].as_str(), "[{name}] tokenUnits, byte-exact");
-            assert_eq!(c["value"].as_str(), test["expectedCValue"].as_str(), "[{name}] C value = unit count");
-            assert_eq!(c["metaType"].as_str(), test["expectedMetaType"].as_str(), "[{name}] metaType");
-            assert_eq!(c["metaId"].as_str(), test["expectedMetaId"].as_str(), "[{name}] metaId");
+            let wire_meta = |key: &str| {
+                c["meta"].as_array()?.iter().find(|m| m["key"] == key)?["value"].as_str()
+            };
+            assert_eq!(
+                c["isotope"], "C",
+                "[{name}] the token creation C atom comes first"
+            );
+            assert_eq!(
+                wire_meta("tokenUnits"),
+                test["expectedTokenUnits"].as_str(),
+                "[{name}] tokenUnits, byte-exact"
+            );
+            assert_eq!(
+                c["value"].as_str(),
+                test["expectedCValue"].as_str(),
+                "[{name}] C value = unit count"
+            );
+            assert_eq!(
+                c["metaType"].as_str(),
+                test["expectedMetaType"].as_str(),
+                "[{name}] metaType"
+            );
+            assert_eq!(
+                c["metaId"].as_str(),
+                test["expectedMetaId"].as_str(),
+                "[{name}] metaId"
+            );
 
             let molecule = Molecule::from_json(sent, MoleculeFromJsonOptions::default())?;
-            assert_eq!(molecule.atoms[0].isotope, Isotope::C, "[{name}] reconstructed C atom");
-            assert_eq!(unit_ids(&molecule.atoms[0])?, strings(&test["expectedTokenUnitIds"])?, "[{name}] tokenUnits ids");
-            molecule.check(None).map_err(|e| format!("[{name}] check: {e}"))?;
+            assert_eq!(
+                molecule.atoms[0].isotope,
+                Isotope::C,
+                "[{name}] reconstructed C atom"
+            );
+            assert_eq!(
+                unit_ids(&molecule.atoms[0])?,
+                strings(&test["expectedTokenUnitIds"])?,
+                "[{name}] tokenUnits ids"
+            );
+            molecule
+                .check(None)
+                .map_err(|e| format!("[{name}] check: {e}"))?;
         }
         Ok(())
     }
@@ -376,12 +703,25 @@ mod phase_b_vectors {
         units: Vec<String>,
     ) -> TestResult<Value> {
         let (url, mut received) = loopback_validator().await?;
-        let mut client = KnishIOClient::new(url.as_str(), Some("public".to_string()), None, None, None, Some(false));
+        let mut client = KnishIOClient::new(
+            url.as_str(),
+            Some("public".to_string()),
+            None,
+            None,
+            None,
+            Some(false),
+        );
         client.set_secret(secret);
-        client.create_token("STK", amount, meta, batch_id, units).await?;
+        client
+            .create_token("STK", amount, meta, batch_id, units)
+            .await?;
         let mut proposals = Vec::new();
         while let Ok(request) = received.try_recv() {
-            if request["query"].as_str().unwrap_or_default().contains("ProposeMolecule") {
+            if request["query"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("ProposeMolecule")
+            {
                 proposals.push(request["variables"]["molecule"].clone());
             }
         }
@@ -407,20 +747,68 @@ mod phase_b_vectors {
         let secret = generate_secret("create-token-batch-ids");
 
         let c = proposed_create_token(&secret, None, stackable(), None, unit_list()).await?;
-        assert!(c["batchId"].is_null(), "stackable, no batch id: the C atom has none, got {}", c["batchId"]);
-        assert_eq!(wire_meta(&c, "walletBatchId"), None, "stackable, no batch id: the recipient wallet has none");
-        let generated = wire_meta(&c, "batchId").ok_or("stackable, no batch id: no batchId meta")?;
-        assert!(generated.len() == 64 && generated.chars().all(|ch| ch.is_ascii_hexdigit()), "a fresh batch id: {generated}");
+        assert!(
+            c["batchId"].is_null(),
+            "stackable, no batch id: the C atom has none, got {}",
+            c["batchId"]
+        );
+        assert_eq!(
+            wire_meta(&c, "walletBatchId"),
+            None,
+            "stackable, no batch id: the recipient wallet has none"
+        );
+        let generated =
+            wire_meta(&c, "batchId").ok_or("stackable, no batch id: no batchId meta")?;
+        assert!(
+            generated.len() == 64 && generated.chars().all(|ch| ch.is_ascii_hexdigit()),
+            "a fresh batch id: {generated}"
+        );
 
-        let c = proposed_create_token(&secret, None, stackable(), Some("explicit-batch"), unit_list()).await?;
-        assert_eq!(c["batchId"], "explicit-batch", "stackable, explicit batch id: the C atom");
-        assert_eq!(wire_meta(&c, "walletBatchId"), Some("explicit-batch"), "stackable, explicit batch id: the wallet");
-        assert_eq!(wire_meta(&c, "batchId"), Some("explicit-batch"), "stackable, explicit batch id: the meta");
+        let c = proposed_create_token(
+            &secret,
+            None,
+            stackable(),
+            Some("explicit-batch"),
+            unit_list(),
+        )
+        .await?;
+        assert_eq!(
+            c["batchId"], "explicit-batch",
+            "stackable, explicit batch id: the C atom"
+        );
+        assert_eq!(
+            wire_meta(&c, "walletBatchId"),
+            Some("explicit-batch"),
+            "stackable, explicit batch id: the wallet"
+        );
+        assert_eq!(
+            wire_meta(&c, "batchId"),
+            Some("explicit-batch"),
+            "stackable, explicit batch id: the meta"
+        );
 
-        let c = proposed_create_token(&secret, Some(1000.0), Vec::new(), Some("explicit-batch"), vec![]).await?;
-        assert_eq!(c["batchId"], "explicit-batch", "fungible, explicit batch id: the C atom");
-        assert_eq!(wire_meta(&c, "walletBatchId"), Some("explicit-batch"), "fungible, explicit batch id: the wallet");
-        assert_eq!(wire_meta(&c, "batchId"), None, "fungible: no batchId meta, as JS");
+        let c = proposed_create_token(
+            &secret,
+            Some(1000.0),
+            Vec::new(),
+            Some("explicit-batch"),
+            vec![],
+        )
+        .await?;
+        assert_eq!(
+            c["batchId"], "explicit-batch",
+            "fungible, explicit batch id: the C atom"
+        );
+        assert_eq!(
+            wire_meta(&c, "walletBatchId"),
+            Some("explicit-batch"),
+            "fungible, explicit batch id: the wallet"
+        );
+        assert_eq!(
+            wire_meta(&c, "batchId"),
+            None,
+            "fungible: no batchId meta, as JS"
+        );
         Ok(())
     }
 
@@ -433,12 +821,27 @@ mod phase_b_vectors {
         use knishio_client::OtsVersion;
         let secret = generate_secret("fleet-audit-2026-11");
         for _ in 0..20 {
-            let c = proposed_create_token(&secret, None, stackable(), Some("explicit-batch"), unit_list()).await?;
+            let c = proposed_create_token(
+                &secret,
+                None,
+                stackable(),
+                Some("explicit-batch"),
+                unit_list(),
+            )
+            .await?;
 
             // The metas create_token passed: every C meta before the recipient wallet's
-            let user_meta: Vec<MetaItem> = c["meta"].as_array().ok_or("C metas")?.iter()
+            let user_meta: Vec<MetaItem> = c["meta"]
+                .as_array()
+                .ok_or("C metas")?
+                .iter()
                 .take_while(|m| m["key"] != "walletTokenSlug")
-                .map(|m| Ok(MetaItem::new(m["key"].as_str().ok_or("key")?, m["value"].as_str().ok_or("value")?)))
+                .map(|m| {
+                    Ok(MetaItem::new(
+                        m["key"].as_str().ok_or("key")?,
+                        m["value"].as_str().ok_or("value")?,
+                    ))
+                })
                 .collect::<TestResult<_>>()?;
             assert_eq!(
                 serde_json::to_string(&user_meta)?,
@@ -446,29 +849,45 @@ mod phase_b_vectors {
             );
 
             let wallet = |token: &str, at: &str, batch_id: Option<&str>| {
-                Wallet::new_with_ots_version(Some(&secret), None, Some(token), None, Some(&at.repeat(32)), batch_id, None, None, OtsVersion::V1)
+                Wallet::new_with_ots_version(
+                    Some(&secret),
+                    None,
+                    Some(token),
+                    None,
+                    Some(&at.repeat(32)),
+                    batch_id,
+                    None,
+                    None,
+                    OtsVersion::V1,
+                )
             };
             let mut molecule = Molecule::new();
             molecule.secret = Some(secret.clone());
             molecule.source_wallet = Some(wallet("USER", "aa", None)?);
             molecule.remainder_wallet = Some(wallet("USER", "bb", None)?);
-            molecule.init_token_creation(&wallet("STK", "cc", Some("explicit-batch"))?, 2.0, user_meta)?;
+            molecule.init_token_creation(
+                &wallet("STK", "cc", Some("explicit-batch"))?,
+                2.0,
+                user_meta,
+            )?;
             for atom in &mut molecule.atoms {
                 atom.created_at = "1700000000000".to_string();
             }
-            assert_eq!(Atom::hash_atoms(&molecule.atoms, "base17")?, "04g5df2f94a1c19aaa4ac57d3d95ee278ea2037db233e6g1b051e5bgb020a70a");
+            assert_eq!(
+                Atom::hash_atoms(&molecule.atoms, "base17")?,
+                "04g5df2f94a1c19aaa4ac57d3d95ee278ea2037db233e6g1b051e5bgb020a70a"
+            );
         }
         Ok(())
     }
 }
 
 mod patent_vectors {
-    use serde::Deserialize;
     use knishio_client::crypto::{
-        shake256, generate_bundle_hash, generate_key, generate_address,
-        generate_ots_signature, generate_secret,
-        hex_to_base17, normalize_hash,
+        generate_address, generate_bundle_hash, generate_key, generate_ots_signature,
+        generate_secret, hex_to_base17, normalize_hash, shake256,
     };
+    use serde::Deserialize;
 
     // ── JSON structures matching canonical-patent-vectors.json ───────────────
 
@@ -611,9 +1030,7 @@ mod patent_vectors {
 
     // ── Load canonical vectors ──────────────────────────────────────────────
 
-    const PATENT_VECTORS_JSON: &str = include_str!(
-        "fixtures/canonical-patent-vectors.json"
-    );
+    const PATENT_VECTORS_JSON: &str = include_str!("fixtures/canonical-patent-vectors.json");
 
     fn load_patent_vectors() -> PatentVectors {
         serde_json::from_str(PATENT_VECTORS_JSON)
@@ -629,10 +1046,17 @@ mod patent_vectors {
         let vectors = load_patent_vectors();
         for test in &vectors.vectors.generate_secret.tests {
             let secret = generate_secret(&test.seed);
-            assert_eq!(secret.len(), test.length,
-                "generate_secret('{}') length mismatch", test.seed);
-            assert_eq!(secret, test.expected_secret,
-                "generate_secret('{}') value mismatch (cross-SDK parity)", test.seed);
+            assert_eq!(
+                secret.len(),
+                test.length,
+                "generate_secret('{}') length mismatch",
+                test.seed
+            );
+            assert_eq!(
+                secret, test.expected_secret,
+                "generate_secret('{}') value mismatch (cross-SDK parity)",
+                test.seed
+            );
         }
     }
 
@@ -651,8 +1075,9 @@ mod patent_vectors {
         let position = "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b";
 
         for test in &vectors.vectors.buffer_deposit_conservation.tests {
-            let mut source = Wallet::create(Some(secret), None, "BUFTOK", Some(position), None, None)
-                .expect("create buffer source wallet");
+            let mut source =
+                Wallet::create(Some(secret), None, "BUFTOK", Some(position), None, None)
+                    .expect("create buffer source wallet");
             source.balance = test.source_balance.to_string();
 
             let mut mol = Molecule::with_params(
@@ -677,8 +1102,9 @@ mod patent_vectors {
                 let iso = a["isotope"].as_str().unwrap_or("");
                 if iso == "V" || iso == "B" {
                     if let Some(v) = a["value"].as_str() {
-                        sum += v.parse::<i128>()
-                            .unwrap_or_else(|_| panic!("[{}] unparseable atom value '{}'", test.name, v));
+                        sum += v.parse::<i128>().unwrap_or_else(|_| {
+                            panic!("[{}] unparseable atom value '{}'", test.name, v)
+                        });
                         if iso == "V" {
                             v_values.push(v.to_string());
                         } else {
@@ -688,15 +1114,31 @@ mod patent_vectors {
                 }
             }
 
-            assert_eq!(sum.to_string(), test.expected_sum,
-                "[{}] V+B conservation sum must be 0", test.name);
+            assert_eq!(
+                sum.to_string(),
+                test.expected_sum,
+                "[{}] V+B conservation sum must be 0",
+                test.name
+            );
             // Emit order: source V (full-balance debit), buffer B (+amount), remainder V (+change).
-            assert_eq!(v_values.first().map(String::as_str), Some(test.expected_source_value.as_str()),
-                "[{}] source V-atom must debit the full balance", test.name);
-            assert_eq!(b_value.as_deref(), Some(test.expected_buffer_value.as_str()),
-                "[{}] buffer B-atom value", test.name);
-            assert_eq!(v_values.get(1).map(String::as_str), Some(test.expected_remainder_value.as_str()),
-                "[{}] remainder V-atom value", test.name);
+            assert_eq!(
+                v_values.first().map(String::as_str),
+                Some(test.expected_source_value.as_str()),
+                "[{}] source V-atom must debit the full balance",
+                test.name
+            );
+            assert_eq!(
+                b_value.as_deref(),
+                Some(test.expected_buffer_value.as_str()),
+                "[{}] buffer B-atom value",
+                test.name
+            );
+            assert_eq!(
+                v_values.get(1).map(String::as_str),
+                Some(test.expected_remainder_value.as_str()),
+                "[{}] remainder V-atom value",
+                test.name
+            );
         }
     }
 
@@ -717,8 +1159,9 @@ mod patent_vectors {
         let position = "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b";
 
         for test in &vectors.vectors.buffer_withdraw_conservation.tests {
-            let mut source = Wallet::create(Some(secret), None, "BUFTOK", Some(position), None, None)
-                .expect("create buffer source wallet");
+            let mut source =
+                Wallet::create(Some(secret), None, "BUFTOK", Some(position), None, None)
+                    .expect("create buffer source wallet");
             source.balance = test.source_balance.to_string();
 
             let mut mol = Molecule::with_params(
@@ -747,8 +1190,9 @@ mod patent_vectors {
                 let iso = a["isotope"].as_str().unwrap_or("");
                 if iso == "V" || iso == "B" {
                     if let Some(v) = a["value"].as_str() {
-                        sum += v.parse::<i128>()
-                            .unwrap_or_else(|_| panic!("[{}] unparseable atom value '{}'", test.name, v));
+                        sum += v.parse::<i128>().unwrap_or_else(|_| {
+                            panic!("[{}] unparseable atom value '{}'", test.name, v)
+                        });
                         if iso == "B" {
                             b_values.push(v.to_string());
                         } else {
@@ -758,15 +1202,31 @@ mod patent_vectors {
                 }
             }
 
-            assert_eq!(sum.to_string(), test.expected_sum,
-                "[{}] V+B conservation sum must be 0", test.name);
+            assert_eq!(
+                sum.to_string(),
+                test.expected_sum,
+                "[{}] V+B conservation sum must be 0",
+                test.name
+            );
             // Emit order: source B (full-balance debit), recipient V (+amount), remainder B (+change).
-            assert_eq!(b_values.first().map(String::as_str), Some(test.expected_source_value.as_str()),
-                "[{}] source B-atom must debit the full balance", test.name);
-            assert_eq!(v_values.first().map(String::as_str), Some(test.expected_recipient_value.as_str()),
-                "[{}] recipient V-atom value", test.name);
-            assert_eq!(b_values.get(1).map(String::as_str), Some(test.expected_remainder_value.as_str()),
-                "[{}] remainder B-atom value", test.name);
+            assert_eq!(
+                b_values.first().map(String::as_str),
+                Some(test.expected_source_value.as_str()),
+                "[{}] source B-atom must debit the full balance",
+                test.name
+            );
+            assert_eq!(
+                v_values.first().map(String::as_str),
+                Some(test.expected_recipient_value.as_str()),
+                "[{}] recipient V-atom value",
+                test.name
+            );
+            assert_eq!(
+                b_values.get(1).map(String::as_str),
+                Some(test.expected_remainder_value.as_str()),
+                "[{}] remainder B-atom value",
+                test.name
+            );
         }
     }
 
@@ -778,25 +1238,37 @@ mod patent_vectors {
         for test in &vectors.vectors.continuid_chain.tests {
             // Verify bundle hash
             let bundle = generate_bundle_hash(&test.secret);
-            assert_eq!(bundle, test.expected_bundle,
-                "Bundle hash mismatch for '{}'", test.name);
+            assert_eq!(
+                bundle, test.expected_bundle,
+                "Bundle hash mismatch for '{}'",
+                test.name
+            );
 
             // Verify wallet at position 1
             let key1 = generate_key(&test.secret, &test.token, &test.position1);
             let address1 = generate_address(&key1).unwrap();
-            assert_eq!(address1, test.expected_address1,
-                "Address1 mismatch for '{}'", test.name);
+            assert_eq!(
+                address1, test.expected_address1,
+                "Address1 mismatch for '{}'",
+                test.name
+            );
 
             // Verify ContinuID position derivation: position2 = SHAKE256(position1, 256)
             let position2 = shake256(&test.position1, 256);
-            assert_eq!(position2, test.expected_position2,
-                "Position2 derivation mismatch for '{}'", test.name);
+            assert_eq!(
+                position2, test.expected_position2,
+                "Position2 derivation mismatch for '{}'",
+                test.name
+            );
 
             // Verify wallet at position 2
             let key2 = generate_key(&test.secret, &test.token, &position2);
             let address2 = generate_address(&key2).unwrap();
-            assert_eq!(address2, test.expected_address2,
-                "Address2 mismatch for '{}'", test.name);
+            assert_eq!(
+                address2, test.expected_address2,
+                "Address2 mismatch for '{}'",
+                test.name
+            );
 
             // Verify invariants
             assert_ne!(test.position1, position2, "Positions must differ");
@@ -811,15 +1283,20 @@ mod patent_vectors {
 
         for test in &vectors.vectors.base17_enumeration.tests {
             let base17 = hex_to_base17(&test.hex_input).unwrap();
-            assert_eq!(base17, test.expected_base17,
-                "Base17 mismatch for '{}'", test.name);
+            assert_eq!(
+                base17, test.expected_base17,
+                "Base17 mismatch for '{}'",
+                test.name
+            );
 
             // Verify normalized sum = 0 (WOTS+ invariant)
             let normalized = normalize_hash(&base17);
             let sum: i32 = normalized.iter().map(|&x| x as i32).sum();
-            assert_eq!(sum, test.normalized_sum,
+            assert_eq!(
+                sum, test.normalized_sum,
                 "Normalized sum mismatch for '{}': expected {}, got {}",
-                test.name, test.normalized_sum, sum);
+                test.name, test.normalized_sum, sum
+            );
         }
     }
 
@@ -830,16 +1307,21 @@ mod patent_vectors {
 
         for test in &vectors.vectors.multi_isotope_molecule.tests {
             let bundle = generate_bundle_hash(&test.secret);
-            assert_eq!(bundle, test.expected_bundle,
-                "Bundle mismatch for '{}'", test.name);
+            assert_eq!(
+                bundle, test.expected_bundle,
+                "Bundle mismatch for '{}'",
+                test.name
+            );
 
             let mut addresses = Vec::new();
             for (isotope_name, spec) in &test.isotopes {
                 let key = generate_key(&test.secret, &spec.token, &spec.expected_position);
                 let address = generate_address(&key).unwrap();
-                assert_eq!(address, spec.expected_address,
+                assert_eq!(
+                    address, spec.expected_address,
                     "Address mismatch for '{}' isotope {} at position {}",
-                    test.name, isotope_name, spec.expected_position);
+                    test.name, isotope_name, spec.expected_position
+                );
                 addresses.push(address);
             }
 
@@ -850,8 +1332,12 @@ mod patent_vectors {
                 sorted.dedup();
                 sorted.len()
             };
-            assert_eq!(unique_count, addresses.len(),
-                "All isotope addresses must be unique for '{}'", test.name);
+            assert_eq!(
+                unique_count,
+                addresses.len(),
+                "All isotope addresses must be unique for '{}'",
+                test.name
+            );
         }
     }
 
@@ -862,20 +1348,34 @@ mod patent_vectors {
 
         for test in &vectors.vectors.bigint_carry_edge.tests {
             // Verify input length
-            assert_eq!(test.input.len(), test.input_length,
-                "Input length mismatch for '{}'", test.name);
+            assert_eq!(
+                test.input.len(),
+                test.input_length,
+                "Input length mismatch for '{}'",
+                test.name
+            );
 
             // Verify SHAKE256 hash
             let hash = shake256(&test.input, 256);
-            assert_eq!(hash, test.expected_shake256,
-                "SHAKE256 mismatch for '{}'", test.name);
-            assert_eq!(hash.len(), 64,
-                "SHAKE256 output must be 64 hex chars for '{}'", test.name);
+            assert_eq!(
+                hash, test.expected_shake256,
+                "SHAKE256 mismatch for '{}'",
+                test.name
+            );
+            assert_eq!(
+                hash.len(),
+                64,
+                "SHAKE256 output must be 64 hex chars for '{}'",
+                test.name
+            );
 
             // Verify Base17 of hash
             let base17 = hex_to_base17(&hash).unwrap();
-            assert_eq!(base17, test.expected_base17_of_hash,
-                "Base17(SHAKE256) mismatch for '{}'", test.name);
+            assert_eq!(
+                base17, test.expected_base17_of_hash,
+                "Base17(SHAKE256) mismatch for '{}'",
+                test.name
+            );
 
             // Verify key generation produces correct length
             let key = generate_key(
@@ -883,8 +1383,12 @@ mod patent_vectors {
                 "USER",
                 "0000000000000000000000000000000000000000000000000000000000000001",
             );
-            assert_eq!(key.len(), test.expected_key_length,
-                "Key length mismatch for '{}'", test.name);
+            assert_eq!(
+                key.len(),
+                test.expected_key_length,
+                "Key length mismatch for '{}'",
+                test.name
+            );
         }
     }
 
@@ -900,22 +1404,38 @@ mod patent_vectors {
             // CheckMolecule::ots): hash each key chunk 16 times, join, then
             // digest = SHAKE256(joined, 8192) and address = SHAKE256(digest, 256).
             let ots_address = generate_address(&key).unwrap();
-            assert_eq!(ots_address, test.expected_ots_address,
-                "OTS address mismatch for '{}'", test.name);
+            assert_eq!(
+                ots_address, test.expected_ots_address,
+                "OTS address mismatch for '{}'",
+                test.name
+            );
 
             // Verify Base17 conversion of molecular hash
             let base17 = hex_to_base17(&test.molecular_hash_hex).unwrap();
-            assert_eq!(base17, test.molecular_hash_base17,
-                "Molecular hash Base17 mismatch for '{}'", test.name);
+            assert_eq!(
+                base17, test.molecular_hash_base17,
+                "Molecular hash Base17 mismatch for '{}'",
+                test.name
+            );
 
             // Generate signature
             let signature = generate_ots_signature(&key, &test.molecular_hash_base17).unwrap();
-            assert_eq!(signature.len(), test.expected_signature_fragment_count,
-                "Fragment count mismatch for '{}'", test.name);
-            assert_eq!(signature[0], test.expected_signature_fragment0,
-                "Fragment 0 mismatch for '{}'", test.name);
-            assert_eq!(signature[15], test.expected_signature_fragment15,
-                "Fragment 15 mismatch for '{}'", test.name);
+            assert_eq!(
+                signature.len(),
+                test.expected_signature_fragment_count,
+                "Fragment count mismatch for '{}'",
+                test.name
+            );
+            assert_eq!(
+                signature[0], test.expected_signature_fragment0,
+                "Fragment 0 mismatch for '{}'",
+                test.name
+            );
+            assert_eq!(
+                signature[15], test.expected_signature_fragment15,
+                "Fragment 15 mismatch for '{}'",
+                test.name
+            );
 
             // Sign-then-verify roundtrip (two-pass, mirroring CheckMolecule::ots):
             // recover the public-key fragments from the signature (hash each fragment
@@ -932,11 +1452,17 @@ mod patent_vectors {
             }
             let recovered_digest = shake256(&recovered, 8192);
             let recovered_address = shake256(&recovered_digest, 256);
-            assert_eq!(recovered_address, test.expected_ots_address,
-                "Roundtrip recovered address mismatch for '{}'", test.name);
+            assert_eq!(
+                recovered_address, test.expected_ots_address,
+                "Roundtrip recovered address mismatch for '{}'",
+                test.name
+            );
             let verified = recovered_address == test.expected_ots_address;
-            assert_eq!(verified, test.expected_verified,
-                "Verification mismatch for '{}': expected {}", test.name, test.expected_verified);
+            assert_eq!(
+                verified, test.expected_verified,
+                "Verification mismatch for '{}': expected {}",
+                test.name, test.expected_verified
+            );
         }
     }
 
@@ -945,11 +1471,24 @@ mod patent_vectors {
     #[test]
     fn phase_b_fixture_mirror_matches_master() -> Result<(), serde_json::Error> {
         let master: serde_json::Value = serde_json::from_str(PATENT_VECTORS_JSON)?;
-        let mirror: serde_json::Value = serde_json::from_str(super::fixtures::PHASE_B_VECTORS_JSON)?;
-        let sections = ["token_replenish", "stackable_fusion_conservation", "buffer_withdraw_fresh_remainder", "create_token_units"];
-        assert_eq!(mirror.as_object().map(|m| m.len()), Some(sections.len()), "the mirror holds exactly the Phase B sections");
+        let mirror: serde_json::Value =
+            serde_json::from_str(super::fixtures::PHASE_B_VECTORS_JSON)?;
+        let sections = [
+            "token_replenish",
+            "stackable_fusion_conservation",
+            "buffer_withdraw_fresh_remainder",
+            "create_token_units",
+        ];
+        assert_eq!(
+            mirror.as_object().map(|m| m.len()),
+            Some(sections.len()),
+            "the mirror holds exactly the Phase B sections"
+        );
         for section in sections {
-            assert_eq!(mirror[section], master["vectors"][section], "fixture section {section} drifted from the master");
+            assert_eq!(
+                mirror[section], master["vectors"][section],
+                "fixture section {section} drifted from the master"
+            );
         }
         Ok(())
     }

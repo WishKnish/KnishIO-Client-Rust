@@ -83,14 +83,24 @@ impl OtsVersion {
 
     /// The higher of this version and `floor`: V2 when either is V2
     pub fn at_least(self, floor: OtsVersion) -> OtsVersion {
-        if self == Self::V2 || floor == Self::V2 { Self::V2 } else { Self::V1 }
+        if self == Self::V2 || floor == Self::V2 {
+            Self::V2
+        } else {
+            Self::V1
+        }
     }
 
     /// The OTS version under which `secret` derives `address` for `token` at `position`
     ///
     /// Tries `preferred` first, then the other version; the address comparison ignores case.
     /// `None` when neither version derives `address`.
-    pub fn detect(secret: &str, token: &str, position: &str, address: &str, preferred: OtsVersion) -> Option<OtsVersion> {
+    pub fn detect(
+        secret: &str,
+        token: &str,
+        position: &str,
+        address: &str,
+        preferred: OtsVersion,
+    ) -> Option<OtsVersion> {
         [preferred, preferred.other()].into_iter().find(|version| {
             generate_address(&version.derive_key(secret, token, position))
                 .is_ok_and(|derived| derived.eq_ignore_ascii_case(address))
@@ -114,7 +124,9 @@ impl TryFrom<u8> for OtsVersion {
         match version {
             1 => Ok(Self::V1),
             2 => Ok(Self::V2),
-            other => Err(format!("KnishIO: unsupported OTS version {other}; expected 1 or 2.")),
+            other => Err(format!(
+                "KnishIO: unsupported OTS version {other}; expected 1 or 2."
+            )),
         }
     }
 }
@@ -128,46 +140,46 @@ impl TryFrom<u8> for OtsVersion {
 pub struct Wallet {
     /// Token slug this wallet is intended for (e.g., "USER", "TEST")
     pub token: String,
-    
+
     /// Current balance of the wallet (stored as String for arbitrary-precision integers)
     #[serde(deserialize_with = "deserialize_balance")]
     pub balance: String,
-    
+
     /// Wallet address (hexadecimal public key)
     pub address: Option<String>,
-    
+
     /// Position string used to salt the secret for one-time signatures
     pub position: Option<String>,
-    
+
     /// Bundle hash - 64-character hexadecimal user identifier
     pub bundle: Option<String>,
-    
+
     /// Batch ID for grouped transactions
     #[serde(rename = "batchId")]
     pub batch_id: Option<String>,
-    
+
     /// Character encoding for signatures
     pub characters: Option<String>,
-    
+
     /// Private key for signing (4096 characters)
     #[serde(skip_serializing)]
     pub key: Option<String>,
-    
+
     /// ML-KEM public key for quantum encryption
     pub pubkey: Option<String>,
-    
+
     /// ML-KEM private key for quantum decryption
     #[serde(skip_serializing)]
     pub privkey: Option<Vec<u8>>,
-    
+
     /// Token units owned by this wallet
     #[serde(rename = "tokenUnits")]
     pub token_units: Vec<TokenUnit>,
-    
+
     /// Trade rates for buffer operations (sorted keys: deterministic serialization)
     #[serde(rename = "tradeRates")]
     pub trade_rates: BTreeMap<String, f64>,
-    
+
     /// Molecules associated with this wallet
     pub molecules: HashMap<String, serde_json::Value>,
     /// ML-KEM parameter set (default: ML-KEM-1024)
@@ -204,7 +216,7 @@ impl Wallet {
     /// Create a new Wallet instance
     ///
     /// # Arguments
-    /// 
+    ///
     /// * `secret` - 2048-character biometric hash (optional for shadow wallets)
     /// * `bundle` - 64-character hexadecimal user identifier (optional)
     /// * `token` - Token slug (defaults to "USER")
@@ -252,7 +264,7 @@ impl Wallet {
         ots_version: OtsVersion,
     ) -> Result<Self> {
         let token = token.unwrap_or("USER").to_string();
-        
+
         let mut wallet = Wallet {
             token: token.clone(),
             balance: "0".to_string(),
@@ -285,7 +297,7 @@ impl Wallet {
             // Key & address initialization
             if let Some(position) = &wallet.position {
                 wallet.key = Some(ots_version.derive_key(secret, &token, position));
-                
+
                 if wallet.address.is_none() {
                     if let Some(key) = &wallet.key {
                         wallet.address = Some(generate_address(key)?);
@@ -318,7 +330,9 @@ impl Wallet {
             None => None,
         };
         if key_version.is_some_and(|version| version != ots_version) {
-            return Err(KnishIOError::Custom("KnishIO: cannot change the OTS version of a keyed wallet.".to_string()));
+            return Err(KnishIOError::Custom(
+                "KnishIO: cannot change the OTS version of a keyed wallet.".to_string(),
+            ));
         }
         self.ots_version = ots_version;
         Ok(())
@@ -344,7 +358,15 @@ impl Wallet {
         characters: Option<&str>,
         mlkem_parameter_set: Option<MlKemParameterSet>,
     ) -> Result<Self> {
-        Self::create_with_ots_version(secret, bundle, token, position, characters, mlkem_parameter_set, OtsVersion::V1)
+        Self::create_with_ots_version(
+            secret,
+            bundle,
+            token,
+            position,
+            characters,
+            mlkem_parameter_set,
+            OtsVersion::V1,
+        )
     }
 
     /// [`Wallet::create`] with an explicit OTS version for the wallet's key and address
@@ -371,7 +393,7 @@ impl Wallet {
             // Only generate position if not provided
             if final_position.is_none() {
                 final_position = Some(Self::generate_position(64));
-            } 
+            }
             if let Some(secret) = secret {
                 final_bundle = Some(generate_bundle_hash(secret));
             }
@@ -383,7 +405,7 @@ impl Wallet {
             Some(token),
             None,
             final_position.as_deref(),
-            None,  // batch_id
+            None, // batch_id
             characters,
             mlkem_parameter_set,
             ots_version,
@@ -403,7 +425,11 @@ impl Wallet {
         // The Balance query selects `amount` (the validator's balance field); fall back to
         // `balance` for other shapes. Reading only `balance` (absent from the Balance selection
         // set) silently yielded 0 for every live balance query.
-        let balance_val = if !data["amount"].is_null() { &data["amount"] } else { &data["balance"] };
+        let balance_val = if !data["amount"].is_null() {
+            &data["amount"]
+        } else {
+            &data["balance"]
+        };
         // Use pattern matching for cleaner data extraction
         let (balance, token, address, bundle, position, characters, batch_id) = (
             // Accept balance as string, number, or integer from JSON
@@ -421,7 +447,7 @@ impl Wallet {
             },
             data["tokenSlug"].as_str().unwrap_or("USER"),
             data["address"].as_str(),
-            data["bundleHash"].as_str(), 
+            data["bundleHash"].as_str(),
             data["position"].as_str(),
             data["characters"].as_str(),
             data["batchId"].as_str(),
@@ -451,15 +477,25 @@ impl Wallet {
                     .iter()
                     .filter_map(|unit_data| {
                         if let Some(obj) = unit_data.as_object() {
-                            let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let id = obj
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
                             if id.is_empty() {
                                 return None;
                             }
-                            let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let name = obj
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
                             // `metas` is a JSON-encoded String scalar on the wire, parsed in its
                             // document order (JS JSON.parse); accept an object too.
                             let meta = match obj.get("metas") {
-                                Some(serde_json::Value::String(encoded)) => serde_json::from_str::<OrderedValue>(encoded).ok(),
+                                Some(serde_json::Value::String(encoded)) => {
+                                    serde_json::from_str::<OrderedValue>(encoded).ok()
+                                }
                                 other => other.cloned().map(OrderedValue::from),
                             }
                             .and_then(|v| v.as_object().cloned());
@@ -469,11 +505,16 @@ impl Wallet {
                                 return None;
                             }
                             let id = unit_array[0].as_str().unwrap_or("").to_string();
-                            let name = unit_array[1].as_str().map(|s| s.to_string()).unwrap_or_default();
+                            let name = unit_array[1]
+                                .as_str()
+                                .map(|s| s.to_string())
+                                .unwrap_or_default();
                             let meta = unit_array
                                 .get(2)
                                 .filter(|metas| metas.is_object())
-                                .and_then(|metas| OrderedValue::from(metas.clone()).as_object().cloned());
+                                .and_then(|metas| {
+                                    OrderedValue::from(metas.clone()).as_object().cloned()
+                                });
                             Some(TokenUnit::new(id, name, meta))
                         } else {
                             None
@@ -491,7 +532,7 @@ impl Wallet {
     /// # Arguments
     ///
     /// * `secret` - Secret string
-    /// * `token` - Token slug 
+    /// * `token` - Token slug
     /// * `position` - Position string
     ///
     /// # Returns
@@ -500,27 +541,27 @@ impl Wallet {
     pub fn set_key_from_secret(&mut self, secret: &str, token: &str, position: &str) -> Result<()> {
         self.token = token.to_string();
         self.position = Some(position.to_string());
-        
+
         // Generate bundle hash if not present
         if self.bundle.is_none() {
             self.bundle = Some(generate_bundle_hash(secret));
         }
-        
+
         // Generate key and address at this wallet's OTS version (JS generateKey({ otsVersion }))
         self.key = Some(self.ots_version.derive_key(secret, token, position));
-        
+
         if let Some(key) = &self.key {
             self.address = Some(generate_address(key)?);
         }
-        
+
         // Set default characters
         if self.characters.is_none() {
             self.characters = Some("BASE64".to_string());
         }
-        
+
         // Initialize ML-KEM keys
         self.initialize_mlkem()?;
-        
+
         Ok(())
     }
 
@@ -593,11 +634,11 @@ impl Wallet {
     /// A hexadecimal position string
     pub fn generate_position(salt_length: usize) -> String {
         use rand::RngExt;
-        
+
         const HEX_CHARSET: &[u8] = b"abcdef0123456789";
-        
+
         let mut rng = rand::rng();
-        
+
         // Use iterator with random sampling for better performance
         (0..salt_length)
             .map(|_| HEX_CHARSET[rng.random_range(0..HEX_CHARSET.len())] as char)
@@ -627,7 +668,10 @@ impl Wallet {
             .filter(|unit_data| unit_data.len() >= 2)
             .map(|unit_data| {
                 let id = unit_data[0].as_str().unwrap_or("").to_string();
-                let name = unit_data[1].as_str().map(|s| s.to_string()).unwrap_or_default();
+                let name = unit_data[1]
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
                 let meta = unit_data.get(2).and_then(OrderedValue::as_object).cloned();
 
                 TokenUnit::new(id, name, meta)
@@ -641,9 +685,7 @@ impl Wallet {
     ///
     /// Vector of token unit data arrays `[id, name, metas]` (JS `TokenUnit.toData`)
     pub fn get_token_units_data(&self) -> Vec<Vec<OrderedValue>> {
-        self.token_units.iter().map(|unit| {
-            unit.to_data()
-        }).collect()
+        self.token_units.iter().map(|unit| unit.to_data()).collect()
     }
 
     /// Split token units between wallets
@@ -702,7 +744,10 @@ impl Wallet {
         }
 
         // Each recipient gets its own subset of the source's token units
-        for (recipient, ids) in recipient_wallets.iter_mut().zip(recipient_unit_lists.iter()) {
+        for (recipient, ids) in recipient_wallets
+            .iter_mut()
+            .zip(recipient_unit_lists.iter())
+        {
             recipient.token_units = self
                 .token_units
                 .iter()
@@ -743,7 +788,11 @@ impl Wallet {
 
     /// Create a remainder wallet from the source wallet. Its OTS version is the higher of this
     /// wallet's and `min_ots_version`.
-    pub fn create_remainder_with_min_ots_version(&self, secret: &str, min_ots_version: OtsVersion) -> Result<Wallet> {
+    pub fn create_remainder_with_min_ots_version(
+        &self,
+        secret: &str,
+        min_ots_version: OtsVersion,
+    ) -> Result<Wallet> {
         let mut remainder_wallet = Self::create_with_ots_version(
             Some(secret),
             None,
@@ -830,20 +879,25 @@ impl Wallet {
         let mut seed = [0u8; 64];
         for i in 0..64 {
             let hex_chars = &seed_hex[i * 2..i * 2 + 2];
-            seed[i] = u8::from_str_radix(hex_chars, 16)
-                .map_err(|_| KnishIOError::DecryptionKey)?;
+            seed[i] = u8::from_str_radix(hex_chars, 16).map_err(|_| KnishIOError::DecryptionKey)?;
         }
 
         let (pk_bytes, sk_bytes) = match set {
             MlKemParameterSet::MlKem1024 => {
                 use libcrux_ml_kem::mlkem1024;
                 let keypair = mlkem1024::generate_key_pair(seed);
-                (keypair.pk().as_slice().to_vec(), keypair.sk().as_slice().to_vec())
+                (
+                    keypair.pk().as_slice().to_vec(),
+                    keypair.sk().as_slice().to_vec(),
+                )
             }
             MlKemParameterSet::MlKem768 => {
                 use libcrux_ml_kem::mlkem768;
                 let keypair = mlkem768::generate_key_pair(seed);
-                (keypair.pk().as_slice().to_vec(), keypair.sk().as_slice().to_vec())
+                (
+                    keypair.pk().as_slice().to_vec(),
+                    keypair.sk().as_slice().to_vec(),
+                )
             }
         };
 
@@ -887,12 +941,12 @@ impl Wallet {
         // Convert message to JSON string and bytes (matches JavaScript)
         let message_string = serde_json::to_string(message)?;
         let message_bytes = message_string.as_bytes();
-        
+
         // Deserialize recipient public key from base64
         let recipient_pubkey_bytes = base64::engine::general_purpose::STANDARD
             .decode(recipient_pubkey)
             .map_err(|_| KnishIOError::DecryptionKey)?;
-            
+
         // Perform ML-KEM encapsulation to get shared secret
         use libcrux_ml_kem::MlKemPublicKey;
 
@@ -912,7 +966,10 @@ impl Wallet {
                 public_key_array.copy_from_slice(&recipient_pubkey_bytes);
                 let public_key = MlKemPublicKey::from(public_key_array);
                 let (ciphertext, shared_secret) = mlkem1024::encapsulate(&public_key, randomness);
-                (ciphertext.as_slice().to_vec(), shared_secret.as_slice().to_vec())
+                (
+                    ciphertext.as_slice().to_vec(),
+                    shared_secret.as_slice().to_vec(),
+                )
             }
             MlKemParameterSet::MlKem768 => {
                 use libcrux_ml_kem::mlkem768;
@@ -920,16 +977,22 @@ impl Wallet {
                 public_key_array.copy_from_slice(&recipient_pubkey_bytes);
                 let public_key = MlKemPublicKey::from(public_key_array);
                 let (ciphertext, shared_secret) = mlkem768::encapsulate(&public_key, randomness);
-                (ciphertext.as_slice().to_vec(), shared_secret.as_slice().to_vec())
+                (
+                    ciphertext.as_slice().to_vec(),
+                    shared_secret.as_slice().to_vec(),
+                )
             }
         };
 
         // Encrypt message using AES-GCM with shared secret
-        let encrypted_message_bytes = self.encrypt_with_shared_secret(message_bytes, &shared_secret_bytes).await?;
+        let encrypted_message_bytes = self
+            .encrypt_with_shared_secret(message_bytes, &shared_secret_bytes)
+            .await?;
         // Serialize to base64 (matches JavaScript serialization)
         let cipher_text = base64::engine::general_purpose::STANDARD.encode(&ciphertext_bytes);
-        let encrypted_message = base64::engine::general_purpose::STANDARD.encode(encrypted_message_bytes);
-        
+        let encrypted_message =
+            base64::engine::general_purpose::STANDARD.encode(encrypted_message_bytes);
+
         Ok(EncryptedMessage {
             cipher_text,
             encrypted_message,
@@ -982,8 +1045,7 @@ impl Wallet {
         use zeroize::Zeroize;
 
         // Get private key
-        let privkey = self.privkey.as_ref()
-            .ok_or(KnishIOError::DecryptionKey)?;
+        let privkey = self.privkey.as_ref().ok_or(KnishIOError::DecryptionKey)?;
 
         // Deserialize ciphertext from base64
         let ciphertext_bytes = base64::engine::general_purpose::STANDARD
@@ -1014,10 +1076,11 @@ impl Wallet {
             .map_err(|_| KnishIOError::DecryptionKey)?;
 
         // Decrypt message using AES-GCM with shared secret
-        let decrypted_bytes = self.decrypt_with_shared_secret(&encrypted_message_bytes, &shared_secret_bytes).await?;
+        let decrypted_bytes = self
+            .decrypt_with_shared_secret(&encrypted_message_bytes, &shared_secret_bytes)
+            .await?;
 
-        String::from_utf8(decrypted_bytes)
-            .map_err(|_| KnishIOError::DecryptionKey)
+        String::from_utf8(decrypted_bytes).map_err(|_| KnishIOError::DecryptionKey)
     }
 
     /// ML-KEM decapsulation at an explicit parameter set
@@ -1046,7 +1109,9 @@ impl Wallet {
                 ciphertext_array.copy_from_slice(ciphertext_bytes);
                 let ciphertext = MlKemCiphertext::from(ciphertext_array);
 
-                mlkem1024::decapsulate(&secret_key, &ciphertext).as_slice().to_vec()
+                mlkem1024::decapsulate(&secret_key, &ciphertext)
+                    .as_slice()
+                    .to_vec()
             }
             MlKemParameterSet::MlKem768 => {
                 use libcrux_ml_kem::mlkem768;
@@ -1058,7 +1123,9 @@ impl Wallet {
                 ciphertext_array.copy_from_slice(ciphertext_bytes);
                 let ciphertext = MlKemCiphertext::from(ciphertext_array);
 
-                mlkem768::decapsulate(&secret_key, &ciphertext).as_slice().to_vec()
+                mlkem768::decapsulate(&secret_key, &ciphertext)
+                    .as_slice()
+                    .to_vec()
             }
         })
     }
@@ -1157,52 +1224,62 @@ impl Wallet {
     }
 
     /// Encrypt data with AES-256-GCM using shared secret
-    async fn encrypt_with_shared_secret(&self, message: &[u8], shared_secret: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+    async fn encrypt_with_shared_secret(
+        &self,
+        message: &[u8],
+        shared_secret: &[u8],
+    ) -> Result<Vec<u8>> {
         use aes_gcm::aead::Aead;
-        
+        use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+
         // Use shared secret as AES key
-        let cipher = Aes256Gcm::new_from_slice(shared_secret)
-            .map_err(|_| KnishIOError::DecryptionKey)?;
-        
+        let cipher =
+            Aes256Gcm::new_from_slice(shared_secret).map_err(|_| KnishIOError::DecryptionKey)?;
+
         // Generate random nonce
         let mut nonce_bytes = [0u8; 12];
         rand::rng().fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from(nonce_bytes);
-        
+
         // Encrypt message
-        let mut encrypted = cipher.encrypt(&nonce, message)
+        let mut encrypted = cipher
+            .encrypt(&nonce, message)
             .map_err(|_| KnishIOError::EncryptionError)?;
-        
+
         // Prepend nonce to encrypted data
         let mut result = nonce_bytes.to_vec();
         result.append(&mut encrypted);
-        
+
         Ok(result)
     }
-    
+
     /// Decrypt data with AES-256-GCM using shared secret
-    async fn decrypt_with_shared_secret(&self, encrypted_data: &[u8], shared_secret: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+    async fn decrypt_with_shared_secret(
+        &self,
+        encrypted_data: &[u8],
+        shared_secret: &[u8],
+    ) -> Result<Vec<u8>> {
         use aes_gcm::aead::Aead;
-        
+        use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+
         if encrypted_data.len() < 12 {
             return Err(KnishIOError::DecryptionKey);
         }
-        
+
         // Use shared secret as AES key
-        let cipher = Aes256Gcm::new_from_slice(shared_secret)
-            .map_err(|_| KnishIOError::DecryptionKey)?;
-        
+        let cipher =
+            Aes256Gcm::new_from_slice(shared_secret).map_err(|_| KnishIOError::DecryptionKey)?;
+
         // Extract nonce and encrypted message
-        let nonce = Nonce::try_from(&encrypted_data[..12])
-            .map_err(|_| KnishIOError::DecryptionKey)?;
+        let nonce =
+            Nonce::try_from(&encrypted_data[..12]).map_err(|_| KnishIOError::DecryptionKey)?;
         let encrypted_message = &encrypted_data[12..];
-        
+
         // Decrypt message
-        let decrypted = cipher.decrypt(&nonce, encrypted_message)
+        let decrypted = cipher
+            .decrypt(&nonce, encrypted_message)
             .map_err(|_| KnishIOError::DecryptionKey)?;
-        
+
         Ok(decrypted)
     }
 }
@@ -1294,8 +1371,9 @@ mod tests {
             None,
             None,
             None,
-        ).expect("Wallet creation should succeed with valid parameters");
-        
+        )
+        .expect("Wallet creation should succeed with valid parameters");
+
         assert_eq!(wallet.token, "TEST");
         assert!(wallet.bundle.is_some());
         assert!(wallet.position.is_some());
@@ -1307,28 +1385,54 @@ mod tests {
     #[test]
     fn ots_version_serializes_as_js_number() {
         let v2 = Wallet::new_with_ots_version(
-            Some("0123456789abcdef"), None, Some("USER"), None, Some("abcdef"), None, None, None, OtsVersion::V2,
-        ).expect("v2 wallet");
+            Some("0123456789abcdef"),
+            None,
+            Some("USER"),
+            None,
+            Some("abcdef"),
+            None,
+            None,
+            None,
+            OtsVersion::V2,
+        )
+        .expect("v2 wallet");
         let v2_json = serde_json::to_value(&v2).expect("serialize v2");
         assert_eq!(v2_json["otsVersion"], serde_json::json!(2));
         let round_trip: Wallet = serde_json::from_value(v2_json).expect("deserialize v2");
         assert_eq!(round_trip.ots_version, OtsVersion::V2);
 
-        let v1 = Wallet::create(Some("0123456789abcdef"), None, "USER", Some("abcdef"), None, None).expect("v1 wallet");
+        let v1 = Wallet::create(
+            Some("0123456789abcdef"),
+            None,
+            "USER",
+            Some("abcdef"),
+            None,
+            None,
+        )
+        .expect("v1 wallet");
         let v1_json = serde_json::to_value(&v1).expect("serialize v1");
-        assert!(v1_json.get("otsVersion").is_none(), "V1 is omitted: {v1_json}");
+        assert!(
+            v1_json.get("otsVersion").is_none(),
+            "V1 is omitted: {v1_json}"
+        );
         let defaulted: Wallet = serde_json::from_value(v1_json).expect("deserialize v1");
         assert_eq!(defaulted.ots_version, OtsVersion::V1);
 
         let err = serde_json::from_str::<OtsVersion>("3").expect_err("3 is not a version");
-        assert!(err.to_string().contains("KnishIO: unsupported OTS version 3; expected 1 or 2."), "{err}");
+        assert!(
+            err.to_string()
+                .contains("KnishIO: unsupported OTS version 3; expected 1 or 2."),
+            "{err}"
+        );
     }
 
     const DETECT_SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    const DETECT_POSITION: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+    const DETECT_POSITION: &str =
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
     fn address_at(version: OtsVersion) -> String {
-        generate_address(&version.derive_key(DETECT_SECRET, "USER", DETECT_POSITION)).expect("address")
+        generate_address(&version.derive_key(DETECT_SECRET, "USER", DETECT_POSITION))
+            .expect("address")
     }
 
     #[test]
@@ -1336,32 +1440,91 @@ mod tests {
         let (v1, v2) = (address_at(OtsVersion::V1), address_at(OtsVersion::V2));
         assert_ne!(v1, v2);
         for preferred in [OtsVersion::V1, OtsVersion::V2] {
-            assert_eq!(OtsVersion::detect(DETECT_SECRET, "USER", DETECT_POSITION, &v2, preferred), Some(OtsVersion::V2));
-            assert_eq!(OtsVersion::detect(DETECT_SECRET, "USER", DETECT_POSITION, &v1, preferred), Some(OtsVersion::V1));
-            assert_eq!(OtsVersion::detect(DETECT_SECRET, "USER", DETECT_POSITION, &v2.to_uppercase(), preferred), Some(OtsVersion::V2));
-            assert_eq!(OtsVersion::detect(DETECT_SECRET, "USER", DETECT_POSITION, &Wallet::generate_position(64), preferred), None);
+            assert_eq!(
+                OtsVersion::detect(DETECT_SECRET, "USER", DETECT_POSITION, &v2, preferred),
+                Some(OtsVersion::V2)
+            );
+            assert_eq!(
+                OtsVersion::detect(DETECT_SECRET, "USER", DETECT_POSITION, &v1, preferred),
+                Some(OtsVersion::V1)
+            );
+            assert_eq!(
+                OtsVersion::detect(
+                    DETECT_SECRET,
+                    "USER",
+                    DETECT_POSITION,
+                    &v2.to_uppercase(),
+                    preferred
+                ),
+                Some(OtsVersion::V2)
+            );
+            assert_eq!(
+                OtsVersion::detect(
+                    DETECT_SECRET,
+                    "USER",
+                    DETECT_POSITION,
+                    &Wallet::generate_position(64),
+                    preferred
+                ),
+                None
+            );
         }
     }
 
     #[test]
     fn set_ots_version_on_a_keyless_wallet_sets_it() {
-        let mut wallet = Wallet::create(None, Some("bundle"), "USER", None, None, None).expect("keyless wallet");
+        let mut wallet =
+            Wallet::create(None, Some("bundle"), "USER", None, None, None).expect("keyless wallet");
         assert!(wallet.key.is_none());
-        wallet.set_ots_version(OtsVersion::V2).expect("keyless wallet takes a version");
+        wallet
+            .set_ots_version(OtsVersion::V2)
+            .expect("keyless wallet takes a version");
         assert_eq!(wallet.ots_version, OtsVersion::V2);
     }
 
     #[test]
     fn set_ots_version_on_a_keyed_wallet_of_the_other_version_is_refused() {
-        let mut v1 = Wallet::new(Some(DETECT_SECRET), None, Some("USER"), None, Some(DETECT_POSITION), None, None, None).expect("v1 wallet");
-        let err = v1.set_ots_version(OtsVersion::V2).expect_err("a v1 key cannot become v2");
-        assert_eq!(err.to_string(), "KnishIO: cannot change the OTS version of a keyed wallet.");
+        let mut v1 = Wallet::new(
+            Some(DETECT_SECRET),
+            None,
+            Some("USER"),
+            None,
+            Some(DETECT_POSITION),
+            None,
+            None,
+            None,
+        )
+        .expect("v1 wallet");
+        let err = v1
+            .set_ots_version(OtsVersion::V2)
+            .expect_err("a v1 key cannot become v2");
+        assert_eq!(
+            err.to_string(),
+            "KnishIO: cannot change the OTS version of a keyed wallet."
+        );
         assert_eq!(v1.ots_version, OtsVersion::V1);
-        v1.set_ots_version(OtsVersion::V1).expect("the same version is accepted");
+        v1.set_ots_version(OtsVersion::V1)
+            .expect("the same version is accepted");
 
-        let mut v2 = Wallet::new_with_ots_version(Some(DETECT_SECRET), None, Some("USER"), None, Some(DETECT_POSITION), None, None, None, OtsVersion::V2).expect("v2 wallet");
-        let err = v2.set_ots_version(OtsVersion::V1).expect_err("a v2 key cannot become v1");
-        assert_eq!(err.to_string(), "KnishIO: cannot change the OTS version of a keyed wallet.");
+        let mut v2 = Wallet::new_with_ots_version(
+            Some(DETECT_SECRET),
+            None,
+            Some("USER"),
+            None,
+            Some(DETECT_POSITION),
+            None,
+            None,
+            None,
+            OtsVersion::V2,
+        )
+        .expect("v2 wallet");
+        let err = v2
+            .set_ots_version(OtsVersion::V1)
+            .expect_err("a v2 key cannot become v1");
+        assert_eq!(
+            err.to_string(),
+            "KnishIO: cannot change the OTS version of a keyed wallet."
+        );
     }
 
     #[test]
@@ -1375,8 +1538,9 @@ mod tests {
             None,
             None,
             None,
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         assert!(wallet.is_shadow());
         assert_eq!(wallet.token, "TEST");
         assert_eq!(wallet.bundle, Some("test-bundle".to_string()));
@@ -1384,7 +1548,9 @@ mod tests {
 
     #[test]
     fn test_bundle_hash_validation() {
-        assert!(Wallet::is_bundle_hash("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+        assert!(Wallet::is_bundle_hash(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        ));
         assert!(!Wallet::is_bundle_hash("invalid"));
         assert!(!Wallet::is_bundle_hash("0123456789abcdef")); // too short
     }
@@ -1393,7 +1559,7 @@ mod tests {
     fn test_position_generation() {
         let pos1 = Wallet::generate_position(64);
         let pos2 = Wallet::generate_position(64);
-        
+
         assert_eq!(pos1.len(), 64);
         assert_eq!(pos2.len(), 64);
         assert_ne!(pos1, pos2); // Should be random
@@ -1422,9 +1588,9 @@ mod tests {
                 ["unit1", "Unit 1", {"meta": "data"}]
             ]
         });
-        
+
         let wallet = Wallet::from_response_data(data).unwrap();
-        
+
         assert_eq!(wallet.balance, "100");
         assert_eq!(wallet.token, "TEST");
         assert_eq!(wallet.address, Some("test-address".to_string()));
@@ -1439,8 +1605,10 @@ mod tests {
     #[test]
     fn test_set_key_from_secret() {
         let mut wallet = Wallet::default();
-        wallet.set_key_from_secret("test-secret", "TEST", "test-position").unwrap();
-        
+        wallet
+            .set_key_from_secret("test-secret", "TEST", "test-position")
+            .unwrap();
+
         assert_eq!(wallet.token, "TEST");
         assert_eq!(wallet.position, Some("test-position".to_string()));
         assert!(wallet.bundle.is_some());
@@ -1456,10 +1624,10 @@ mod tests {
             wallet.batch_id = Some("source-batch".to_string());
             wallet
         };
-        
+
         let mut target_wallet = Wallet::default();
         target_wallet.init_batch_id_from_source(&source_wallet);
-        
+
         assert_eq!(target_wallet.batch_id, Some("source-batch".to_string()));
     }
 
@@ -1472,25 +1640,52 @@ mod tests {
         // Same secret + token + position → same keypair every time
         let wallet1 = Wallet::create(
             Some("KNISHIO_TEST_SECRET_DO_NOT_USE_IN_PRODUCTION"),
-            None, "TEST", Some("fixed_position_for_testing"), None, None,
-        ).unwrap();
+            None,
+            "TEST",
+            Some("fixed_position_for_testing"),
+            None,
+            None,
+        )
+        .unwrap();
         let wallet2 = Wallet::create(
             Some("KNISHIO_TEST_SECRET_DO_NOT_USE_IN_PRODUCTION"),
-            None, "TEST", Some("fixed_position_for_testing"), None, None,
-        ).unwrap();
+            None,
+            "TEST",
+            Some("fixed_position_for_testing"),
+            None,
+            None,
+        )
+        .unwrap();
 
-        assert!(wallet1.pubkey.is_some(), "ML-KEM pubkey should be generated");
-        assert!(wallet1.privkey.is_some(), "ML-KEM privkey should be generated");
-        assert_eq!(wallet1.pubkey, wallet2.pubkey, "Same seed should produce same pubkey");
-        assert_eq!(wallet1.privkey, wallet2.privkey, "Same seed should produce same privkey");
+        assert!(
+            wallet1.pubkey.is_some(),
+            "ML-KEM pubkey should be generated"
+        );
+        assert!(
+            wallet1.privkey.is_some(),
+            "ML-KEM privkey should be generated"
+        );
+        assert_eq!(
+            wallet1.pubkey, wallet2.pubkey,
+            "Same seed should produce same pubkey"
+        );
+        assert_eq!(
+            wallet1.privkey, wallet2.privkey,
+            "Same seed should produce same privkey"
+        );
     }
 
     #[test]
     fn test_mlkem_key_sizes() {
         let wallet1024 = Wallet::create(
             Some("KNISHIO_TEST_SECRET_DO_NOT_USE_IN_PRODUCTION"),
-            None, "TEST", None, None, None,
-        ).unwrap();
+            None,
+            "TEST",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         // ML-KEM-1024 spec: pubkey = 1568 bytes, privkey = 3168 bytes
         let pubkey_bytes = base64::engine::general_purpose::STANDARD
@@ -1498,49 +1693,90 @@ mod tests {
             .unwrap();
         let privkey_bytes = wallet1024.privkey.as_ref().unwrap();
 
-        assert_eq!(pubkey_bytes.len(), 1568, "ML-KEM-1024 pubkey should be 1568 bytes");
-        assert_eq!(privkey_bytes.len(), 3168, "ML-KEM-1024 privkey should be 3168 bytes");
+        assert_eq!(
+            pubkey_bytes.len(),
+            1568,
+            "ML-KEM-1024 pubkey should be 1568 bytes"
+        );
+        assert_eq!(
+            privkey_bytes.len(),
+            3168,
+            "ML-KEM-1024 privkey should be 3168 bytes"
+        );
 
         // ML-KEM-768 step-back
         let wallet768 = Wallet::create(
             Some("KNISHIO_TEST_SECRET_DO_NOT_USE_IN_PRODUCTION"),
-            None, "TEST", None, None, Some(MlKemParameterSet::MlKem768),
-        ).unwrap();
+            None,
+            "TEST",
+            None,
+            None,
+            Some(MlKemParameterSet::MlKem768),
+        )
+        .unwrap();
 
         let pubkey_bytes768 = base64::engine::general_purpose::STANDARD
             .decode(wallet768.pubkey.as_ref().unwrap())
             .unwrap();
         let privkey_bytes768 = wallet768.privkey.as_ref().unwrap();
 
-        assert_eq!(pubkey_bytes768.len(), 1184, "ML-KEM-768 pubkey should be 1184 bytes");
-        assert_eq!(privkey_bytes768.len(), 2400, "ML-KEM-768 privkey should be 2400 bytes");
+        assert_eq!(
+            pubkey_bytes768.len(),
+            1184,
+            "ML-KEM-768 pubkey should be 1184 bytes"
+        );
+        assert_eq!(
+            privkey_bytes768.len(),
+            2400,
+            "ML-KEM-768 privkey should be 2400 bytes"
+        );
     }
 
     #[tokio::test]
     async fn test_mlkem_encrypt_decrypt_roundtrip() {
         let sender = Wallet::create(
             Some("sender_secret_for_testing_12345"),
-            None, "TEST", None, None, None,
-        ).unwrap();
+            None,
+            "TEST",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         let recipient = Wallet::create(
             Some("recipient_secret_for_testing_12345"),
-            None, "TEST", None, None, None,
-        ).unwrap();
+            None,
+            "TEST",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         let message = serde_json::json!({"hello": "quantum world", "value": 42});
         let recipient_pubkey = recipient.pubkey.as_ref().unwrap();
 
-        let encrypted = sender.encrypt_message(&message, recipient_pubkey).await.unwrap();
+        let encrypted = sender
+            .encrypt_message(&message, recipient_pubkey)
+            .await
+            .unwrap();
 
         // Ciphertext should be 1568 bytes (base64 encoded) for ML-KEM-1024 default
         let ciphertext_bytes = base64::engine::general_purpose::STANDARD
             .decode(&encrypted.cipher_text)
             .unwrap();
-        assert_eq!(ciphertext_bytes.len(), 1568, "ML-KEM-1024 ciphertext should be 1568 bytes");
+        assert_eq!(
+            ciphertext_bytes.len(),
+            1568,
+            "ML-KEM-1024 ciphertext should be 1568 bytes"
+        );
 
         // Decrypt with recipient's private key
         let decrypted = recipient.decrypt_message(&encrypted).await.unwrap();
-        assert_eq!(decrypted, message, "Decrypted message should match original");
+        assert_eq!(
+            decrypted, message,
+            "Decrypted message should match original"
+        );
     }
 
     // PQ-transport hardening: a stale/non-PQ node advertises a ~48-byte `key`; encrypt_message must
@@ -1549,16 +1785,28 @@ mod tests {
     async fn test_mlkem_encrypt_rejects_mismatched_key() {
         let sender = Wallet::create(
             Some("sender_secret_for_testing_12345"),
-            None, "TEST", None, None, None,
-        ).unwrap();
+            None,
+            "TEST",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         // 48 bytes base64 — the exact length a pre-PQ validator advertised in its auth `key`.
         let short_key = base64::engine::general_purpose::STANDARD.encode([0u8; 48]);
-        let result = sender.encrypt_message(&serde_json::json!({"q": 1}), &short_key).await;
-        assert!(result.is_err(), "encrypt_message must reject non-1568 key on 1024 wallet");
+        let result = sender
+            .encrypt_message(&serde_json::json!({"q": 1}), &short_key)
+            .await;
+        assert!(
+            result.is_err(),
+            "encrypt_message must reject non-1568 key on 1024 wallet"
+        );
 
         // 768 key (1184 bytes) rejected by 1024 wallet
         let key_768 = base64::engine::general_purpose::STANDARD.encode([0u8; 1184]);
-        let result768 = sender.encrypt_message(&serde_json::json!({"q": 1}), &key_768).await;
+        let result768 = sender
+            .encrypt_message(&serde_json::json!({"q": 1}), &key_768)
+            .await;
         assert!(result768.is_err(), "1024 wallet must reject 768 key");
     }
 
@@ -1567,34 +1815,63 @@ mod tests {
         // Use valid hex secrets (generate_key treats secret as hex BigUint)
         let wallet1 = Wallet::create(
             Some("aaaa0000aaaa0000aaaa0000aaaa0000aaaa0000aaaa0000aaaa0000aaaa0000"),
-            None, "TEST", None, None, None,
-        ).unwrap();
+            None,
+            "TEST",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         let wallet2 = Wallet::create(
             Some("bbbb1111bbbb1111bbbb1111bbbb1111bbbb1111bbbb1111bbbb1111bbbb1111"),
-            None, "TEST", None, None, None,
-        ).unwrap();
+            None,
+            "TEST",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
-        assert_ne!(wallet1.pubkey, wallet2.pubkey, "Different secrets should produce different ML-KEM pubkeys");
-        assert_ne!(wallet1.privkey, wallet2.privkey, "Different secrets should produce different ML-KEM privkeys");
+        assert_ne!(
+            wallet1.pubkey, wallet2.pubkey,
+            "Different secrets should produce different ML-KEM pubkeys"
+        );
+        assert_ne!(
+            wallet1.privkey, wallet2.privkey,
+            "Different secrets should produce different ML-KEM privkeys"
+        );
     }
 
     #[test]
     fn test_mlkem_shadow_wallet_no_keys() {
         // Shadow wallets (no secret) should NOT have ML-KEM keys
         let wallet = Wallet::new(
-            None, Some("test-bundle"), Some("TEST"),
-            None, None, None, None, None,
-        ).unwrap();
+            None,
+            Some("test-bundle"),
+            Some("TEST"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
-        assert!(wallet.pubkey.is_none(), "Shadow wallet should not have ML-KEM pubkey");
-        assert!(wallet.privkey.is_none(), "Shadow wallet should not have ML-KEM privkey");
+        assert!(
+            wallet.pubkey.is_none(),
+            "Shadow wallet should not have ML-KEM pubkey"
+        );
+        assert!(
+            wallet.privkey.is_none(),
+            "Shadow wallet should not have ML-KEM privkey"
+        );
     }
 
     #[test]
     fn test_token_unit_management() {
         let mut wallet = Wallet::default();
         let mut remainder_wallet = Wallet::default();
-        
+
         // Add some test token units
         wallet.token_units.push(TokenUnit::new(
             "unit1".to_string(),
@@ -1606,10 +1883,10 @@ mod tests {
             "Unit 2".to_string(),
             None,
         ));
-        
+
         // Split units
         wallet.split_units(&["unit1".to_string()], &mut remainder_wallet, None);
-        
+
         assert_eq!(wallet.token_units.len(), 1);
         assert_eq!(remainder_wallet.token_units.len(), 1);
         assert_eq!(wallet.token_units[0].id, "unit1");
@@ -1661,7 +1938,8 @@ mod tests {
     #[test]
     fn test_balance_serde_number_format() {
         // Deserialize from number format (backwards compatibility)
-        let json = r#"{"balance":1000,"token":"TEST","tokenUnits":[],"tradeRates":{},"molecules":{}}"#;
+        let json =
+            r#"{"balance":1000,"token":"TEST","tokenUnits":[],"tradeRates":{},"molecules":{}}"#;
         let wallet: Wallet = serde_json::from_str(json).unwrap();
         assert_eq!(wallet.balance, "1000");
     }
@@ -1677,7 +1955,8 @@ mod tests {
             Some(&"1".repeat(64)),
             Some("BASE64"),
             Some(set),
-        ).expect("client wallet");
+        )
+        .expect("client wallet");
         let validator = Wallet::create(
             Some(&"b".repeat(2048)),
             None,
@@ -1685,7 +1964,8 @@ mod tests {
             Some(&"2".repeat(64)),
             Some("BASE64"),
             Some(set),
-        ).expect("validator wallet");
+        )
+        .expect("validator wallet");
 
         let validator_pubkey = validator.pubkey.clone().expect("validator pubkey");
         let body = r#"{"query":"query { Balance { address } }","variables":null}"#;
@@ -1699,7 +1979,11 @@ mod tests {
             serde_json::from_str(&envelope_json).expect("envelope parses as a recipient map");
 
         // Single recipient, addressed by hash_share — matches the validator's lookup.
-        assert_eq!(map.len(), 1, "the request envelope addresses exactly one recipient");
+        assert_eq!(
+            map.len(),
+            1,
+            "the request envelope addresses exactly one recipient"
+        );
         assert!(
             map.contains_key(&Wallet::hash_share(&validator_pubkey)),
             "envelope must be keyed by hash_share(validator_pubkey)"
@@ -1720,7 +2004,10 @@ mod tests {
             serde_json::Value::String(s) => s,
             other => other.to_string(),
         };
-        assert_eq!(recovered, body, "decrypted plaintext must be the original request body");
+        assert_eq!(
+            recovered, body,
+            "decrypted plaintext must be the original request body"
+        );
     }
 
     #[tokio::test]

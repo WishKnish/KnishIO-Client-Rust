@@ -4,7 +4,7 @@
 //! equivalent to QueryToken.js
 
 use crate::query::Query;
-use crate::response::{Response, BaseResponse}; // No specific ResponseToken - uses BaseResponse
+use crate::response::{BaseResponse, Response}; // No specific ResponseToken - uses BaseResponse
 use serde_json::{json, Value};
 
 /// Query for getting token information
@@ -209,9 +209,7 @@ mod tests {
 
     #[test]
     fn test_add_slug() {
-        let query = QueryToken::new()
-            .add_slug("KNISH")
-            .add_slug("TOKEN2");
+        let query = QueryToken::new().add_slug("KNISH").add_slug("TOKEN2");
 
         assert_eq!(query.slugs().len(), 2);
         assert_eq!(query.slugs()[0], "KNISH");
@@ -269,9 +267,10 @@ mod tests {
     fn test_query_string() {
         let query = QueryToken::new();
         let query_string = query.get_query();
-        
+
         // Check that the query string contains expected fields
-        assert!(query_string.contains("Token( slug: $slug, slugs: $slugs, limit: $limit, order: $order )"));
+        assert!(query_string
+            .contains("Token( slug: $slug, slugs: $slugs, limit: $limit, order: $order )"));
         assert!(query_string.contains("slug"));
         assert!(query_string.contains("name"));
         assert!(query_string.contains("fungibility"));

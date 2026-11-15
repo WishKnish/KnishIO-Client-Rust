@@ -187,7 +187,7 @@ impl QueryMetaTypeViaAtom {
 
         // Handle filter
         let mut filter = params.filter;
-        
+
         // Add key/value filter if both are provided
         if let (Some(key), Some(value)) = (params.key, params.value) {
             filter.push(json!({
@@ -196,7 +196,7 @@ impl QueryMetaTypeViaAtom {
                 "comparison": "="
             }));
         }
-        
+
         if !filter.is_empty() {
             variables["filter"] = json!(filter);
         }
@@ -391,7 +391,7 @@ mod tests {
         assert_eq!(variables["metaTypes"], json!(["user"]));
         assert_eq!(variables["metaIds"], json!(["123"]));
         assert_eq!(variables["latest"], json!(true));
-        
+
         // Check that key/value created a filter
         let filter = variables["filter"].as_array().unwrap();
         assert_eq!(filter.len(), 1);
@@ -434,7 +434,8 @@ mod tests {
         assert_eq!(query.meta_types[0], "user");
 
         // Test by_atom_values
-        let query = QueryMetaTypeViaAtom::by_atom_values(vec!["val1".to_string(), "val2".to_string()]);
+        let query =
+            QueryMetaTypeViaAtom::by_atom_values(vec!["val1".to_string(), "val2".to_string()]);
         assert_eq!(query.atom_values.len(), 2);
 
         // Test latest
@@ -450,7 +451,7 @@ mod tests {
     fn test_query_string() {
         let query = QueryMetaTypeViaAtom::new();
         let query_string = query.get_query();
-        
+
         // Check that the query string contains expected fields
         assert!(query_string.contains("MetaTypeViaAtom("));
         assert!(query_string.contains("metaTypes: $metaTypes"));

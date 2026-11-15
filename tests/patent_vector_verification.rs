@@ -7,10 +7,10 @@
 // If any test fails, the patent document must be updated with the correct value.
 
 use knishio_client::crypto::{
-    generate_key, generate_address, generate_ots_signature, verify_ots_signature,
+    generate_address, generate_key, generate_ots_signature, verify_ots_signature,
 };
-use knishio_client::Atom;
 use knishio_client::types::Isotope;
+use knishio_client::Atom;
 
 /// Test Vector 1: Key Derivation — Standard Hex Inputs
 ///
@@ -39,10 +39,16 @@ fn patent_tv1_standard_hex_key_derivation() {
     println!("TV1 Key prefix (patent):    {}", patent_key_prefix);
     println!("TV1 Address (actual):       {}", address);
     println!("TV1 Address (patent):       {}", patent_address);
-    println!("TV1 Key prefix match:       {}", actual_key_prefix == patent_key_prefix);
+    println!(
+        "TV1 Key prefix match:       {}",
+        actual_key_prefix == patent_key_prefix
+    );
     println!("TV1 Address match:          {}", address == patent_address);
 
-    assert_eq!(actual_key_prefix, patent_key_prefix, "TV1: Key prefix mismatch");
+    assert_eq!(
+        actual_key_prefix, patent_key_prefix,
+        "TV1: Key prefix mismatch"
+    );
     assert_eq!(address, patent_address, "TV1: Address mismatch");
 }
 
@@ -69,10 +75,16 @@ fn patent_tv2_non_hex_secret_normalization() {
     println!("TV2 Key prefix (patent):    {}", patent_key_prefix);
     println!("TV2 Address (actual):       {}", address);
     println!("TV2 Address (patent):       {}", patent_address);
-    println!("TV2 Key prefix match:       {}", actual_key_prefix == patent_key_prefix);
+    println!(
+        "TV2 Key prefix match:       {}",
+        actual_key_prefix == patent_key_prefix
+    );
     println!("TV2 Address match:          {}", address == patent_address);
 
-    assert_eq!(actual_key_prefix, patent_key_prefix, "TV2: Key prefix mismatch");
+    assert_eq!(
+        actual_key_prefix, patent_key_prefix,
+        "TV2: Key prefix mismatch"
+    );
     assert_eq!(address, patent_address, "TV2: Address mismatch");
 }
 
@@ -98,10 +110,16 @@ fn patent_tv3_non_hex_position_normalization() {
     println!("TV3 Key prefix (patent):    {}", patent_key_prefix);
     println!("TV3 Address (actual):       {}", address);
     println!("TV3 Address (patent):       {}", patent_address);
-    println!("TV3 Key prefix match:       {}", actual_key_prefix == patent_key_prefix);
+    println!(
+        "TV3 Key prefix match:       {}",
+        actual_key_prefix == patent_key_prefix
+    );
     println!("TV3 Address match:          {}", address == patent_address);
 
-    assert_eq!(actual_key_prefix, patent_key_prefix, "TV3: Key prefix mismatch");
+    assert_eq!(
+        actual_key_prefix, patent_key_prefix,
+        "TV3: Key prefix mismatch"
+    );
     assert_eq!(address, patent_address, "TV3: Address mismatch");
 }
 
@@ -127,10 +145,16 @@ fn patent_tv4_leading_zeros_position() {
     println!("TV4 Key prefix (patent):    {}", patent_key_prefix);
     println!("TV4 Address (actual):       {}", address);
     println!("TV4 Address (patent):       {}", patent_address);
-    println!("TV4 Key prefix match:       {}", actual_key_prefix == patent_key_prefix);
+    println!(
+        "TV4 Key prefix match:       {}",
+        actual_key_prefix == patent_key_prefix
+    );
     println!("TV4 Address match:          {}", address == patent_address);
 
-    assert_eq!(actual_key_prefix, patent_key_prefix, "TV4: Key prefix mismatch");
+    assert_eq!(
+        actual_key_prefix, patent_key_prefix,
+        "TV4: Key prefix mismatch"
+    );
     assert_eq!(address, patent_address, "TV4: Address mismatch");
 }
 
@@ -157,10 +181,16 @@ fn patent_tv5_bigint_carry() {
     println!("TV5 Key prefix (patent):    {}", patent_key_prefix);
     println!("TV5 Address (actual):       {}", address);
     println!("TV5 Address (patent):       {}", patent_address);
-    println!("TV5 Key prefix match:       {}", actual_key_prefix == patent_key_prefix);
+    println!(
+        "TV5 Key prefix match:       {}",
+        actual_key_prefix == patent_key_prefix
+    );
     println!("TV5 Address match:          {}", address == patent_address);
 
-    assert_eq!(actual_key_prefix, patent_key_prefix, "TV5: Key prefix mismatch");
+    assert_eq!(
+        actual_key_prefix, patent_key_prefix,
+        "TV5: Key prefix mismatch"
+    );
     assert_eq!(address, patent_address, "TV5: Address mismatch");
 }
 
@@ -225,11 +255,21 @@ fn patent_tv6_molecular_hash() {
 
     println!("TV6 Molecular hash (actual):  {}", molecular_hash);
     println!("TV6 Molecular hash (correct): {}", correct_hash);
-    println!("TV6 Match:                    {}", molecular_hash == correct_hash);
+    println!(
+        "TV6 Match:                    {}",
+        molecular_hash == correct_hash
+    );
 
-    assert_eq!(molecular_hash.len(), 64, "Molecular hash must be 64 base17 chars");
+    assert_eq!(
+        molecular_hash.len(),
+        64,
+        "Molecular hash must be 64 base17 chars"
+    );
     // Verify it contains base17 chars (0-9, a-g), not just hex (0-9, a-f)
-    assert!(molecular_hash.contains('g'), "Base17 hash should contain 'g' chars");
+    assert!(
+        molecular_hash.contains('g'),
+        "Base17 hash should contain 'g' chars"
+    );
     assert_eq!(molecular_hash, correct_hash, "TV6: Molecular hash mismatch");
 }
 
@@ -245,7 +285,7 @@ fn patent_tv6_molecular_hash() {
 /// fragments themselves against the patent value.
 #[test]
 fn patent_tv7_wots_signature() {
-    use knishio_client::crypto::{shake256, normalize_hash};
+    use knishio_client::crypto::{normalize_hash, shake256};
 
     // Re-derive key from TV1
     let secret = "d4f5a6b7c8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4";
@@ -259,14 +299,21 @@ fn patent_tv7_wots_signature() {
 
     // Generate signature
     let signature = generate_ots_signature(&key, molecular_hash).unwrap();
-    assert_eq!(signature.len(), 16, "WOTS+ signature must have 16 fragments");
+    assert_eq!(
+        signature.len(),
+        16,
+        "WOTS+ signature must have 16 fragments"
+    );
 
     // Patent expected fragment 0 (128 hex chars = 512 bits):
     let patent_fragment_0 = "5b490eb07e1492da63531ea9bc69807235a27773b485c2235ff435bc82a74cb32211749e1ac471be1d2d7a08b5a887821a259dcff7408699b29d02c3433fe754";
 
     println!("TV7 Fragment 0 (actual):    {}", signature[0]);
     println!("TV7 Fragment 0 (patent):    {}", patent_fragment_0);
-    println!("TV7 Fragment 0 match:       {}", signature[0] == patent_fragment_0);
+    println!(
+        "TV7 Fragment 0 match:       {}",
+        signature[0] == patent_fragment_0
+    );
 
     // Verify fragment 0 matches
     assert_eq!(signature[0], patent_fragment_0, "TV7: Fragment 0 mismatch");
@@ -280,7 +327,7 @@ fn patent_tv7_wots_signature() {
     // (two-stage: join public fragments → SHAKE256(joined, 8192) → SHAKE256(digest, 256))
     let normalized = normalize_hash(molecular_hash);
     let mut public_key_fragments = Vec::new();
-    let key_chunks: Vec<&str> = (0..16).map(|i| &key[i*128..(i+1)*128]).collect();
+    let key_chunks: Vec<&str> = (0..16).map(|i| &key[i * 128..(i + 1) * 128]).collect();
     for (i, chunk) in key_chunks.iter().enumerate() {
         let _normalized_value = normalized[i];
         // Signing hashes (8 - n[i]) times from private key
@@ -297,8 +344,14 @@ fn patent_tv7_wots_signature() {
     let verify_recovered_address = shake256(&digest, 256);
 
     println!("TV7 Address from generate_address():   {}", address);
-    println!("TV7 Address from verify round-trip:     {}", verify_recovered_address);
-    println!("TV7 Addresses match:                   {}", address == verify_recovered_address);
+    println!(
+        "TV7 Address from verify round-trip:     {}",
+        verify_recovered_address
+    );
+    println!(
+        "TV7 Addresses match:                   {}",
+        address == verify_recovered_address
+    );
 
     // The verify-recovered address now uses the same two-pass derivation as
     // generate_address / CheckMolecule::ots, so they must be equal.
@@ -308,7 +361,10 @@ fn patent_tv7_wots_signature() {
     );
     let valid = verify_ots_signature(&signature, molecular_hash, &verify_recovered_address);
     println!("TV7 Signature valid (verify path):     {}", valid);
-    assert!(valid, "TV7: Signature must verify against verify-path recovered address");
+    assert!(
+        valid,
+        "TV7: Signature must verify against verify-path recovered address"
+    );
 }
 
 /// Summary test: Run all vectors and report results
@@ -327,46 +383,66 @@ fn patent_vectors_summary() {
     let key1 = generate_key(
         "d4f5a6b7c8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4",
         "KNISH",
-        "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4d5e6f7a8b9c0d1e2"
+        "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4d5e6f7a8b9c0d1e2",
     );
     let addr1 = generate_address(&key1).unwrap();
-    println!("TV1 (hex key):       key_prefix={} addr={}", &key1[..32], addr1);
+    println!(
+        "TV1 (hex key):       key_prefix={} addr={}",
+        &key1[..32],
+        addr1
+    );
 
     // TV2: Non-hex secret
     let key2 = generate_key(
         "my_secret_passphrase",
         "KNISH",
-        "0000000000000000000000000000000000000000000000000000000000000001"
+        "0000000000000000000000000000000000000000000000000000000000000001",
     );
     let addr2 = generate_address(&key2).unwrap();
-    println!("TV2 (non-hex sec):   key_prefix={} addr={}", &key2[..32], addr2);
+    println!(
+        "TV2 (non-hex sec):   key_prefix={} addr={}",
+        &key2[..32],
+        addr2
+    );
 
     // TV3: Non-hex position
     let key3 = generate_key(
         "d4f5a6b7c8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4",
         "GOLD",
-        "non_hex_position_string"
+        "non_hex_position_string",
     );
     let addr3 = generate_address(&key3).unwrap();
-    println!("TV3 (non-hex pos):   key_prefix={} addr={}", &key3[..32], addr3);
+    println!(
+        "TV3 (non-hex pos):   key_prefix={} addr={}",
+        &key3[..32],
+        addr3
+    );
 
     // TV4: Zero position
     let key4 = generate_key(
         "d4f5a6b7c8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4",
         "KNISH",
-        "0000000000000000000000000000000000000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000000000000000000",
     );
     let addr4 = generate_address(&key4).unwrap();
-    println!("TV4 (zero pos):      key_prefix={} addr={}", &key4[..32], addr4);
+    println!(
+        "TV4 (zero pos):      key_prefix={} addr={}",
+        &key4[..32],
+        addr4
+    );
 
     // TV5: BigInt carry
     let key5 = generate_key(
         "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "KNISH",
-        "0000000000000000000000000000000000000000000000000000000000000001"
+        "0000000000000000000000000000000000000000000000000000000000000001",
     );
     let addr5 = generate_address(&key5).unwrap();
-    println!("TV5 (carry):         key_prefix={} addr={}", &key5[..32], addr5);
+    println!(
+        "TV5 (carry):         key_prefix={} addr={}",
+        &key5[..32],
+        addr5
+    );
 
     println!("\nAll key derivation vectors computed successfully.");
 }

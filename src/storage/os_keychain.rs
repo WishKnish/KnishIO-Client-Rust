@@ -54,9 +54,9 @@ impl OsKeychainSecretStorageProvider {
                 let mut random_bytes = [0u8; 32];
                 rand::rng().fill_bytes(&mut random_bytes);
                 let p = BASE64.encode(random_bytes);
-                entry
-                    .set_password(&p)
-                    .map_err(|e| KnishIOError::SecretStorage(format!("OS keychain unavailable: {e}")))?;
+                entry.set_password(&p).map_err(|e| {
+                    KnishIOError::SecretStorage(format!("OS keychain unavailable: {e}"))
+                })?;
                 Zeroizing::new(p)
             }
             Err(e) => {
@@ -107,14 +107,16 @@ impl OsKeychainSecretStorageProvider {
             .get_item(&format!("{KEY_PREFIX}{bundle_hash}"))?
             .ok_or_else(|| KnishIOError::SecretNotFound(bundle_hash.to_string()))?;
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e)))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e))
+        })?;
 
         let decrypted = envelope::open(&payload, &self.passphrase)?;
 
         with_secure_bytes(decrypted.to_vec(), |bytes| {
-            let secret_string = String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e)))?;
+            let secret_string = String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e))
+            })?;
             f(&secret_string)
         })
     }
@@ -182,11 +184,14 @@ impl SecretStorageProvider for OsKeychainSecretStorageProvider {
                 hardware_backed: false,
                 provider_type: "aes-gcm".to_string(),
             };
-            let recovery_payload = envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
+            let recovery_payload =
+                envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
             let recovery_json = serde_json::to_string(&recovery_payload)
                 .map_err(|e| KnishIOError::SecretStorage(format!("Serialization failed: {e}")))?;
-            self.backend
-                .set_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"), recovery_json)?;
+            self.backend.set_item(
+                &format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"),
+                recovery_json,
+            )?;
         }
 
         Ok(())
@@ -204,27 +209,35 @@ impl SecretStorageProvider for OsKeychainSecretStorageProvider {
             ));
         }
 
-        let raw = match self.backend.get_item(&format!("{KEY_PREFIX}{bundle_hash}"))? {
+        let raw = match self
+            .backend
+            .get_item(&format!("{KEY_PREFIX}{bundle_hash}"))?
+        {
             Some(val) => val,
             None => return Ok(None),
         };
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e)))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e))
+        })?;
 
         let decrypted = envelope::open(&payload, &self.passphrase)?;
 
         with_secure_bytes(decrypted.to_vec(), |bytes| {
-            String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e)))
+            String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e))
+            })
         })
         .map(Some)
     }
 
     async fn delete_secret(&self, bundle_hash: &str) -> Result<bool> {
-        let removed_primary = self.backend
+        let removed_primary = self
+            .backend
             .remove_item(&format!("{KEY_PREFIX}{bundle_hash}"))?;
-        let _ = self.backend.remove_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"));
+        let _ = self
+            .backend
+            .remove_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"));
         Ok(removed_primary)
     }
 
@@ -256,32 +269,44 @@ impl SecretStorageProvider for OsKeychainSecretStorageProvider {
         options: StorageOptions,
     ) -> Result<()> {
         if bundle_hash.is_empty() {
-            return Err(KnishIOError::SecretStorage("Bundle hash cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Bundle hash cannot be empty".to_string(),
+            ));
         }
         if recovery_passphrase.is_empty() {
-            return Err(KnishIOError::SecretStorage("Recovery passphrase cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Recovery passphrase cannot be empty".to_string(),
+            ));
         }
 
         let raw = self
             .backend
             .get_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"))?
-            .ok_or_else(|| KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}")))?;
+            .ok_or_else(|| {
+                KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}"))
+            })?;
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}")))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}"))
+        })?;
 
         let decrypted = envelope::open(&payload, recovery_passphrase)?;
 
         let secret_str = with_secure_bytes(decrypted.to_vec(), |bytes| {
-            String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext in recovery envelope: {e}")))
+            String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!(
+                    "Invalid UTF-8 plaintext in recovery envelope: {e}"
+                ))
+            })
         })?;
 
         let mut reenroll_options = options;
         if reenroll_options.recovery_passphrase.is_none() {
-            reenroll_options.recovery_passphrase = Some(Zeroizing::new(recovery_passphrase.to_string()));
+            reenroll_options.recovery_passphrase =
+                Some(Zeroizing::new(recovery_passphrase.to_string()));
         }
 
-        self.store_secret(bundle_hash, &secret_str, reenroll_options).await
+        self.store_secret(bundle_hash, &secret_str, reenroll_options)
+            .await
     }
 }

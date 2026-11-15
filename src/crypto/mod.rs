@@ -25,10 +25,13 @@
 //! - **Memory Pooling**: Zero-allocation buffer management for high-throughput operations
 //! - **Adaptive Selection**: Automatic fallback between SIMD and standard implementations
 
-use shake::{Shake256, digest::{ExtendableOutput, Update, XofReader}};
 use crate::error::{KnishIOError, Result};
 use num_bigint;
 use num_traits;
+use shake::{
+    digest::{ExtendableOutput, Update, XofReader},
+    Shake256,
+};
 use std::sync::LazyLock;
 
 // SIMD-optimized cryptographic operations
@@ -89,19 +92,19 @@ fn is_simd_supported() -> bool {
 /// ```
 pub fn shake256(input: &str, output_length: usize) -> String {
     use std::time::Instant;
-    
+
     // Use SIMD implementation if available and enabled
     if *SIMD_ENABLED {
         let start = Instant::now();
         let result = simd::simd_shake256_optimized(input, output_length);
         let duration = start.elapsed();
-        
+
         // Record performance metrics
         simd::record_performance(
             duration.as_nanos() as u64,
             input.len() as u64 + (output_length / 8) as u64,
         );
-        
+
         result
     } else {
         // Standard implementation fallback
@@ -125,7 +128,7 @@ fn shake256_standard(input: &str, output_length: usize) -> String {
 ///
 /// This function matches the JavaScript SDK's incremental hashing pattern
 /// where values are fed one by one into the SHAKE256 sponge.
-/// 
+///
 /// Uses SIMD optimization when available for improved performance.
 ///
 /// # Arguments
@@ -138,20 +141,20 @@ fn shake256_standard(input: &str, output_length: usize) -> String {
 /// Hexadecimal string representation of the hash
 pub fn shake256_incremental(values: &[String], output_length: usize) -> String {
     use std::time::Instant;
-    
+
     // Use SIMD implementation if available
     if *SIMD_ENABLED {
         let start = Instant::now();
         let result = simd::simd_shake256_incremental(values, output_length);
         let duration = start.elapsed();
-        
+
         // Calculate total input bytes
         let total_bytes: usize = values.iter().map(|v| v.len()).sum();
         simd::record_performance(
             duration.as_nanos() as u64,
             total_bytes as u64 + (output_length / 8) as u64,
         );
-        
+
         result
     } else {
         // Standard implementation fallback
@@ -162,12 +165,12 @@ pub fn shake256_incremental(values: &[String], output_length: usize) -> String {
 /// Standard incremental SHAKE256 implementation (non-SIMD)
 fn shake256_incremental_standard(values: &[String], output_length: usize) -> String {
     let mut hasher = Shake256::default();
-    
+
     // Update the hasher incrementally with each value
     for value in values {
         hasher.update(value.as_bytes());
     }
-    
+
     let mut reader = hasher.finalize_xof();
     let mut output = vec![0u8; output_length / 8];
     reader.read(&mut output);
@@ -220,7 +223,7 @@ pub fn generate_secret_with_params(seed: Option<&str>, length: usize) -> String 
 ///
 /// Creates a 2048-character secret by repeatedly hashing the seed.
 /// This matches the JavaScript implementation exactly.
-/// 
+///
 /// Uses SIMD optimization when available for improved performance.
 ///
 /// # Arguments
@@ -301,7 +304,7 @@ pub fn generate_batch_id_with_params(molecular_hash: Option<&str>, index: Option
         let input = format!("{}{}", hash, idx);
         return shake256(&input, 256);
     }
-    
+
     // Generate random batch ID if parameters not provided
     generate_random_hash()
 }
@@ -386,7 +389,7 @@ pub fn generate_key(secret: &str, token: &str, position: &str) -> String {
     let intermediate_hash = shake256(&intermediate_input, 8192);
 
     // Second stage: hash the intermediate hash to get final key
-    shake256(&intermediate_hash, 8192)  // 8192 bits = 2048 hex chars
+    shake256(&intermediate_hash, 8192) // 8192 bits = 2048 hex chars
 }
 
 /// Generate an OTS v2 private key (docs/OTS_V2_SPECIFICATION.md §2.3)
@@ -400,7 +403,10 @@ pub fn generate_key(secret: &str, token: &str, position: &str) -> String {
 ///
 /// An 8192-character hexadecimal key string (64 chunks of 128)
 pub fn generate_key_v2(secret: &str, token: &str, position: &str) -> String {
-    let stage1 = format!("{OTS_V2_DOMAIN_TAG}|{}|{token}", indexed_key_hex(secret, position));
+    let stage1 = format!(
+        "{OTS_V2_DOMAIN_TAG}|{}|{token}",
+        indexed_key_hex(secret, position)
+    );
     let intermediate_hash = shake256(&stage1, 8192); // 2048 hex chars
     shake256(&intermediate_hash, 32768) // 32768 bits = 8192 hex chars
 }
@@ -449,7 +455,9 @@ pub fn generate_address(key: &str) -> Result<String> {
             }
             Ok(wots_address_v2_sdk(key))
         }
-        _ => Err(KnishIOError::custom("Key must be 2048 (OTS v1) or 8192 (OTS v2) characters")),
+        _ => Err(KnishIOError::custom(
+            "Key must be 2048 (OTS v1) or 8192 (OTS v2) characters",
+        )),
     }
 }
 
@@ -472,29 +480,29 @@ pub(crate) fn wots_address_v2_sdk(key: &str) -> String {
 pub(crate) fn wots_address_sdk(key: &str) -> String {
     // Subdivide private key into 16 fragments of 128 characters each
     let key_fragments = chunk_string(key, 128);
-    
+
     // Generating wallet digest - create a hasher that we'll update with each processed fragment
     let mut digest_hasher = Shake256::default();
-    
+
     for fragment in key_fragments {
         let mut working_fragment = fragment;
-        
+
         // Process each fragment through 16 rounds of SHAKE256
         for _ in 0..16 {
             // Each round produces 512 bits (64 bytes) of output
             working_fragment = shake256(&working_fragment, 512);
         }
-        
+
         // Add the processed fragment to the digest
         digest_hasher.update(working_fragment.as_bytes());
     }
-    
+
     // Get the final digest (8192 bits = 1024 bytes)
     let mut digest_reader = digest_hasher.finalize_xof();
     let mut digest_output = vec![0u8; 1024]; // 8192 bits = 1024 bytes
     digest_reader.read(&mut digest_output);
     let digest = hex::encode(digest_output);
-    
+
     // Producing wallet address - final SHAKE256 with 256-bit output
     shake256(&digest, 256)
 }
@@ -512,24 +520,24 @@ pub(crate) fn wots_address_sdk(key: &str) -> String {
 /// A 64-character hexadecimal position string
 pub fn generate_position(salt_length: usize) -> String {
     use rand::RngExt;
-    
+
     let mut rng = rand::rng();
     let salt: String = (0..salt_length)
         .map(|_| format!("{:02x}", rng.random::<u8>()))
         .collect();
-    
+
     shake256(&salt, 256)
 }
 
 /// Generate a random hash (helper function)
 fn generate_random_hash() -> String {
     use rand::RngExt;
-    
+
     let mut rng = rand::rng();
     let random_data: String = (0..32)
         .map(|_| format!("{:02x}", rng.random::<u8>()))
         .collect();
-    
+
     shake256(&random_data, 256)
 }
 
@@ -547,7 +555,7 @@ fn generate_random_hash() -> String {
 /// A vector of 64 signed integers (-8 to 8) representing the enumerated hash
 pub fn enumerate_hash(hash: &str) -> Vec<i8> {
     let mut enumerated = Vec::new();
-    
+
     for ch in hash.to_lowercase().chars() {
         let value = match ch {
             '0' => -8,
@@ -571,7 +579,7 @@ pub fn enumerate_hash(hash: &str) -> Vec<i8> {
         };
         enumerated.push(value);
     }
-    
+
     enumerated
 }
 
@@ -589,9 +597,9 @@ pub fn enumerate_hash(hash: &str) -> Vec<i8> {
 /// A normalized vector where the sum equals zero
 pub fn normalize_enumerated(mut enumerated: Vec<i8>) -> Vec<i8> {
     let mut total: i32 = enumerated.iter().map(|&x| x as i32).sum();
-    
+
     let total_condition = total < 0;
-    
+
     while total != 0 {
         for i in 0..enumerated.len() {
             let condition = if total_condition {
@@ -599,7 +607,7 @@ pub fn normalize_enumerated(mut enumerated: Vec<i8>) -> Vec<i8> {
             } else {
                 enumerated[i] > -8
             };
-            
+
             if condition {
                 if total_condition {
                     enumerated[i] += 1;
@@ -608,14 +616,14 @@ pub fn normalize_enumerated(mut enumerated: Vec<i8>) -> Vec<i8> {
                     enumerated[i] -= 1;
                     total -= 1;
                 }
-                
+
                 if total == 0 {
                     break;
                 }
             }
         }
     }
-    
+
     enumerated
 }
 
@@ -646,19 +654,19 @@ fn base58_encode(input: &str) -> Result<String> {
     // Convert hex string to bytes
     let bytes = hex::decode(input)
         .map_err(|_| KnishIOError::Code("base58_encode: invalid hex input".into()))?;
-    
+
     if bytes.is_empty() {
         return Ok(String::new());
     }
-    
+
     // Count leading zeros
     let leading_zeros = bytes.iter().take_while(|&&b| b == 0).count();
-    
+
     // Convert to big integer and encode
     let mut num = num_bigint::BigUint::from_bytes_be(&bytes);
     let mut encoded = Vec::new();
     let base = num_bigint::BigUint::from(58u32);
-    
+
     while num > num_bigint::BigUint::from(0u32) {
         let remainder = &num % &base;
         num /= &base;
@@ -669,12 +677,12 @@ fn base58_encode(input: &str) -> Result<String> {
         };
         encoded.push(BASE58_ALPHABET[digit_index]);
     }
-    
+
     // Add leading '1's for leading zeros
     for _ in 0..leading_zeros {
         encoded.push(b'1');
     }
-    
+
     // Reverse and convert to string
     encoded.reverse();
     // BASE58_ALPHABET is all ASCII, so this is infallible in practice
@@ -700,8 +708,12 @@ pub fn hex_to_base17(hex: &str) -> Result<String> {
     use num_traits::{Num, Zero};
 
     // Convert hex string to BigUint - matches JavaScript BigInt conversion
-    let num = BigUint::from_str_radix(hex, 16)
-        .map_err(|_| KnishIOError::Code(format!("hex_to_base17: invalid hex input: {}", &hex[..hex.len().min(16)])))?;
+    let num = BigUint::from_str_radix(hex, 16).map_err(|_| {
+        KnishIOError::Code(format!(
+            "hex_to_base17: invalid hex input: {}",
+            &hex[..hex.len().min(16)]
+        ))
+    })?;
 
     // Base-17 digits - exact match to JavaScript destSymbolTable
     let digits = "0123456789abcdefg";
@@ -709,7 +721,7 @@ pub fn hex_to_base17(hex: &str) -> Result<String> {
 
     // JavaScript: If the result is empty, it means the source was 0
     if num.is_zero() {
-        return Ok("0".repeat(64));  // padStart(64, '0')
+        return Ok("0".repeat(64)); // padStart(64, '0')
     }
 
     let mut result = String::new();
@@ -719,11 +731,18 @@ pub fn hex_to_base17(hex: &str) -> Result<String> {
     while !n.is_zero() {
         let remainder = &n % &base;
         // remainder is always 0..16, parsing to usize is infallible
-        let digit_index: usize = remainder.to_string().parse()
+        let digit_index: usize = remainder
+            .to_string()
+            .parse()
             .expect("internal invariant: BigUint remainder mod 17 is always a valid usize");
         // digit_index is always < 17 = digits.len(), so nth() is infallible
-        result.insert(0, digits.chars().nth(digit_index)
-            .expect("internal invariant: digit_index < 17"));
+        result.insert(
+            0,
+            digits
+                .chars()
+                .nth(digit_index)
+                .expect("internal invariant: digit_index < 17"),
+        );
         n /= &base;
     }
 
@@ -742,31 +761,32 @@ pub fn hex_to_base17(hex: &str) -> Result<String> {
 /// Result containing decoded bytes or error
 pub fn base58_decode(input: &str) -> Result<Vec<u8>> {
     const BASE58_ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    
+
     if input.is_empty() {
         return Ok(Vec::new());
     }
-    
+
     // Count leading '1's
     let leading_ones = input.chars().take_while(|&c| c == '1').count();
-    
+
     // Convert to big integer
     let mut num = num_bigint::BigUint::from(0u32);
     let base = num_bigint::BigUint::from(58u32);
-    
+
     for ch in input.chars() {
-        let digit = BASE58_ALPHABET.find(ch)
+        let digit = BASE58_ALPHABET
+            .find(ch)
             .ok_or_else(|| KnishIOError::custom(format!("Invalid Base58 character: {}", ch)))?;
         num = num * &base + num_bigint::BigUint::from(digit);
     }
-    
+
     // Convert to bytes
     let mut bytes = num.to_bytes_be();
-    
+
     // Add leading zeros for leading '1's
     let mut result = vec![0u8; leading_ones];
     result.append(&mut bytes);
-    
+
     Ok(result)
 }
 
@@ -781,19 +801,19 @@ pub fn base58_decode(input: &str) -> Result<Vec<u8>> {
 /// Base58 encoded string
 pub fn base58_encode_bytes(input: &[u8]) -> String {
     const BASE58_ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    
+
     if input.is_empty() {
         return String::new();
     }
-    
+
     // Count leading zeros
     let leading_zeros = input.iter().take_while(|&&b| b == 0).count();
-    
+
     // Convert to big integer and encode
     let mut num = num_bigint::BigUint::from_bytes_be(input);
     let mut encoded = Vec::new();
     let base = num_bigint::BigUint::from(58u32);
-    
+
     while num > num_bigint::BigUint::from(0u32) {
         let remainder = &num % &base;
         num /= &base;
@@ -804,12 +824,12 @@ pub fn base58_encode_bytes(input: &[u8]) -> String {
         };
         encoded.push(BASE58_ALPHABET[digit_index]);
     }
-    
+
     // Add leading '1's for leading zeros
     for _ in 0..leading_zeros {
         encoded.push(b'1');
     }
-    
+
     // Reverse and convert to string
     encoded.reverse();
     String::from_utf8(encoded).unwrap_or_default()
@@ -850,12 +870,12 @@ pub fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    
+
     let mut result = 0u8;
     for (byte_a, byte_b) in a.bytes().zip(b.bytes()) {
         result |= byte_a ^ byte_b;
     }
-    
+
     result == 0
 }
 
@@ -871,16 +891,20 @@ pub fn constant_time_eq(a: &str, b: &str) -> bool {
 /// # Returns
 ///
 /// Derived key as hexadecimal string
-pub fn pbkdf2_derive_key(password: &str, salt: &str, iterations: u32, key_length: usize) -> Result<String> {
-    use sha2::Sha256;
+pub fn pbkdf2_derive_key(
+    password: &str,
+    salt: &str,
+    iterations: u32,
+    key_length: usize,
+) -> Result<String> {
     use pbkdf2::pbkdf2_hmac;
-    
-    let salt_bytes = hex::decode(salt)
-        .map_err(|_| KnishIOError::custom("Invalid salt format"))?;
-    
+    use sha2::Sha256;
+
+    let salt_bytes = hex::decode(salt).map_err(|_| KnishIOError::custom("Invalid salt format"))?;
+
     let mut key = vec![0u8; key_length];
     pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt_bytes, iterations, &mut key);
-    
+
     Ok(hex::encode(key))
 }
 
@@ -954,7 +978,7 @@ pub fn generate_ots_fragment(key_chunk: &str, normalized_value: i8) -> Result<St
     if key_chunk.len() != 128 {
         return Err(KnishIOError::SignatureMalformed);
     }
-    
+
     // Hash (8 - normalizedHash[index]) times for signing
     let iterations = 8 - normalized_value;
 
@@ -988,7 +1012,7 @@ pub fn verify_ots_fragment(ots_fragment: &str, normalized_value: i8) -> Result<S
     if ots_fragment.len() != 128 {
         return Err(KnishIOError::SignatureMalformed);
     }
-    
+
     // Hash (8 + normalizedHash[index]) times for verification
     let iterations = 8 + normalized_value;
 
@@ -1065,21 +1089,21 @@ pub fn generate_ots_signature(private_key: &str, molecular_hash: &str) -> Result
 ///
 /// True if signature is valid, false otherwise
 pub fn verify_ots_signature(
-    ots_signature: &[String], 
-    molecular_hash: &str, 
-    expected_address: &str
+    ots_signature: &[String],
+    molecular_hash: &str,
+    expected_address: &str,
 ) -> bool {
     if ots_signature.len() != 16 && ots_signature.len() != 64 {
         return false;
     }
-    
+
     if !is_signable_hash(molecular_hash) {
         return false;
     }
-    
-    // Step 1: Normalize the molecular hash  
+
+    // Step 1: Normalize the molecular hash
     let normalized_hash = normalize_hash(molecular_hash);
-    
+
     // Step 2: Verify each OTS fragment to get public key fragments
     let mut public_key_fragments = Vec::new();
     for (i, ots_fragment) in ots_signature.iter().enumerate() {
@@ -1090,7 +1114,7 @@ pub fn verify_ots_signature(
         };
         public_key_fragments.push(public_key_fragment);
     }
-    
+
     // Step 3: Hash all public key fragments together, then derive the address
     // (two-pass, matching generate_address and CheckMolecule::ots):
     // digest = SHAKE256(joined, 8192); address = SHAKE256(digest, 256).
@@ -1106,37 +1130,37 @@ pub fn verify_ots_signature(
 pub mod perf {
     use super::simd::{get_performance_stats, reset_performance_stats, warm_up_simd};
     use super::*;
-    
+
     /// Check if SIMD optimizations are enabled
     pub fn is_simd_enabled() -> bool {
         *SIMD_ENABLED
     }
-    
+
     /// Get current performance statistics
     pub fn get_crypto_performance_stats() -> simd::PerformanceStats {
         get_performance_stats()
     }
-    
+
     /// Reset performance statistics
     pub fn reset_crypto_performance_stats() {
         reset_performance_stats()
     }
-    
+
     /// Warm up SIMD subsystem for optimal performance
     pub fn warm_up_crypto_simd() {
         warm_up_simd()
     }
-    
+
     /// Check if current platform supports SIMD acceleration
     pub fn platform_supports_simd() -> bool {
         is_simd_supported()
     }
-    
+
     /// Get detailed system information for performance analysis
     pub fn get_system_info() -> SystemInfo {
         SystemInfo::collect()
     }
-    
+
     #[cfg(feature = "benchmark-mode")]
     /// Run comprehensive performance benchmark
     pub fn benchmark_crypto_performance() -> simd::benchmarks::PerformanceReport {
@@ -1162,7 +1186,7 @@ pub struct MemoryInfo {
 impl SystemInfo {
     fn collect() -> Self {
         let mut simd_features = Vec::new();
-        
+
         #[cfg(target_arch = "x86_64")]
         {
             if is_x86_feature_detected!("avx2") {
@@ -1175,12 +1199,12 @@ impl SystemInfo {
                 simd_features.push("AES-NI".to_string());
             }
         }
-        
+
         #[cfg(target_arch = "aarch64")]
         {
             simd_features.push("NEON".to_string());
         }
-        
+
         Self {
             cpu_arch: std::env::consts::ARCH.to_string(),
             simd_features,
@@ -1204,67 +1228,67 @@ mod tests {
             shake256("test", 256),
             "b54ff7255705a71ee2925e4a3e30e41aed489a579d5595e0df13e32e1e4dd202"
         );
-        
+
         assert_eq!(
             shake256("KnishIO", 256),
             "35e3c3f33aefb940baaf430855ccb441c24b7b0542f682b8543f4c9d3a077c6e"
         );
     }
-    
+
     #[test]
     fn test_generate_secret() {
         let secret = generate_secret("test-seed");
-        assert_eq!(secret.len(), 2048);  // canonical 2048 hex chars (1024-byte SHAKE256 squeeze), all SDKs
+        assert_eq!(secret.len(), 2048); // canonical 2048 hex chars (1024-byte SHAKE256 squeeze), all SDKs
         assert!(secret.chars().all(|c| c.is_ascii_hexdigit()));
     }
-    
+
     #[test]
     fn test_generate_bundle_hash() {
         let hash = generate_bundle_hash("test-secret");
         assert_eq!(hash.len(), 64);
         assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
-    
+
     #[test]
     fn test_generate_batch_id() {
         let batch_id = generate_batch_id();
         assert_eq!(batch_id.len(), 64);
         assert!(batch_id.chars().all(|c| c.is_ascii_hexdigit()));
-        
+
         // Test with specific parameters
         let batch_id_param = generate_batch_id_with_params(Some("test-hash"), Some(123));
         assert_eq!(batch_id_param.len(), 64);
         assert!(batch_id_param.chars().all(|c| c.is_ascii_hexdigit()));
-        
+
         // Different parameters should produce different results
         let batch_id_diff = generate_batch_id_with_params(Some("different-hash"), Some(123));
         assert_ne!(batch_id_param, batch_id_diff);
     }
-    
+
     #[test]
     fn test_generate_key() {
         let key = generate_key("test-secret", "TEST", "position123");
-        assert_eq!(key.len(), 2048);  // Match JS SDK: outputLen 8192 bits = 2048 hex chars
+        assert_eq!(key.len(), 2048); // Match JS SDK: outputLen 8192 bits = 2048 hex chars
         assert!(key.chars().all(|c| c.is_ascii_hexdigit()));
     }
-    
+
     #[test]
     fn test_generate_position() {
         let pos = generate_position(32);
         assert_eq!(pos.len(), 64);
         assert!(pos.chars().all(|c| c.is_ascii_hexdigit()));
-        
+
         // Positions should be random
         let pos2 = generate_position(32);
         assert_ne!(pos, pos2);
     }
-    
+
     #[test]
     fn test_normalize_hash() {
         let hash = "0123456789abcdef".repeat(4); // 64 character hash
         let normalized = normalize_hash(&hash);
-        assert_eq!(normalized.len(), 64);  // Match hash length: 64 chars = 64 enumerated values (matches JS SDK)
-        assert!(normalized.iter().all(|&v| (-8..=8).contains(&v)));  // Values must be in range [-8, 8]
+        assert_eq!(normalized.len(), 64); // Match hash length: 64 chars = 64 enumerated values (matches JS SDK)
+        assert!(normalized.iter().all(|&v| (-8..=8).contains(&v))); // Values must be in range [-8, 8]
     }
 
     #[test]
@@ -1273,14 +1297,14 @@ mod tests {
         let secret = generate_secret_with_params(Some("test-seed"), 1024);
         assert_eq!(secret.len(), 1024);
         assert!(secret.chars().all(|c| c.is_ascii_hexdigit()));
-        
+
         // Test random generation
         let random1 = generate_secret_with_params(None, 512);
         let random2 = generate_secret_with_params(None, 512);
         assert_eq!(random1.len(), 512);
         assert_eq!(random2.len(), 512);
         assert_ne!(random1, random2); // Should be different
-        
+
         // Test deterministic with same seed
         let secret1 = generate_secret_with_params(Some("same-seed"), 256);
         let secret2 = generate_secret_with_params(Some("same-seed"), 256);
@@ -1305,12 +1329,12 @@ mod tests {
         let hex_data = hex::encode(test_data.as_bytes());
         let encoded = base58_encode(&hex_data).unwrap();
         assert!(!encoded.is_empty());
-        
+
         // Test decode
         let decoded = base58_decode(&encoded).unwrap();
         let decoded_hex = hex::encode(decoded);
         assert_eq!(hex_data, decoded_hex);
-        
+
         // Test bytes encoding
         let bytes = b"test data";
         let encoded_bytes = base58_encode_bytes(bytes);
@@ -1322,7 +1346,7 @@ mod tests {
     fn test_generate_salt() {
         let salt1 = generate_salt(32);
         let salt2 = generate_salt(32);
-        
+
         assert_eq!(salt1.len(), 64); // 32 bytes = 64 hex chars
         assert_eq!(salt2.len(), 64);
         assert_ne!(salt1, salt2); // Should be random
@@ -1335,7 +1359,7 @@ mod tests {
         assert!(!constant_time_eq("hello", "world"));
         assert!(!constant_time_eq("hello", "hello2"));
         assert!(!constant_time_eq("hello", "hell"));
-        
+
         // Test with hex strings (common use case)
         let hash1 = "a1b2c3d4e5f6";
         let hash2 = "a1b2c3d4e5f6";
@@ -1349,10 +1373,10 @@ mod tests {
         let salt = generate_salt(16); // 32 hex chars
         let key1 = pbkdf2_derive_key("password", &salt, 1000, 32).unwrap();
         let key2 = pbkdf2_derive_key("password", &salt, 1000, 32).unwrap();
-        
+
         assert_eq!(key1.len(), 64); // 32 bytes = 64 hex chars
         assert_eq!(key1, key2); // Same inputs should produce same key
-        
+
         // Different password should produce different key
         let key3 = pbkdf2_derive_key("different", &salt, 1000, 32).unwrap();
         assert_ne!(key1, key3);
@@ -1363,7 +1387,7 @@ mod tests {
         let seed1 = generate_signature_seed("molecular_hash", "wallet_key");
         let seed2 = generate_signature_seed("molecular_hash", "wallet_key");
         let seed3 = generate_signature_seed("different_hash", "wallet_key");
-        
+
         assert_eq!(seed1.len(), 128); // 512 bits = 128 hex chars
         assert_eq!(seed1, seed2); // Same inputs should produce same seed
         assert_ne!(seed1, seed3); // Different inputs should produce different seed
@@ -1372,18 +1396,34 @@ mod tests {
     #[test]
     fn test_verify_address_format() {
         // Valid addresses (64-char hex strings matching JS SDK)
-        assert!(verify_address_format("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
-        assert!(verify_address_format("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"));
-        assert!(verify_address_format("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"));
-        assert!(verify_address_format("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"));
+        assert!(verify_address_format(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        ));
+        assert!(verify_address_format(
+            "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"
+        ));
+        assert!(verify_address_format(
+            "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+        ));
+        assert!(verify_address_format(
+            "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+        ));
 
         // Invalid addresses
         assert!(!verify_address_format("0123456789abcdef")); // Too short (16 chars)
-        assert!(!verify_address_format("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefXX")); // Too long (66 chars)
-        assert!(!verify_address_format("g123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")); // Invalid char 'g'
-        assert!(!verify_address_format("z123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")); // Invalid char 'z'
+        assert!(!verify_address_format(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefXX"
+        )); // Too long (66 chars)
+        assert!(!verify_address_format(
+            "g123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        )); // Invalid char 'g'
+        assert!(!verify_address_format(
+            "z123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        )); // Invalid char 'z'
         assert!(!verify_address_format("")); // Empty
-        assert!(!verify_address_format("Kk1234567890abcdefghijklmnopqrstuvwxyzABCDEF")); // Wrong format (has Kk prefix, wrong length)
+        assert!(!verify_address_format(
+            "Kk1234567890abcdefghijklmnopqrstuvwxyzABCDEF"
+        )); // Wrong format (has Kk prefix, wrong length)
     }
 
     #[test]
@@ -1391,10 +1431,10 @@ mod tests {
         let molecule_json = r#"{"atoms":[],"molecularHash":"test"}"#;
         let hash1 = hash_molecule(molecule_json);
         let hash2 = hash_molecule(molecule_json);
-        
+
         assert_eq!(hash1.len(), 64);
         assert_eq!(hash1, hash2); // Deterministic
-        
+
         let different_json = r#"{"atoms":[],"molecularHash":"different"}"#;
         let hash3 = hash_molecule(different_json);
         assert_ne!(hash1, hash3); // Different input should produce different hash
@@ -1405,7 +1445,7 @@ mod tests {
         // Test with 128-character key chunk and normalized value
         let key_chunk = "a".repeat(128);
         let normalized_value = 0i8; // Middle value
-        
+
         let fragment1 = generate_ots_fragment(&key_chunk, normalized_value).unwrap();
         let fragment2 = generate_ots_fragment(&key_chunk, normalized_value).unwrap();
         let fragment3 = generate_ots_fragment(&key_chunk, 1i8).unwrap(); // Different normalized value
@@ -1416,40 +1456,40 @@ mod tests {
 
         // Test with different normalized values
         let fragment_neg8 = generate_ots_fragment(&key_chunk, -8i8).unwrap(); // Max iterations (16)
-        let fragment_pos8 = generate_ots_fragment(&key_chunk, 8i8).unwrap();  // Min iterations (0)
+        let fragment_pos8 = generate_ots_fragment(&key_chunk, 8i8).unwrap(); // Min iterations (0)
 
         assert_eq!(fragment_pos8, key_chunk); // 0 iterations = original chunk
         assert_ne!(fragment_neg8, key_chunk); // 16 iterations = heavily hashed
     }
-    
+
     #[test]
     fn test_verify_ots_fragment() {
         let key_chunk = "b".repeat(128);
         let normalized_value = 2i8;
-        
+
         // Generate OTS fragment (8 - 2 = 6 iterations)
         let ots_fragment = generate_ots_fragment(&key_chunk, normalized_value).unwrap();
 
         // Verify should do (8 + 2 = 10 iterations)
         let public_key_fragment = verify_ots_fragment(&ots_fragment, normalized_value).unwrap();
-        
+
         assert_eq!(public_key_fragment.len(), 128);
-        
+
         // Total iterations should be 6 + 10 = 16
         // This should equal hashing the original key 16 times
         let mut expected = key_chunk.clone();
         for _ in 0..16 {
             expected = shake256(&expected, 512);
         }
-        
+
         assert_eq!(public_key_fragment, expected);
     }
-    
+
     #[test]
     fn test_generate_ots_signature() {
         let private_key = "c".repeat(2048); // 2048-character private key
         let molecular_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"; // 64 chars base17
-        
+
         let ots_signature = generate_ots_signature(&private_key, molecular_hash).unwrap();
 
         assert_eq!(ots_signature.len(), 16); // 16 fragments
@@ -1466,7 +1506,7 @@ mod tests {
         let different_signature = generate_ots_signature(&private_key, different_hash).unwrap();
         assert_ne!(ots_signature, different_signature);
     }
-    
+
     #[test]
     fn test_verify_ots_signature() {
         let private_key = "d".repeat(2048);
@@ -1474,11 +1514,11 @@ mod tests {
 
         // Generate signature
         let ots_signature = generate_ots_signature(&private_key, molecular_hash).unwrap();
-        
+
         // Calculate expected address by simulating the verification process
         let normalized_hash = normalize_hash(molecular_hash);
         let mut public_key_fragments = Vec::new();
-        
+
         // Split private key into chunks and process each
         for i in 0..16 {
             let start = i * 128;
@@ -1492,7 +1532,7 @@ mod tests {
             }
             public_key_fragments.push(working_chunk);
         }
-        
+
         // Two-pass address derivation (matches verify_ots_signature / generate_address)
         let public_key_joined = public_key_fragments.join("");
         let digest = shake256(&public_key_joined, 8192);
@@ -1501,35 +1541,35 @@ mod tests {
         // Verify signature
         let is_valid = verify_ots_signature(&ots_signature, molecular_hash, &expected_address);
         assert!(is_valid);
-        
+
         // Test with wrong address
         let wrong_address = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let is_invalid = verify_ots_signature(&ots_signature, molecular_hash, wrong_address);
         assert!(!is_invalid);
-        
-        // Test with wrong molecular hash  
+
+        // Test with wrong molecular hash
         let wrong_hash = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
         let is_invalid2 = verify_ots_signature(&ots_signature, wrong_hash, &expected_address);
         assert!(!is_invalid2);
     }
-    
+
     #[test]
     fn test_ots_signature_round_trip() {
         // Full round-trip test: sign -> verify
         let private_key = "e".repeat(2048);
-        let molecular_hash = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"; 
-        
+        let molecular_hash = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff";
+
         // Generate signature
         let ots_signature = generate_ots_signature(&private_key, molecular_hash).unwrap();
 
         // Calculate the correct address for this key
         let _normalized_hash = normalize_hash(molecular_hash);
         let mut expected_public_key_fragments = Vec::new();
-        
+
         for i in 0..16 {
             let start = i * 128;
             let key_chunk = &private_key[start..start + 128];
-            
+
             // Hash the key chunk 16 times total (as if fully signed then verified)
             let mut working_chunk = key_chunk.to_string();
             for _ in 0..16 {
@@ -1537,7 +1577,7 @@ mod tests {
             }
             expected_public_key_fragments.push(working_chunk);
         }
-        
+
         // Two-pass address derivation (matches verify_ots_signature / generate_address)
         let public_key_joined = expected_public_key_fragments.join("");
         let digest = shake256(&public_key_joined, 8192);
@@ -1545,7 +1585,10 @@ mod tests {
 
         // Verify the signature
         let is_valid = verify_ots_signature(&ots_signature, molecular_hash, &expected_address);
-        assert!(is_valid, "OTS signature round-trip verification should pass");
+        assert!(
+            is_valid,
+            "OTS signature round-trip verification should pass"
+        );
     }
 
     #[test]
@@ -1579,8 +1622,14 @@ mod tests {
     #[test]
     fn test_normalized_hash_sum_zero_random_inputs() {
         let test_inputs = [
-            "alpha", "beta", "gamma", "delta", "epsilon",
-            "hello world", "KnishIO", "test-secret-1234",
+            "alpha",
+            "beta",
+            "gamma",
+            "delta",
+            "epsilon",
+            "hello world",
+            "KnishIO",
+            "test-secret-1234",
         ];
         for input in &test_inputs {
             let hash = hex_to_base17(&shake256(input, 256)).unwrap();
@@ -1596,8 +1645,12 @@ mod tests {
         for n in -8i8..=8 {
             let sign_iters = 8 - n as i32;
             let verify_iters = 8 + n as i32;
-            assert_eq!(sign_iters + verify_iters, 16,
-                "Iteration total != 16 for n={}", n);
+            assert_eq!(
+                sign_iters + verify_iters,
+                16,
+                "Iteration total != 16 for n={}",
+                n
+            );
             assert!(sign_iters >= 0, "Negative sign iterations for n={}", n);
             assert!(verify_iters >= 0, "Negative verify iterations for n={}", n);
         }
@@ -1620,7 +1673,10 @@ mod tests {
         let hex_position = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
         let key_hex = generate_key(hex_secret, "TEST", hex_position);
         let key_nonhex = generate_key(nonhex_secret, "TEST", hex_position);
-        assert_ne!(key_hex, key_nonhex, "Hex and non-hex secrets must produce different keys");
+        assert_ne!(
+            key_hex, key_nonhex,
+            "Hex and non-hex secrets must produce different keys"
+        );
     }
 
     /// Full OTS round-trip: generate key, sign, verify, and determinism check

@@ -2,11 +2,11 @@
 //!
 //! Equivalent to Version4.js in the JavaScript SDK
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use super::{AtomVersion, HashAtom};
 use crate::atom::Atom;
 use crate::types::{Isotope, MetaItem};
-use super::{HashAtom, AtomVersion};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Version 4 atom implementation
 ///
@@ -154,7 +154,10 @@ impl Version4 {
         atom.meta_id = self.meta_id.clone();
         atom.meta = self.meta.clone().unwrap_or_default();
         atom.index = self.index;
-        atom.created_at = self.created_at.clone().unwrap_or_else(|| chrono::Utc::now().timestamp_millis().to_string());
+        atom.created_at = self
+            .created_at
+            .clone()
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis().to_string());
         atom.version = self.version.clone();
 
         atom
@@ -162,9 +165,9 @@ impl Version4 {
 
     /// Check if this Version4 atom has all required fields
     pub fn is_valid(&self) -> bool {
-        self.position.is_some() 
-            && self.wallet_address.is_some() 
-            && self.isotope.is_some() 
+        self.position.is_some()
+            && self.wallet_address.is_some()
+            && self.isotope.is_some()
             && self.token.is_some()
     }
 
@@ -179,10 +182,16 @@ impl Version4 {
             map.insert("position".to_string(), Value::String(position.clone()));
         }
         if let Some(ref wallet_address) = self.wallet_address {
-            map.insert("walletAddress".to_string(), Value::String(wallet_address.clone()));
+            map.insert(
+                "walletAddress".to_string(),
+                Value::String(wallet_address.clone()),
+            );
         }
         if let Some(ref isotope) = self.isotope {
-            map.insert("isotope".to_string(), serde_json::to_value(isotope).unwrap_or(Value::Null));
+            map.insert(
+                "isotope".to_string(),
+                serde_json::to_value(isotope).unwrap_or(Value::Null),
+            );
         }
         if let Some(ref token) = self.token {
             map.insert("token".to_string(), Value::String(token.clone()));
@@ -200,7 +209,10 @@ impl Version4 {
             map.insert("metaId".to_string(), Value::String(meta_id.clone()));
         }
         if let Some(ref meta) = self.meta {
-            map.insert("meta".to_string(), serde_json::to_value(meta).unwrap_or(Value::Null));
+            map.insert(
+                "meta".to_string(),
+                serde_json::to_value(meta).unwrap_or(Value::Null),
+            );
         }
         if let Some(index) = self.index {
             map.insert("index".to_string(), Value::Number(index.into()));
@@ -220,8 +232,7 @@ impl Version4 {
 impl Default for Version4 {
     fn default() -> Self {
         Self::new(
-            None, None, None, None, None, None,
-            None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None,
         )
     }
 }
@@ -230,11 +241,11 @@ impl AtomVersion for Version4 {
     fn from_atom(atom: &Atom) -> Self {
         Self::from_atom(atom)
     }
-    
+
     fn view(&self) -> Value {
         self.view()
     }
-    
+
     fn version(&self) -> String {
         "4".to_string()
     }
@@ -276,12 +287,7 @@ mod tests {
 
     #[test]
     fn test_version4_from_atom() {
-        let mut atom = Atom::new(
-            "W1",
-            "test-address",
-            Isotope::C,
-            "TEST"
-        );
+        let mut atom = Atom::new("W1", "test-address", Isotope::C, "TEST");
         atom.value = Some(50.0.to_string());
         atom.batch_id = Some("batch456".to_string());
         atom.meta_type = Some("identity".to_string());
@@ -445,18 +451,19 @@ mod tests {
 
         // Should be structured array
         assert!(hash_repr.is_array());
-        
+
         let arr = hash_repr.as_array().unwrap();
-        
+
         // Should contain only non-None fields, sorted by key
         // Expected fields: batchId, index, isotope, position, token, value, version, walletAddress
         assert_eq!(arr.len(), 8);
-        
+
         // Verify key ordering (alphabetical)
-        let keys: Vec<String> = arr.iter()
+        let keys: Vec<String> = arr
+            .iter()
             .map(|item| item.as_object().unwrap().keys().next().unwrap().clone())
             .collect();
-        
+
         let mut sorted_keys = keys.clone();
         sorted_keys.sort();
         assert_eq!(keys, sorted_keys);
@@ -489,10 +496,10 @@ mod tests {
     #[test]
     fn test_atom_version_trait() {
         let atom = Atom::new("W1", "addr", Isotope::V, "TOKEN");
-        
+
         let version4 = Version4::from_atom(&atom);
         assert_eq!(version4.version(), "4");
-        
+
         let view = version4.view();
         assert!(view.is_array() || view.is_object());
     }
@@ -500,7 +507,7 @@ mod tests {
     #[test]
     fn test_javascript_compatibility() {
         // Test that our implementation matches JavaScript SDK patterns
-        
+
         // Test constructor with same parameters as JS
         let version4 = Version4::new(
             Some("W1".to_string()),
@@ -511,15 +518,15 @@ mod tests {
             Some("batchId".to_string()),
             Some("metaType".to_string()),
             Some("metaId".to_string()),
-            None, // meta
-            Some(0), // index
+            None,                           // meta
+            Some(0),                        // index
             Some("1234567890".to_string()), // createdAt
-            Some("4".to_string()), // version
+            Some("4".to_string()),          // version
         );
-        
+
         // Test serialization matches JS field names
         let json_value = serde_json::to_value(&version4).unwrap();
-        
+
         assert_eq!(json_value["position"], "W1");
         assert_eq!(json_value["walletAddress"], "walletAddress"); // camelCase
         assert_eq!(json_value["isotope"], "V");
@@ -531,26 +538,27 @@ mod tests {
         assert_eq!(json_value["index"], 0);
         assert_eq!(json_value["createdAt"], "1234567890"); // camelCase
         assert_eq!(json_value["version"], "4");
-        
+
         // Test create method (equivalent to JS Version4.create)
         let atom = Atom::new("W2", "addr2", Isotope::C, "TOKEN2");
         let version4_from_atom = Version4::from_atom(&atom);
-        
+
         assert_eq!(version4_from_atom.position, Some("W2".to_string()));
         assert_eq!(version4_from_atom.wallet_address, Some("addr2".to_string()));
         assert_eq!(version4_from_atom.isotope, Some(Isotope::C));
         assert_eq!(version4_from_atom.token, Some("TOKEN2".to_string()));
-        
+
         // Test view method (inherited from HashAtom)
         let view = version4.view();
         assert!(view.is_array()); // Should be structured as array
-        
+
         // Test that view is sorted properly
         if let Some(arr) = view.as_array() {
-            let keys: Vec<String> = arr.iter()
+            let keys: Vec<String> = arr
+                .iter()
                 .map(|item| item.as_object().unwrap().keys().next().unwrap().clone())
                 .collect();
-            
+
             let mut sorted_keys = keys.clone();
             sorted_keys.sort();
             assert_eq!(keys, sorted_keys); // Keys should be pre-sorted

@@ -30,8 +30,8 @@
 //! ```
 
 use crate::client::KnishIOClient;
-use crate::graphql::{GraphQLClient, ClientConfig, RetryConfig, SocketConfig};
 use crate::error::{KnishIOError, Result};
+use crate::graphql::{ClientConfig, GraphQLClient, RetryConfig, SocketConfig};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -413,38 +413,55 @@ impl ClientBuilder {
     fn validate(&self) -> Result<()> {
         // Check that at least one URI is provided
         if self.uris.is_empty() {
-            return Err(KnishIOError::ConfigurationError("At least one URI must be specified".into()));
+            return Err(KnishIOError::ConfigurationError(
+                "At least one URI must be specified".into(),
+            ));
         }
 
         // Validate URIs format
         for uri in &self.uris {
-            if !uri.starts_with("http://") && !uri.starts_with("https://") && !uri.starts_with("ws://") && !uri.starts_with("wss://") {
-                return Err(KnishIOError::ConfigurationError(format!("Invalid URI format: {}", uri)));
+            if !uri.starts_with("http://")
+                && !uri.starts_with("https://")
+                && !uri.starts_with("ws://")
+                && !uri.starts_with("wss://")
+            {
+                return Err(KnishIOError::ConfigurationError(format!(
+                    "Invalid URI format: {}",
+                    uri
+                )));
             }
         }
 
         // Validate SDK version
         if self.server_sdk_version < 2 || self.server_sdk_version > 4 {
-            return Err(KnishIOError::ConfigurationError("Server SDK version must be between 2 and 4".into()));
+            return Err(KnishIOError::ConfigurationError(
+                "Server SDK version must be between 2 and 4".into(),
+            ));
         }
 
         // Validate timeout values
         if let Some(timeout) = self.connection_timeout {
             if timeout == 0 || timeout > 300 {
-                return Err(KnishIOError::ConfigurationError("Connection timeout must be between 1 and 300 seconds".into()));
+                return Err(KnishIOError::ConfigurationError(
+                    "Connection timeout must be between 1 and 300 seconds".into(),
+                ));
             }
         }
 
         if let Some(timeout) = self.request_timeout {
             if timeout == 0 || timeout > 600 {
-                return Err(KnishIOError::ConfigurationError("Request timeout must be between 1 and 600 seconds".into()));
+                return Err(KnishIOError::ConfigurationError(
+                    "Request timeout must be between 1 and 600 seconds".into(),
+                ));
             }
         }
 
         // Validate retry count
         if let Some(retries) = self.max_retries {
             if retries > 10 {
-                return Err(KnishIOError::ConfigurationError("Maximum retries cannot exceed 10".into()));
+                return Err(KnishIOError::ConfigurationError(
+                    "Maximum retries cannot exceed 10".into(),
+                ));
             }
         }
 
@@ -478,12 +495,8 @@ impl ClientBuilder {
         let graphql_client = self.graphql_client.clone().unwrap_or_else(|| {
             let client_config = ClientConfig {
                 max_connections: 100,
-                connect_timeout: Duration::from_secs(
-                    self.connection_timeout.unwrap_or(10),
-                ),
-                request_timeout: Duration::from_secs(
-                    self.request_timeout.unwrap_or(60),
-                ),
+                connect_timeout: Duration::from_secs(self.connection_timeout.unwrap_or(10)),
+                request_timeout: Duration::from_secs(self.request_timeout.unwrap_or(60)),
                 keep_alive_timeout: Duration::from_secs(90),
                 tcp_keepalive: Some(Duration::from_secs(60)),
                 insecure_tls: self.insecure_tls,
@@ -546,7 +559,7 @@ impl ClientBuilder {
         // Save values before self is moved
         let auto_auth = self.auto_auth;
         let logging = self.logging;
-        
+
         let mut client = self.build()?;
 
         // Perform initial setup if auto-auth is enabled
@@ -723,8 +736,8 @@ mod tests {
 
     #[test]
     fn test_builder_multiple_uris() {
-        let builder = ClientBuilder::new()
-            .uris(vec!["https://node1.knish.io", "https://node2.knish.io"]);
+        let builder =
+            ClientBuilder::new().uris(vec!["https://node1.knish.io", "https://node2.knish.io"]);
 
         assert_eq!(builder.uris.len(), 2);
         assert!(builder.uris.contains(&"https://node1.knish.io".to_string()));
@@ -753,7 +766,10 @@ mod tests {
         let builder = ClientBuilder::new().uri("invalid-uri");
         let result = builder.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid URI format"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid URI format"));
     }
 
     #[test]
@@ -763,7 +779,10 @@ mod tests {
             .server_sdk_version(10);
         let result = builder.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Server SDK version"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Server SDK version"));
     }
 
     #[test]

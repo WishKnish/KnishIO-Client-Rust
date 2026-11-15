@@ -4,9 +4,9 @@
 //! NFT and stackable token units, ensuring exact compatibility with the JavaScript
 //! TokenUnit.js implementation.
 
-use serde::{Deserialize, Serialize};
 use crate::error::{KnishIOError, Result};
 use crate::types::ordered::{serialize_js_object, OrderedMap, OrderedValue};
+use serde::{Deserialize, Serialize};
 
 /// Represents a token unit with its metadata
 ///
@@ -18,10 +18,10 @@ use crate::types::ordered::{serialize_js_object, OrderedMap, OrderedValue};
 pub struct TokenUnit {
     /// Unique identifier for this token unit
     pub id: String,
-    
+
     /// Human-readable name of the token unit
     pub name: String,
-    
+
     /// Metadata associated with this token unit, in insertion order; it serializes as a JS
     /// object (array-index keys first), the order JS signs it in
     #[serde(serialize_with = "serialize_js_object")]
@@ -89,26 +89,32 @@ impl TokenUnit {
     /// let token_unit = TokenUnit::create_from_graphql(&data).unwrap();
     /// ```
     pub fn create_from_graphql(data: &serde_json::Value) -> Result<Self> {
-        let id = data.get("id")
+        let id = data
+            .get("id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| KnishIOError::custom("Missing 'id' field in GraphQL data"))?
             .to_string();
 
-        let name = data.get("name")
+        let name = data
+            .get("name")
             .and_then(|v| v.as_str())
             .ok_or_else(|| KnishIOError::custom("Missing 'name' field in GraphQL data"))?
             .to_string();
 
         let metas = match data.get("metas") {
             // JSON text in document order; empty, unparsable or not an object → no metas
-            Some(serde_json::Value::String(metas_str)) => match serde_json::from_str::<OrderedValue>(metas_str) {
-                Ok(OrderedValue::Object(map)) => map,
-                _ => OrderedMap::new(),
-            },
-            Some(metas_value @ serde_json::Value::Object(_)) => match OrderedValue::from(metas_value.clone()) {
-                OrderedValue::Object(map) => map,
-                _ => OrderedMap::new(),
-            },
+            Some(serde_json::Value::String(metas_str)) => {
+                match serde_json::from_str::<OrderedValue>(metas_str) {
+                    Ok(OrderedValue::Object(map)) => map,
+                    _ => OrderedMap::new(),
+                }
+            }
+            Some(metas_value @ serde_json::Value::Object(_)) => {
+                match OrderedValue::from(metas_value.clone()) {
+                    OrderedValue::Object(map) => map,
+                    _ => OrderedMap::new(),
+                }
+            }
             _ => OrderedMap::new(),
         };
 
@@ -137,22 +143,31 @@ impl TokenUnit {
     /// let token_unit = TokenUnit::create_from_db(&data).unwrap();
     /// ```
     pub fn create_from_db(data: &OrderedValue) -> Result<Self> {
-        let array = data.as_array()
+        let array = data
+            .as_array()
             .ok_or_else(|| KnishIOError::custom("Expected array data for TokenUnit"))?;
 
         if array.len() < 2 {
-            return Err(KnishIOError::custom("Array must contain at least id and name"));
+            return Err(KnishIOError::custom(
+                "Array must contain at least id and name",
+            ));
         }
 
-        let id = array[0].as_str()
+        let id = array[0]
+            .as_str()
             .ok_or_else(|| KnishIOError::custom("First element (id) must be a string"))?
             .to_string();
 
-        let name = array[1].as_str()
+        let name = array[1]
+            .as_str()
             .ok_or_else(|| KnishIOError::custom("Second element (name) must be a string"))?
             .to_string();
 
-        let metas = array.get(2).and_then(OrderedValue::as_object).cloned().unwrap_or_default();
+        let metas = array
+            .get(2)
+            .and_then(OrderedValue::as_object)
+            .cloned()
+            .unwrap_or_default();
 
         Ok(Self { id, name, metas })
     }
@@ -176,7 +191,8 @@ impl TokenUnit {
     /// assert_eq!(token_unit.get_fragment_zone(), Some("zone1".to_string()));
     /// ```
     pub fn get_fragment_zone(&self) -> Option<String> {
-        self.metas.get("fragmentZone")
+        self.metas
+            .get("fragmentZone")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
@@ -377,7 +393,6 @@ impl TokenUnit {
     }
 }
 
-
 impl std::fmt::Display for TokenUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "TokenUnit(id: {}, name: {})", self.id, self.name)
@@ -394,16 +409,15 @@ mod tests {
     }
 
     fn metas(entries: &[(&str, serde_json::Value)]) -> OrderedMap<OrderedValue> {
-        entries.iter().map(|(k, v)| (k.to_string(), ov(v.clone()))).collect()
+        entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), ov(v.clone())))
+            .collect()
     }
 
     #[test]
     fn test_token_unit_new() {
-        let token_unit = TokenUnit::new(
-            "token123".to_string(),
-            "My Token".to_string(),
-            None,
-        );
+        let token_unit = TokenUnit::new("token123".to_string(), "My Token".to_string(), None);
 
         assert_eq!(token_unit.id, "token123");
         assert_eq!(token_unit.name, "My Token");
@@ -412,13 +426,13 @@ mod tests {
 
     #[test]
     fn test_token_unit_new_with_metas() {
-        let metas = metas(&[("fragmentZone", json!("zone1")), ("fusedTokenUnits", json!(["unit1", "unit2"]))]);
+        let metas = metas(&[
+            ("fragmentZone", json!("zone1")),
+            ("fusedTokenUnits", json!(["unit1", "unit2"])),
+        ]);
 
-        let token_unit = TokenUnit::new(
-            "token123".to_string(),
-            "My Token".to_string(),
-            Some(metas),
-        );
+        let token_unit =
+            TokenUnit::new("token123".to_string(), "My Token".to_string(), Some(metas));
 
         assert_eq!(token_unit.id, "token123");
         assert_eq!(token_unit.name, "My Token");
@@ -439,12 +453,16 @@ mod tests {
         assert_eq!(token_unit.id, "token123");
         assert_eq!(token_unit.name, "My Token");
         assert_eq!(token_unit.get_fragment_zone(), Some("zone1".to_string()));
-        assert_eq!(token_unit.get_fused_token_units(), Some(ov(json!(["unit1", "unit2"]))));
+        assert_eq!(
+            token_unit.get_fused_token_units(),
+            Some(ov(json!(["unit1", "unit2"])))
+        );
     }
 
     /// The ledger's metas text keeps its document order; `to_data` writes it in JS key order.
     #[test]
-    fn test_create_from_graphql_keeps_document_order() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn test_create_from_graphql_keeps_document_order(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let data = json!({ "id": "u1", "name": "U1", "metas": r#"{"zone":"Z","10":1,"2":2,"attr":{"b":1,"a":2}}"# });
         let token_unit = TokenUnit::create_from_graphql(&data)?;
         assert_eq!(token_unit.metadata_keys(), ["zone", "10", "2", "attr"]);
@@ -494,7 +512,10 @@ mod tests {
         assert_eq!(token_unit.id, "token123");
         assert_eq!(token_unit.name, "My Token");
         assert_eq!(token_unit.get_fragment_zone(), Some("zone1".to_string()));
-        assert_eq!(token_unit.get_fused_token_units(), Some(ov(json!(["unit1", "unit2"]))));
+        assert_eq!(
+            token_unit.get_fused_token_units(),
+            Some(ov(json!(["unit1", "unit2"])))
+        );
     }
 
     #[test]
@@ -513,7 +534,10 @@ mod tests {
         assert_eq!(token_unit.id, "token123");
         assert_eq!(token_unit.name, "My Token");
         assert_eq!(token_unit.get_fragment_zone(), Some("zone1".to_string()));
-        assert_eq!(token_unit.get_fused_token_units(), Some(ov(json!(["unit1", "unit2"]))));
+        assert_eq!(
+            token_unit.get_fused_token_units(),
+            Some(ov(json!(["unit1", "unit2"])))
+        );
     }
 
     #[test]
@@ -537,11 +561,8 @@ mod tests {
 
         assert_eq!(token_unit.get_fragment_zone(), Some("zone1".to_string()));
 
-        let token_unit_empty = TokenUnit::new(
-            "token456".to_string(),
-            "Empty Token".to_string(),
-            None,
-        );
+        let token_unit_empty =
+            TokenUnit::new("token456".to_string(), "Empty Token".to_string(), None);
 
         assert_eq!(token_unit_empty.get_fragment_zone(), None);
     }
@@ -554,13 +575,13 @@ mod tests {
             Some(metas(&[("fusedTokenUnits", json!(["unit1", "unit2"]))])),
         );
 
-        assert_eq!(token_unit.get_fused_token_units(), Some(ov(json!(["unit1", "unit2"]))));
-
-        let token_unit_empty = TokenUnit::new(
-            "token456".to_string(),
-            "Empty Token".to_string(),
-            None,
+        assert_eq!(
+            token_unit.get_fused_token_units(),
+            Some(ov(json!(["unit1", "unit2"])))
         );
+
+        let token_unit_empty =
+            TokenUnit::new("token456".to_string(), "Empty Token".to_string(), None);
 
         assert_eq!(token_unit_empty.get_fused_token_units(), None);
     }
@@ -578,9 +599,14 @@ mod tests {
         assert_eq!(data.len(), 3);
         assert_eq!(data[0], ov(json!("token123")));
         assert_eq!(data[1], ov(json!("My Token")));
-        
+
         // Check that metas is properly serialized
-        assert_eq!(data[2].as_object().and_then(|metas| metas.get("fragmentZone")), Some(&ov(json!("zone1"))));
+        assert_eq!(
+            data[2]
+                .as_object()
+                .and_then(|metas| metas.get("fragmentZone")),
+            Some(&ov(json!("zone1")))
+        );
     }
 
     #[test]
@@ -595,7 +621,7 @@ mod tests {
 
         assert_eq!(response["id"], json!("token123"));
         assert_eq!(response["name"], json!("My Token"));
-        
+
         // Check that metas is properly JSON-encoded
         let metas_str = response["metas"].as_str().unwrap();
         assert_eq!(metas_str, r#"{"fragmentZone":"zone1"}"#);
@@ -603,11 +629,7 @@ mod tests {
 
     #[test]
     fn test_metadata_operations() {
-        let mut token_unit = TokenUnit::new(
-            "token123".to_string(),
-            "My Token".to_string(),
-            None,
-        );
+        let mut token_unit = TokenUnit::new("token123".to_string(), "My Token".to_string(), None);
 
         assert!(!token_unit.has_metadata());
         assert!(token_unit.metadata_keys().is_empty());
@@ -671,16 +693,15 @@ mod tests {
         let deserialized: TokenUnit = serde_json::from_str(&json_str).unwrap();
 
         assert_eq!(token_unit, deserialized);
-        assert_eq!(token_unit.get_fragment_zone(), deserialized.get_fragment_zone());
+        assert_eq!(
+            token_unit.get_fragment_zone(),
+            deserialized.get_fragment_zone()
+        );
     }
 
     #[test]
     fn test_display() {
-        let token_unit = TokenUnit::new(
-            "token123".to_string(),
-            "My Token".to_string(),
-            None,
-        );
+        let token_unit = TokenUnit::new("token123".to_string(), "My Token".to_string(), None);
 
         let display_str = format!("{}", token_unit);
         assert_eq!(display_str, "TokenUnit(id: token123, name: My Token)");
@@ -689,7 +710,7 @@ mod tests {
     #[test]
     fn test_default() {
         let token_unit = TokenUnit::default();
-        
+
         assert!(token_unit.id.is_empty());
         assert!(token_unit.name.is_empty());
         assert!(token_unit.metas.is_empty());

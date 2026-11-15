@@ -25,11 +25,11 @@
 //! - Same payload formatting
 //! - Same accessor method signatures
 
-use crate::molecule::Molecule;
-use crate::wallet::Wallet;
-use crate::token_unit::TokenUnit;
 use crate::error::KnishIOError;
-use serde::{Serialize, Deserialize};
+use crate::molecule::Molecule;
+use crate::token_unit::TokenUnit;
+use crate::wallet::Wallet;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -45,7 +45,11 @@ pub struct ResponseFactory;
 
 impl ResponseFactory {
     /// Create response based on GraphQL operation name and data
-    pub fn create_response(operation: &str, json: Value, query: Option<Value>) -> Result<Box<dyn Response>, KnishIOError> {
+    pub fn create_response(
+        operation: &str,
+        json: Value,
+        query: Option<Value>,
+    ) -> Result<Box<dyn Response>, KnishIOError> {
         match operation {
             "ActiveSession" => Ok(Box::new(ResponseActiveSession::new(json, query)?)),
             "Atom" => Ok(Box::new(ResponseAtom::new(json, query)?)),
@@ -53,7 +57,9 @@ impl ResponseFactory {
             "Balance" => Ok(Box::new(ResponseBalance::new(json, query)?)),
             "ContinuId" => Ok(Box::new(ResponseContinuId::new(json, query)?)),
             "ProposeMolecule" => Ok(Box::new(ResponseProposeMolecule::new(json, query)?)),
-            "AccessToken" => Ok(Box::new(ResponseRequestAuthorizationGuest::new(json, query)?)),
+            "AccessToken" => Ok(Box::new(ResponseRequestAuthorizationGuest::new(
+                json, query,
+            )?)),
             "Wallet" => Ok(Box::new(ResponseWalletList::new(json, query)?)),
             "WalletBundle" => Ok(Box::new(ResponseWalletBundle::new(json, query)?)),
             "LinkIdentifier" => Ok(Box::new(ResponseLinkIdentifier::new(json, query)?)),
@@ -67,11 +73,18 @@ impl ResponseFactory {
             }
         }
     }
-    
+
     /// Create response for mutations (all return ProposeMolecule structure)
-    pub fn create_mutation_response(mutation_name: &str, json: Value, query: Option<Value>, molecule: Option<Molecule>) -> Result<Box<dyn Response>, KnishIOError> {
+    pub fn create_mutation_response(
+        mutation_name: &str,
+        json: Value,
+        query: Option<Value>,
+        molecule: Option<Molecule>,
+    ) -> Result<Box<dyn Response>, KnishIOError> {
         match mutation_name {
-            "ProposeMolecule" => Ok(Box::new(ResponseProposeMolecule::with_molecule(json, query, molecule)?)),
+            "ProposeMolecule" => Ok(Box::new(ResponseProposeMolecule::with_molecule(
+                json, query, molecule,
+            )?)),
             "CreateToken" => Ok(Box::new(ResponseCreateToken::new(json))),
             "CreateWallet" => Ok(Box::new(ResponseCreateWallet::new(json))),
             "TransferTokens" => Ok(Box::new(ResponseTransferTokens::new(json))),
@@ -81,7 +94,9 @@ impl ResponseFactory {
             "CreateRule" => Ok(Box::new(ResponseCreateRule::new(json))),
             "ClaimShadowWallet" => Ok(Box::new(ResponseClaimShadowWallet::new(json, query)?)),
             "RequestAuthorization" => Ok(Box::new(ResponseRequestAuthorization::new(json))),
-            "RequestAuthorizationGuest" => Ok(Box::new(ResponseRequestAuthorizationGuest::new(json, query)?)),
+            "RequestAuthorizationGuest" => Ok(Box::new(ResponseRequestAuthorizationGuest::new(
+                json, query,
+            )?)),
             _ => {
                 // Default to generic ProposeMolecule for unknown mutations
                 Ok(Box::new(ResponseProposeMolecule::new(json, query)?))
@@ -99,36 +114,46 @@ impl ResponseUtils {
         // Simple regex-like extraction for operation names
         if let Some(start) = query.find("query ").or_else(|| query.find("mutation ")) {
             let rest = &query[start + 6..];
-            if let Some(end) = rest.find(' ').or_else(|| rest.find('(').or_else(|| rest.find('{'))) {
+            if let Some(end) = rest
+                .find(' ')
+                .or_else(|| rest.find('(').or_else(|| rest.find('{')))
+            {
                 return Some(rest[..end].trim().to_string());
             }
         }
-        
+
         // Try to extract from operation body
-        if let Some(start) = query.find('{'). and_then(|i| {
+        if let Some(start) = query.find('{').and_then(|i| {
             let rest = &query[i + 1..];
             rest.find(char::is_alphabetic)
         }) {
             let operation_start = query.find('{').unwrap() + 1 + start;
             let rest = &query[operation_start..];
-            if let Some(end) = rest.find(char::is_whitespace).or_else(|| rest.find('(')).or_else(|| rest.find('{')) {
+            if let Some(end) = rest
+                .find(char::is_whitespace)
+                .or_else(|| rest.find('('))
+                .or_else(|| rest.find('{'))
+            {
                 return Some(rest[..end].trim().to_string());
             }
         }
-        
+
         None
     }
-    
+
     /// Check if response indicates molecular acceptance
     pub fn is_molecular_accepted(response: &dyn Response) -> bool {
         response.success() && response.status().is_some_and(|s| s == "accepted")
     }
-    
+
     /// Extract molecular hash from any molecular response
     pub fn extract_molecular_hash(response: &dyn Response) -> Option<String> {
-        response.get("molecularHash")?.as_str().map(|s| s.to_string())
+        response
+            .get("molecularHash")?
+            .as_str()
+            .map(|s| s.to_string())
     }
-    
+
     /// Convert generic response data to wallet using standard conversion
     pub fn response_to_wallet(data: &Value, secret: Option<&str>) -> Option<Wallet> {
         ResponseWalletList::wallet_from_data(data, secret)
@@ -142,28 +167,28 @@ impl ResponseUtils {
 pub trait Response: Send + Sync {
     /// Get the response data as JSON (equivalent to data() in JS)
     fn data(&self) -> &Value;
-    
+
     /// Check if the response indicates success
     fn success(&self) -> bool;
-    
+
     /// Get error message if any (equivalent to error checking in JS)
     fn error(&self) -> Option<String>;
-    
+
     /// Get specific field from response data (equivalent to Dot.get in JS)
     fn get(&self, key: &str) -> Option<&Value>;
-    
+
     /// Get the payload (main data content) (equivalent to payload() in JS)
     fn payload(&self) -> Option<&Value>;
-    
+
     /// Get reason/message from response (equivalent to reason() in JS)
     fn reason(&self) -> Option<String>;
-    
+
     /// Get status from response data (equivalent to status() in JS)
     fn status(&self) -> Option<String>;
-    
+
     /// Convert to JSON value (equivalent to response() in JS)
     fn to_json(&self) -> Value;
-    
+
     /// Get the original query that generated this response
     fn query(&self) -> Option<&Value>;
 }
@@ -198,7 +223,7 @@ impl BaseResponse {
         if json.is_null() {
             return Err(KnishIOError::InvalidResponse);
         }
-        
+
         let mut response = BaseResponse {
             data: json.clone(),
             origin_response: json.clone(),
@@ -207,13 +232,13 @@ impl BaseResponse {
             payload: None,
             query: None,
         };
-        
+
         // Check for server errors (equivalent to JS error checking)
         response.validate_response()?;
         response.init();
         Ok(response)
     }
-    
+
     /// Create a fallback BaseResponse for error cases (avoids panic in constructors)
     pub fn empty() -> Self {
         BaseResponse {
@@ -232,12 +257,12 @@ impl BaseResponse {
         response.query = query;
         Ok(response)
     }
-    
+
     pub fn with_data_key(mut self, key: impl Into<String>) -> Self {
         self.data_key = Some(key.into());
         self
     }
-    
+
     /// Initialize the response (equivalent to init() in JS)
     ///
     /// Base implementation - override in specific response types for
@@ -245,7 +270,7 @@ impl BaseResponse {
     pub fn init(&mut self) {
         // Default implementation - override in specific response types
     }
-    
+
     /// Validate response for errors (equivalent to JS constructor error checking)
     ///
     /// Checks for server exceptions and authentication errors matching
@@ -254,41 +279,41 @@ impl BaseResponse {
         // Check for exception key (equivalent to Dot.has(response, errorKey) in JS)
         if let Some(error_value) = self.origin_response.get(&self.error_key) {
             let error_str = error_value.as_str().unwrap_or("");
-            
+
             // Check for unauthenticated error (equivalent to JS UnauthenticatedException)
             if error_str.contains("Unauthenticated") {
                 return Err(KnishIOError::Unauthenticated);
             }
-            
+
             // General invalid response error (equivalent to JS InvalidResponseException)
             return Err(KnishIOError::InvalidResponse);
         }
-        
+
         Ok(())
     }
-    
+
     /// Check if response has errors
     pub fn has_errors(&self) -> bool {
         self.data.get(&self.error_key).is_some()
     }
-    
+
     /// Get dot notation value (equivalent to Dot.get in JS)
     pub fn dot_get(&self, path: &str) -> Option<&Value> {
         let parts: Vec<&str> = path.split('.').collect();
         let mut current = &self.data;
-        
+
         for part in parts {
             current = current.get(part)?;
         }
-        
+
         Some(current)
     }
-    
+
     /// Check if dot notation path exists (equivalent to Dot.has in JS)
     pub fn dot_has(&self, path: &str) -> bool {
         self.dot_get(path).is_some()
     }
-    
+
     /// Get data based on data_key (equivalent to data() in JS)
     pub fn get_data(&self) -> &Value {
         if let Some(ref data_key) = self.data_key {
@@ -303,21 +328,22 @@ impl Response for BaseResponse {
     fn data(&self) -> &Value {
         self.get_data()
     }
-    
+
     fn success(&self) -> bool {
         !self.has_errors() && self.get_data().is_object()
     }
-    
+
     fn error(&self) -> Option<String> {
-        self.origin_response.get(&self.error_key)
+        self.origin_response
+            .get(&self.error_key)
             .and_then(|e| e.as_str())
             .map(|s| s.to_string())
     }
-    
+
     fn get(&self, key: &str) -> Option<&Value> {
         self.get_data().get(key)
     }
-    
+
     fn payload(&self) -> Option<&Value> {
         if let Some(ref payload) = self.payload {
             Some(payload)
@@ -325,29 +351,30 @@ impl Response for BaseResponse {
             Some(self.get_data())
         }
     }
-    
+
     fn reason(&self) -> Option<String> {
         // Return None when the response carries no reason/message — an accepted molecule simply
         // has no reason. (Previously defaulted to "Invalid response from server" unconditionally,
         // which surfaced a misleading reason on ACCEPTED transfers.) Genuine errors carry a
         // reason/message field; callers gate on success()/status() first.
-        self.get_data().get("reason")
+        self.get_data()
+            .get("reason")
             .or_else(|| self.get_data().get("message"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     fn status(&self) -> Option<String> {
-        self.get_data().get("status")
+        self.get_data()
+            .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     fn query(&self) -> Option<&Value> {
         self.query.as_ref()
     }
-    
-    
+
     fn to_json(&self) -> Value {
         self.origin_response.clone()
     }
@@ -370,23 +397,26 @@ impl ResponseActiveSession {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.ActiveSession"),
         })
     }
-    
+
     pub fn active(&self) -> bool {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("active")
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
     }
-    
+
     pub fn expires_at(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("expiresAt")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn session_id(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("sessionId")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -394,15 +424,33 @@ impl ResponseActiveSession {
 }
 
 impl Response for ResponseActiveSession {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.base.success()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for Atom query (equivalent to ResponseAtom.js)
@@ -418,14 +466,16 @@ impl ResponseAtom {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.Atom"),
         })
     }
-    
+
     pub fn instances(&self) -> Vec<Value> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("instances")
-            .and_then(|v| v.as_array()).cloned()
+            .and_then(|v| v.as_array())
+            .cloned()
             .unwrap_or_default()
     }
-    
+
     pub fn metas(&self) -> Vec<Value> {
         let mut metas = Vec::new();
         for instance in self.instances() {
@@ -440,18 +490,34 @@ impl ResponseAtom {
 }
 
 impl Response for ResponseAtom {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { 
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.base.success()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
         // Return structured response like JS
         self.base.payload()
     }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for AuthorizationGuest (equivalent to ResponseAuthorizationGuest.js)
@@ -467,9 +533,10 @@ impl ResponseAuthorizationGuest {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.AuthorizeGuest"),
         })
     }
-    
+
     pub fn wallet(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("wallet")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -477,15 +544,33 @@ impl ResponseAuthorizationGuest {
 }
 
 impl Response for ResponseAuthorizationGuest {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.wallet().is_some() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.wallet().is_some()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for Balance query (equivalent to ResponseBalance.js)
@@ -501,37 +586,53 @@ impl ResponseBalance {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.Balance"),
         })
     }
-    
+
     /// Create a client wallet from response data (equivalent to ResponseWalletList.toClientWallet in JS)
     pub fn to_client_wallet(&self, secret: Option<&str>) -> Option<Wallet> {
         let wallet_data = self.base.get_data();
-        
+
         if wallet_data.get("bundleHash").is_none() || wallet_data.get("tokenSlug").is_none() {
             return None;
         }
-        
+
         // Convert response data to wallet (following JS implementation pattern)
         ResponseWalletList::wallet_from_data(wallet_data, secret)
     }
-    
+
     pub fn wallet_data(&self) -> Option<&Value> {
         Some(self.base.get_data())
     }
 }
 
 impl Response for ResponseBalance {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { 
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.base.success()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
         // Return the wallet as JS ResponseBalance does
         self.wallet_data()
     }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for ClaimShadowWallet (equivalent to ResponseClaimShadowWallet.js)
@@ -547,16 +648,18 @@ impl ResponseClaimShadowWallet {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.ProposeMolecule"),
         })
     }
-    
+
     pub fn molecular_hash(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn status(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -564,23 +667,37 @@ impl ResponseClaimShadowWallet {
 }
 
 impl Response for ResponseClaimShadowWallet {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { 
-        self.base.success() && 
-        self.status().is_some_and(|s| s == "accepted")
+    fn data(&self) -> &Value {
+        self.base.data()
     }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { 
-        self.base.get_data()
+    fn success(&self) -> bool {
+        self.base.success() && self.status().is_some_and(|s| s == "accepted")
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for ContinuId query (equivalent to ResponseContinuId.js)
@@ -596,16 +713,18 @@ impl ResponseContinuId {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.ContinuId"),
         })
     }
-    
+
     pub fn bundle_hash(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("bundleHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn position(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("position")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -613,15 +732,33 @@ impl ResponseContinuId {
 }
 
 impl Response for ResponseContinuId {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.base.success()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for CreateIdentifier (equivalent to ResponseCreateIdentifier.js)
@@ -637,16 +774,18 @@ impl ResponseCreateIdentifier {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.ProposeMolecule"),
         })
     }
-    
+
     pub fn molecular_hash(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn status(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -654,23 +793,37 @@ impl ResponseCreateIdentifier {
 }
 
 impl Response for ResponseCreateIdentifier {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { 
-        self.base.success() && 
-        self.status().is_some_and(|s| s == "accepted")
+    fn data(&self) -> &Value {
+        self.base.data()
     }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { 
-        self.base.get_data()
+    fn success(&self) -> bool {
+        self.base.success() && self.status().is_some_and(|s| s == "accepted")
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for CreateMeta (equivalent to ResponseCreateMeta.js)
@@ -682,22 +835,26 @@ pub struct ResponseCreateMeta {
 impl ResponseCreateMeta {
     pub fn new(json: Value) -> Self {
         ResponseCreateMeta {
-            base: BaseResponse::new(json).unwrap_or_else(|e| {
-                eprintln!("Response construction failed: {}", e);
-                BaseResponse::empty()
-            }).with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json)
+                .unwrap_or_else(|e| {
+                    eprintln!("Response construction failed: {}", e);
+                    BaseResponse::empty()
+                })
+                .with_data_key("data.ProposeMolecule"),
         }
     }
-    
+
     pub fn molecular_hash(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn status(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -705,23 +862,37 @@ impl ResponseCreateMeta {
 }
 
 impl Response for ResponseCreateMeta {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { 
-        self.base.success() && 
-        self.status().is_some_and(|s| s == "accepted")
+    fn data(&self) -> &Value {
+        self.base.data()
     }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { 
-        self.base.get_data()
+    fn success(&self) -> bool {
+        self.base.success() && self.status().is_some_and(|s| s == "accepted")
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for CreateRule (equivalent to ResponseCreateRule.js)
@@ -733,22 +904,26 @@ pub struct ResponseCreateRule {
 impl ResponseCreateRule {
     pub fn new(json: Value) -> Self {
         ResponseCreateRule {
-            base: BaseResponse::new(json).unwrap_or_else(|e| {
-                eprintln!("Response construction failed: {}", e);
-                BaseResponse::empty()
-            }).with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json)
+                .unwrap_or_else(|e| {
+                    eprintln!("Response construction failed: {}", e);
+                    BaseResponse::empty()
+                })
+                .with_data_key("data.ProposeMolecule"),
         }
     }
-    
+
     pub fn molecular_hash(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn status(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -756,23 +931,37 @@ impl ResponseCreateRule {
 }
 
 impl Response for ResponseCreateRule {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { 
-        self.base.success() && 
-        self.status().is_some_and(|s| s == "accepted")
+    fn data(&self) -> &Value {
+        self.base.data()
     }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { 
-        self.base.get_data()
+    fn success(&self) -> bool {
+        self.base.success() && self.status().is_some_and(|s| s == "accepted")
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for CreateToken (equivalent to ResponseCreateToken.js)
@@ -784,22 +973,26 @@ pub struct ResponseCreateToken {
 impl ResponseCreateToken {
     pub fn new(json: Value) -> Self {
         ResponseCreateToken {
-            base: BaseResponse::new(json).unwrap_or_else(|e| {
-                eprintln!("Response construction failed: {}", e);
-                BaseResponse::empty()
-            }).with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json)
+                .unwrap_or_else(|e| {
+                    eprintln!("Response construction failed: {}", e);
+                    BaseResponse::empty()
+                })
+                .with_data_key("data.ProposeMolecule"),
         }
     }
-    
+
     pub fn molecular_hash(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn status(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -807,23 +1000,37 @@ impl ResponseCreateToken {
 }
 
 impl Response for ResponseCreateToken {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { 
-        self.base.success() && 
-        self.status().is_some_and(|s| s == "accepted")
+    fn data(&self) -> &Value {
+        self.base.data()
     }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { 
-        self.base.get_data()
+    fn success(&self) -> bool {
+        self.base.success() && self.status().is_some_and(|s| s == "accepted")
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for CreateWallet (equivalent to ResponseCreateWallet.js)
@@ -835,22 +1042,26 @@ pub struct ResponseCreateWallet {
 impl ResponseCreateWallet {
     pub fn new(json: Value) -> Self {
         ResponseCreateWallet {
-            base: BaseResponse::new(json).unwrap_or_else(|e| {
-                eprintln!("Response construction failed: {}", e);
-                BaseResponse::empty()
-            }).with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json)
+                .unwrap_or_else(|e| {
+                    eprintln!("Response construction failed: {}", e);
+                    BaseResponse::empty()
+                })
+                .with_data_key("data.ProposeMolecule"),
         }
     }
-    
+
     pub fn molecular_hash(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn status(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -858,23 +1069,37 @@ impl ResponseCreateWallet {
 }
 
 impl Response for ResponseCreateWallet {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { 
-        self.base.success() && 
-        self.status().is_some_and(|s| s == "accepted")
+    fn data(&self) -> &Value {
+        self.base.data()
     }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { 
-        self.base.get_data()
+    fn success(&self) -> bool {
+        self.base.success() && self.status().is_some_and(|s| s == "accepted")
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for LinkIdentifier (equivalent to ResponseLinkIdentifier.js)
@@ -890,42 +1115,47 @@ impl ResponseLinkIdentifier {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.LinkIdentifier"),
         })
     }
-    
+
     /// Returns whether the identifier was linked successfully
     pub fn set(&self) -> bool {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("set")
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
     }
-    
+
     /// Returns the response message
     pub fn message(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("message")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     /// Returns the identifier type
     pub fn identifier_type(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("type")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     /// Returns the bundle
     pub fn bundle(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("bundle")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     /// Returns the content
     pub fn content(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("content")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -933,21 +1163,38 @@ impl ResponseLinkIdentifier {
 }
 
 impl Response for ResponseLinkIdentifier {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { 
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
         // Match JS success() logic: return Dot.get(this.data(), 'set')
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("set")
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
     }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for MetaBatch (equivalent to ResponseMetaBatch.js)
@@ -963,22 +1210,40 @@ impl ResponseMetaBatch {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.Batch"),
         })
     }
-    
+
     pub fn batch(&self) -> Option<&Value> {
         Some(self.base.get_data())
     }
 }
 
 impl Response for ResponseMetaBatch {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.batch() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.base.success()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.batch()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for MetaType (equivalent to ResponseMetaType.js)
@@ -994,37 +1259,57 @@ impl ResponseMetaType {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.MetaType"),
         })
     }
-    
+
     pub fn instances(&self) -> Vec<Value> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("instances")
-            .and_then(|v| v.as_array()).cloned()
+            .and_then(|v| v.as_array())
+            .cloned()
             .unwrap_or_default()
     }
-    
+
     pub fn instance_count(&self) -> HashMap<String, i64> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("instanceCount")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default()
     }
-    
+
     pub fn paginator_info(&self) -> Option<&Value> {
-        self.base.get_data()
-            .get("paginatorInfo")
+        self.base.get_data().get("paginatorInfo")
     }
 }
 
 impl Response for ResponseMetaType {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.base.success()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for MetaTypeViaAtom (equivalent to ResponseMetaTypeViaAtom.js)
@@ -1037,14 +1322,13 @@ impl ResponseMetaTypeViaAtom {
     /// Create new ResponseMetaTypeViaAtom (equivalent to ResponseMetaTypeViaAtom.js constructor)
     pub fn new(json: Value, query: Option<Value>) -> Result<Self, KnishIOError> {
         Ok(ResponseMetaTypeViaAtom {
-            base: BaseResponse::with_query(json, query)?.with_data_key("data.AtomsByMoleculeLookup"),
+            base: BaseResponse::with_query(json, query)?
+                .with_data_key("data.AtomsByMoleculeLookup"),
         })
     }
 
     pub fn atoms(&self) -> Vec<Value> {
-        self.base.get_data()
-            .as_array().cloned()
-            .unwrap_or_default()
+        self.base.get_data().as_array().cloned().unwrap_or_default()
     }
 
     /// Verify the cryptographic integrity of all molecules in this response.
@@ -1098,15 +1382,33 @@ impl ResponseMetaTypeViaAtom {
 }
 
 impl Response for ResponseMetaTypeViaAtom {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.base.success()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for Policy (equivalent to ResponsePolicy.js)
@@ -1124,22 +1426,40 @@ impl ResponsePolicy {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.Policy"),
         })
     }
-    
+
     pub fn rule(&self) -> Option<&Value> {
         Some(self.base.get_data())
     }
 }
 
 impl Response for ResponsePolicy {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.rule() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.base.success()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.rule()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for ProposeMolecule (equivalent to ResponseProposeMolecule.js)
@@ -1155,9 +1475,13 @@ impl ResponseProposeMolecule {
     pub fn new(json: Value, query: Option<Value>) -> Result<Self, KnishIOError> {
         Self::with_molecule(json, query, None)
     }
-    
+
     /// Create ResponseProposeMolecule with client molecule reference
-    pub fn with_molecule(json: Value, query: Option<Value>, client_molecule: Option<Molecule>) -> Result<Self, KnishIOError> {
+    pub fn with_molecule(
+        json: Value,
+        query: Option<Value>,
+        client_molecule: Option<Molecule>,
+    ) -> Result<Self, KnishIOError> {
         let mut response = ResponseProposeMolecule {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.ProposeMolecule"),
             client_molecule,
@@ -1166,7 +1490,7 @@ impl ResponseProposeMolecule {
         response.init();
         Ok(response)
     }
-    
+
     /// Initialize response payload parsing (equivalent to init() in JS)
     fn init(&mut self) {
         // Parse payload JSON string or use object directly (matching JS logic)
@@ -1183,42 +1507,51 @@ impl ResponseProposeMolecule {
             }
         }
     }
-    
+
     pub fn client_molecule(&self) -> &Option<Molecule> {
         &self.client_molecule
     }
-    
+
     pub fn molecule(&self) -> Option<Molecule> {
         let data = self.base.get_data();
-        
+
         let mut molecule = Molecule::new();
-        molecule.molecular_hash = data.get("molecularHash").and_then(|v| v.as_str()).map(|s| s.to_string());
-        molecule.status = data.get("status").and_then(|v| v.as_str()).map(|s| s.to_string());
-        
+        molecule.molecular_hash = data
+            .get("molecularHash")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        molecule.status = data
+            .get("status")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         if let Some(created_at) = data.get("createdAt").and_then(|v| v.as_str()) {
             molecule.created_at = created_at.to_string();
         }
-        
+
         Some(molecule)
     }
-    
+
     pub fn molecular_hash(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn status(&self) -> String {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .unwrap_or("rejected")
             .to_string()
     }
-    
+
     pub fn reason(&self) -> String {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("reason")
             .and_then(|v| v.as_str())
             .unwrap_or("Invalid response from server")
@@ -1227,17 +1560,33 @@ impl ResponseProposeMolecule {
 }
 
 impl Response for ResponseProposeMolecule {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.status() == "accepted" }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { 
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.status() == "accepted"
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
         self.parsed_payload.as_ref()
     }
-    fn reason(&self) -> Option<String> { Some(self.reason()) }
-    fn status(&self) -> Option<String> { Some(self.status()) }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn reason(&self) -> Option<String> {
+        Some(self.reason())
+    }
+    fn status(&self) -> Option<String> {
+        Some(self.status())
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for QueryActiveSession (equivalent to ResponseQueryActiveSession.js)
@@ -1249,22 +1598,26 @@ pub struct ResponseQueryActiveSession {
 impl ResponseQueryActiveSession {
     pub fn new(json: Value) -> Self {
         ResponseQueryActiveSession {
-            base: BaseResponse::new(json).unwrap_or_else(|e| {
-                eprintln!("Response construction failed: {}", e);
-                BaseResponse::empty()
-            }).with_data_key("data.ActiveSession"),
+            base: BaseResponse::new(json)
+                .unwrap_or_else(|e| {
+                    eprintln!("Response construction failed: {}", e);
+                    BaseResponse::empty()
+                })
+                .with_data_key("data.ActiveSession"),
         }
     }
-    
+
     pub fn active(&self) -> bool {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("active")
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
     }
-    
+
     pub fn expires_at(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("expiresAt")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -1272,15 +1625,33 @@ impl ResponseQueryActiveSession {
 }
 
 impl Response for ResponseQueryActiveSession {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.base.success()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for RequestAuthorization (equivalent to ResponseRequestAuthorization.js)
@@ -1292,22 +1663,26 @@ pub struct ResponseRequestAuthorization {
 impl ResponseRequestAuthorization {
     pub fn new(json: Value) -> Self {
         ResponseRequestAuthorization {
-            base: BaseResponse::new(json).unwrap_or_else(|e| {
-                eprintln!("Response construction failed: {}", e);
-                BaseResponse::empty()
-            }).with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json)
+                .unwrap_or_else(|e| {
+                    eprintln!("Response construction failed: {}", e);
+                    BaseResponse::empty()
+                })
+                .with_data_key("data.ProposeMolecule"),
         }
     }
-    
+
     pub fn molecular_hash(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn status(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -1315,23 +1690,37 @@ impl ResponseRequestAuthorization {
 }
 
 impl Response for ResponseRequestAuthorization {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { 
-        self.base.success() && 
-        self.status().is_some_and(|s| s == "accepted")
+    fn data(&self) -> &Value {
+        self.base.data()
     }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { 
-        self.base.get_data()
+    fn success(&self) -> bool {
+        self.base.success() && self.status().is_some_and(|s| s == "accepted")
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for RequestAuthorizationGuest (equivalent to ResponseRequestAuthorizationGuest.js)
@@ -1347,15 +1736,13 @@ impl ResponseRequestAuthorizationGuest {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.AccessToken"),
         })
     }
-    
+
     /// Get payload key with error handling (equivalent to payloadKey() in JS)
     pub fn payload_key(&self, key: &str) -> Result<&Value, KnishIOError> {
         let payload = self.base.get_data();
-        payload.get(key).ok_or({
-            KnishIOError::InvalidResponse
-        })
+        payload.get(key).ok_or({ KnishIOError::InvalidResponse })
     }
-    
+
     /// Get public key (equivalent to pubKey() in JS)
     pub fn pub_key(&self) -> Result<String, KnishIOError> {
         self.payload_key("key")?
@@ -1363,63 +1750,85 @@ impl ResponseRequestAuthorizationGuest {
             .map(|s| s.to_string())
             .ok_or(KnishIOError::InvalidResponse)
     }
-    
+
     /// Returns the authorization token
     pub fn token(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("token")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     /// Returns the public key
     pub fn pubkey(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("pubkey")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     /// Returns the expiration timestamp
     pub fn expires_at(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("expiresAt")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     /// Returns the time (equivalent to time() in JS)
     pub fn time(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("time")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     /// Returns encryption setting
     pub fn encrypt(&self) -> Option<bool> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("encrypt")
             .and_then(|v| v.as_bool())
     }
 }
 
 impl Response for ResponseRequestAuthorizationGuest {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { 
-        // Match JS success() logic: payload !== null
-        self.base.get_data().as_object().is_some_and(|obj| !obj.is_empty())
+    fn data(&self) -> &Value {
+        self.base.data()
     }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { 
+    fn success(&self) -> bool {
+        // Match JS success() logic: payload !== null
+        self.base
+            .get_data()
+            .as_object()
+            .is_some_and(|obj| !obj.is_empty())
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
         // Match JS reason() method
         Some("Invalid response from server".to_string())
     }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for RequestTokens (equivalent to ResponseRequestTokens.js)
@@ -1431,22 +1840,26 @@ pub struct ResponseRequestTokens {
 impl ResponseRequestTokens {
     pub fn new(json: Value) -> Self {
         ResponseRequestTokens {
-            base: BaseResponse::new(json).unwrap_or_else(|e| {
-                eprintln!("Response construction failed: {}", e);
-                BaseResponse::empty()
-            }).with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json)
+                .unwrap_or_else(|e| {
+                    eprintln!("Response construction failed: {}", e);
+                    BaseResponse::empty()
+                })
+                .with_data_key("data.ProposeMolecule"),
         }
     }
-    
+
     pub fn molecular_hash(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn status(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -1454,23 +1867,37 @@ impl ResponseRequestTokens {
 }
 
 impl Response for ResponseRequestTokens {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { 
-        self.base.success() && 
-        self.status().is_some_and(|s| s == "accepted")
+    fn data(&self) -> &Value {
+        self.base.data()
     }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { 
-        self.base.get_data()
+    fn success(&self) -> bool {
+        self.base.success() && self.status().is_some_and(|s| s == "accepted")
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for TransferTokens (equivalent to ResponseTransferTokens.js)
@@ -1482,22 +1909,26 @@ pub struct ResponseTransferTokens {
 impl ResponseTransferTokens {
     pub fn new(json: Value) -> Self {
         ResponseTransferTokens {
-            base: BaseResponse::new(json).unwrap_or_else(|e| {
-                eprintln!("Response construction failed: {}", e);
-                BaseResponse::empty()
-            }).with_data_key("data.ProposeMolecule"),
+            base: BaseResponse::new(json)
+                .unwrap_or_else(|e| {
+                    eprintln!("Response construction failed: {}", e);
+                    BaseResponse::empty()
+                })
+                .with_data_key("data.ProposeMolecule"),
         }
     }
-    
+
     pub fn molecular_hash(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    
+
     pub fn status(&self) -> Option<String> {
-        self.base.get_data()
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
@@ -1505,23 +1936,37 @@ impl ResponseTransferTokens {
 }
 
 impl Response for ResponseTransferTokens {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { 
-        self.base.success() && 
-        self.status().is_some_and(|s| s == "accepted")
+    fn data(&self) -> &Value {
+        self.base.data()
     }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { 
-        self.base.get_data()
+    fn success(&self) -> bool {
+        self.base.success() && self.status().is_some_and(|s| s == "accepted")
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base
+            .get_data()
             .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
     }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for WalletBundle (equivalent to ResponseWalletBundle.js)  
@@ -1537,7 +1982,7 @@ impl ResponseWalletBundle {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.WalletBundle"),
         })
     }
-    
+
     pub fn bundles(&self) -> HashMap<String, Value> {
         let mut aggregate = HashMap::new();
         if let Some(bundle_data) = self.base.get_data().as_array() {
@@ -1552,15 +1997,33 @@ impl ResponseWalletBundle {
 }
 
 impl Response for ResponseWalletBundle {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.base.success()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 /// Response for WalletList (equivalent to ResponseWalletList.js)
@@ -1576,7 +2039,7 @@ impl ResponseWalletList {
             base: BaseResponse::with_query(json, query)?.with_data_key("data.Wallet"),
         })
     }
-    
+
     /// Convert response data to client wallet (equivalent to ResponseWalletList.toClientWallet in JS)
     ///
     /// This is the canonical wallet conversion function used across response types
@@ -1584,11 +2047,11 @@ impl ResponseWalletList {
     pub fn wallet_from_data(data: &Value, secret: Option<&str>) -> Option<Wallet> {
         let bundle_hash = data.get("bundleHash")?.as_str()?;
         let token_slug = data.get("tokenSlug")?.as_str()?;
-        
+
         let position = data.get("position").and_then(|v| v.as_str());
         let batch_id = data.get("batchId").and_then(|v| v.as_str());
         let characters = data.get("characters").and_then(|v| v.as_str());
-        
+
         // Create wallet following JS logic (ResponseWalletList.toClientWallet)
         let mut wallet = if position.is_none() {
             // No position: equivalent to JS Wallet.create({bundle, token, batchId, characters})
@@ -1599,16 +2062,21 @@ impl ResponseWalletList {
                 None,
                 characters,
                 None,
-            ).ok()?
+            )
+            .ok()?
         } else {
             // With position: equivalent to JS new Wallet({secret, token, position, batchId, characters}).
             // With a secret and a ledger address, the wallet is keyed at the OTS version its address
             // was derived at; it stays keyless when neither version derives that address.
             let address = data.get("address").and_then(|v| v.as_str());
             let ots_version = match (secret, position, address) {
-                (Some(secret), Some(position), Some(address)) => {
-                    crate::wallet::OtsVersion::detect(secret, token_slug, position, address, crate::wallet::OtsVersion::V1)
-                }
+                (Some(secret), Some(position), Some(address)) => crate::wallet::OtsVersion::detect(
+                    secret,
+                    token_slug,
+                    position,
+                    address,
+                    crate::wallet::OtsVersion::V1,
+                ),
                 _ => Some(crate::wallet::OtsVersion::V1),
             };
             let mut w = Wallet::create_with_ots_version(
@@ -1619,7 +2087,8 @@ impl ResponseWalletList {
                 characters,
                 None,
                 ots_version.unwrap_or_default(),
-            ).ok()?;
+            )
+            .ok()?;
             // Overwrite address from response (server is authoritative)
             if let Some(addr) = address {
                 w.address = Some(addr.to_string());
@@ -1628,27 +2097,28 @@ impl ResponseWalletList {
         };
         // Set batch_id (Wallet::create() doesn't accept it, unlike JS Wallet.create)
         wallet.batch_id = batch_id.map(|s| s.to_string());
-        
+
         // TODO: Token information handling - fields don't exist on current Wallet struct
         // This would need to be implemented if these fields are added to Wallet
         // or handled through a different mechanism
-        
+
         // Set balance and other properties (String for precision)
         if let Some(amount) = data.get("amount").and_then(|v| {
-            v.as_str().map(|s| s.to_string())
+            v.as_str()
+                .map(|s| s.to_string())
                 .or_else(|| v.as_f64().map(|n| n.to_string()))
                 .or_else(|| v.as_i64().map(|n| n.to_string()))
         }) {
             wallet.balance = amount;
         }
-        
+
         if let Some(pubkey) = data.get("pubkey").and_then(|v| v.as_str()) {
             wallet.pubkey = Some(pubkey.to_string());
         }
-        
+
         // TODO: created_at field doesn't exist on current Wallet struct
         // Would need to be added if timestamp tracking is needed
-        
+
         // Handle token units (equivalent to JS tokenUnits processing)
         if let Some(token_units) = data.get("tokenUnits").and_then(|v| v.as_array()) {
             for unit_data in token_units {
@@ -1657,13 +2127,14 @@ impl ResponseWalletList {
                 }
             }
         }
-        
+
         // Handle trade rates (equivalent to JS tradeRates processing)
         if let Some(trade_rates) = data.get("tradeRates").and_then(|v| v.as_array()) {
             for rate_data in trade_rates {
                 if let Some(slug) = rate_data.get("tokenSlug").and_then(|v| v.as_str()) {
                     let amount = rate_data.get("amount").and_then(|v| {
-                        v.as_str().and_then(|s| s.parse::<f64>().ok())
+                        v.as_str()
+                            .and_then(|s| s.parse::<f64>().ok())
                             .or_else(|| v.as_f64())
                     });
                     if let Some(amount_f64) = amount {
@@ -1672,14 +2143,14 @@ impl ResponseWalletList {
                 }
             }
         }
-        
+
         Some(wallet)
     }
-    
+
     /// Get list of wallets from response (equivalent to getWallets() in JS)
     pub fn get_wallets(&self, secret: Option<&str>) -> Vec<Wallet> {
         let mut wallets = Vec::new();
-        
+
         if let Some(wallet_list) = self.base.get_data().as_array() {
             for wallet_data in wallet_list {
                 if let Some(wallet) = Self::wallet_from_data(wallet_data, secret) {
@@ -1687,28 +2158,44 @@ impl ResponseWalletList {
                 }
             }
         }
-        
+
         wallets
     }
-    
+
     /// Get raw wallet data (for compatibility)
     pub fn wallets(&self) -> Vec<Value> {
-        self.base.get_data()
-            .as_array().cloned()
-            .unwrap_or_default()
+        self.base.get_data().as_array().cloned().unwrap_or_default()
     }
 }
 
 impl Response for ResponseWalletList {
-    fn data(&self) -> &Value { self.base.data() }
-    fn success(&self) -> bool { self.base.success() }
-    fn error(&self) -> Option<String> { self.base.error() }
-    fn get(&self, key: &str) -> Option<&Value> { self.base.get(key) }
-    fn payload(&self) -> Option<&Value> { self.base.payload() }
-    fn reason(&self) -> Option<String> { self.base.reason() }
-    fn status(&self) -> Option<String> { self.base.status() }
-    fn to_json(&self) -> Value { self.base.to_json() }
-    fn query(&self) -> Option<&Value> { self.base.query() }
+    fn data(&self) -> &Value {
+        self.base.data()
+    }
+    fn success(&self) -> bool {
+        self.base.success()
+    }
+    fn error(&self) -> Option<String> {
+        self.base.error()
+    }
+    fn get(&self, key: &str) -> Option<&Value> {
+        self.base.get(key)
+    }
+    fn payload(&self) -> Option<&Value> {
+        self.base.payload()
+    }
+    fn reason(&self) -> Option<String> {
+        self.base.reason()
+    }
+    fn status(&self) -> Option<String> {
+        self.base.status()
+    }
+    fn to_json(&self) -> Value {
+        self.base.to_json()
+    }
+    fn query(&self) -> Option<&Value> {
+        self.base.query()
+    }
 }
 
 // =====================================================
@@ -1723,7 +2210,7 @@ impl Response for ResponseWalletList {
 /// ## Architecture Overview
 ///
 /// The response system follows a consistent pattern:
-/// 
+///
 /// 1. **Base Response Trait**: Defines standard interface for all responses
 /// 2. **BaseResponse Struct**: Core functionality shared by all response types  
 /// 3. **Specific Response Types**: 22 response implementations matching JavaScript SDK
@@ -1779,7 +2266,7 @@ impl Response for ResponseWalletList {
 /// });
 ///
 /// let response = ResponseBalance::new(json_response, None)?;
-/// 
+///
 /// if response.success() {
 ///     if let Some(wallet) = response.to_client_wallet(None) {
 ///         println!("Balance: {}", wallet.balance);
@@ -1891,7 +2378,7 @@ impl Response for ResponseWalletList {
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-/// 
+///
 /// This comprehensive response system ensures that Rust applications can seamlessly
 /// interact with KnishIO nodes using the exact same patterns and expectations as
 /// the reference JavaScript SDK implementation.

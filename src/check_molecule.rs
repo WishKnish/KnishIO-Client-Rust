@@ -5,14 +5,14 @@
 //! JavaScript SDK's CheckMolecule.js class.
 
 use crate::atom::Atom;
-use crate::molecule::Molecule;
-use crate::wallet::Wallet;
-use crate::types::Isotope;
+use crate::crypto::shake256;
 use crate::error::{KnishIOError, Result};
 use crate::meta::Meta;
-use crate::crypto::shake256;
+use crate::molecule::Molecule;
 use crate::rules::Rule;
-use serde::{Serialize, Deserialize};
+use crate::types::Isotope;
+use crate::wallet::Wallet;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -226,7 +226,7 @@ impl<'a> CheckMolecule<'a> {
 
             for key in &policy_array {
                 if let Some(policy_json) = metas.get(*key) {
-                    let policy: HashMap<String, serde_json::Value> = 
+                    let policy: HashMap<String, serde_json::Value> =
                         serde_json::from_str(policy_json)
                             .map_err(|_| KnishIOError::PolicyInvalid)?;
 
@@ -239,8 +239,9 @@ impl<'a> CheckMolecule<'a> {
                             if let Some(values) = policy_value.as_array() {
                                 for value in values {
                                     if let Some(val_str) = value.as_str() {
-                                        if !Wallet::is_bundle_hash(val_str) && 
-                                           !["all", "self"].contains(&val_str) {
+                                        if !Wallet::is_bundle_hash(val_str)
+                                            && !["all", "self"].contains(&val_str)
+                                        {
                                             return Err(KnishIOError::PolicyInvalid);
                                         }
                                     }
@@ -282,13 +283,16 @@ impl<'a> CheckMolecule<'a> {
 
             if meta_type == "wallet" {
                 for key in &["position", "bundle"] {
-                    if !meta.contains_key(*key) || meta.get(*key).unwrap_or(&String::new()).is_empty() {
+                    if !meta.contains_key(*key)
+                        || meta.get(*key).unwrap_or(&String::new()).is_empty()
+                    {
                         return Err(KnishIOError::MetaMissing);
                     }
                 }
             }
 
-            if !meta.contains_key("token") || meta.get("token").unwrap_or(&String::new()).is_empty() {
+            if !meta.contains_key("token") || meta.get("token").unwrap_or(&String::new()).is_empty()
+            {
                 return Err(KnishIOError::MetaMissing);
             }
 
@@ -312,9 +316,8 @@ impl<'a> CheckMolecule<'a> {
             let metas = atom.aggregated_meta();
 
             if let Some(policy_json) = metas.get("policy") {
-                let policy: HashMap<String, serde_json::Value> = 
-                    serde_json::from_str(policy_json)
-                        .map_err(|_| KnishIOError::MetaMissing)?;
+                let policy: HashMap<String, serde_json::Value> =
+                    serde_json::from_str(policy_json).map_err(|_| KnishIOError::MetaMissing)?;
 
                 for key in policy.keys() {
                     if !["read", "write"].contains(&key.as_str()) {
@@ -324,16 +327,15 @@ impl<'a> CheckMolecule<'a> {
             }
 
             if let Some(rule_json) = metas.get("rule") {
-                let rules: serde_json::Value = 
-                    serde_json::from_str(rule_json)
-                        .map_err(|_| KnishIOError::MetaMissing)?;
+                let rules: serde_json::Value =
+                    serde_json::from_str(rule_json).map_err(|_| KnishIOError::MetaMissing)?;
 
                 if !rules.is_array() {
                     return Err(KnishIOError::MetaMissing);
                 }
 
                 let rules_array = rules.as_array().unwrap();
-                
+
                 if rules_array.is_empty() {
                     return Err(KnishIOError::MetaMissing);
                 }
@@ -341,8 +343,7 @@ impl<'a> CheckMolecule<'a> {
                 // Validate individual rules using Rule::from_object (equivalent to Rule.toObject in JS)
                 for rule_data in rules_array {
                     // Validate that each rule can be properly parsed using Rule::from_object
-                    Rule::from_object(rule_data)
-                        .map_err(|_| KnishIOError::MetaMissing)?;
+                    Rule::from_object(rule_data).map_err(|_| KnishIOError::MetaMissing)?;
                 }
             }
         }
@@ -434,7 +435,9 @@ impl<'a> CheckMolecule<'a> {
         // V+B balance conservation: sum of all V and B atom values must equal zero
         let v_atoms = self.get_isotopes(&[Isotope::V]);
         if !v_atoms.is_empty() {
-            let sum: f64 = v_atoms.iter().chain(isotope_b.iter())
+            let sum: f64 = v_atoms
+                .iter()
+                .chain(isotope_b.iter())
                 .filter_map(|a| a.value.as_ref().and_then(|v| v.parse::<f64>().ok()))
                 .filter(|v| !v.is_nan())
                 .sum();
@@ -485,7 +488,9 @@ impl<'a> CheckMolecule<'a> {
         // V+F balance conservation: sum of all V and F atom values must equal zero
         let v_atoms = self.get_isotopes(&[Isotope::V]);
         if !v_atoms.is_empty() {
-            let sum: f64 = v_atoms.iter().chain(isotope_f.iter())
+            let sum: f64 = v_atoms
+                .iter()
+                .chain(isotope_f.iter())
                 .filter_map(|a| a.value.as_ref().and_then(|v| v.parse::<f64>().ok()))
                 .filter(|v| !v.is_nan())
                 .sum();
@@ -532,7 +537,9 @@ impl<'a> CheckMolecule<'a> {
                 return Err(KnishIOError::TransferMismatched);
             }
 
-            let end_value: f64 = end_atom.value.as_ref()
+            let end_value: f64 = end_atom
+                .value
+                .as_ref()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0);
 
@@ -543,7 +550,9 @@ impl<'a> CheckMolecule<'a> {
             // A plain 2-atom V transfer (no B/F isotope to absorb the difference) must
             // balance to zero, mirroring JS CheckMolecule.isotopeV's firstAtom+endAtom sum.
             if !has_cross_isotope {
-                let first_value: f64 = first_atom.value.as_ref()
+                let first_value: f64 = first_atom
+                    .value
+                    .as_ref()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(0.0);
                 if first_value + end_value != 0.0 {
@@ -563,7 +572,9 @@ impl<'a> CheckMolecule<'a> {
             }
 
             // Making sure we're in number land
-            let value: f64 = atom.value.as_ref()
+            let value: f64 = atom
+                .value
+                .as_ref()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0);
 
@@ -607,7 +618,9 @@ impl<'a> CheckMolecule<'a> {
 
         // If we're provided with a senderWallet argument, we can perform additional checks
         if let Some(sender) = sender_wallet {
-            let value: f64 = first_atom.value.as_ref()
+            let value: f64 = first_atom
+                .value
+                .as_ref()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0);
 
@@ -640,7 +653,7 @@ impl<'a> CheckMolecule<'a> {
     /// Equivalent to CheckMolecule.molecularHash() in JavaScript
     fn molecular_hash(&self) -> Result<bool> {
         let computed_hash = Atom::hash_atoms(&self.molecule.atoms, "base17")?;
-        
+
         if let Some(ref stored_hash) = self.molecule.molecular_hash {
             if stored_hash != &computed_hash {
                 return Err(KnishIOError::MolecularHashMismatch);
@@ -656,7 +669,12 @@ impl<'a> CheckMolecule<'a> {
     pub fn ots(&self) -> Result<bool> {
         // The declared hash must be exactly 64 base-17 characters before any chain work
         // (docs/OTS_V2_SPECIFICATION.md §5, step 0).
-        if !self.molecule.molecular_hash.as_deref().is_some_and(crate::crypto::is_signable_hash) {
+        if !self
+            .molecule
+            .molecular_hash
+            .as_deref()
+            .is_some_and(crate::crypto::is_signable_hash)
+        {
             return Err(KnishIOError::SignatureMalformed);
         }
 
@@ -688,7 +706,10 @@ impl<'a> CheckMolecule<'a> {
         // None the SDK loop below runs unchanged.
         let kcore_fragments = crate::kcore::chains_hex_signed(
             &ots,
-            normalized_hash.iter().take(ots.len() / 128).map(|&n| 8 + i32::from(n)),
+            normalized_hash
+                .iter()
+                .take(ots.len() / 128)
+                .map(|&n| 8 + i32::from(n)),
         );
         let key_fragments = if let Some(fragments) = kcore_fragments {
             fragments
@@ -736,7 +757,8 @@ impl<'a> CheckMolecule<'a> {
 
     /// Helper method to get atoms by isotope type(s)
     fn get_isotopes(&self, isotopes: &[Isotope]) -> Vec<&Atom> {
-        self.molecule.atoms
+        self.molecule
+            .atoms
             .iter()
             .filter(|atom| isotopes.contains(&atom.isotope))
             .collect()
@@ -744,11 +766,12 @@ impl<'a> CheckMolecule<'a> {
 
     /// Convert base64 to hexadecimal string
     fn base64_to_hex(base64_str: &str) -> Result<String> {
-        use base64::{Engine as _, engine::general_purpose};
-        
-        let decoded = general_purpose::STANDARD.decode(base64_str)
+        use base64::{engine::general_purpose, Engine as _};
+
+        let decoded = general_purpose::STANDARD
+            .decode(base64_str)
             .map_err(|_| KnishIOError::SignatureMalformed)?;
-        
+
         Ok(hex::encode(decoded))
     }
 
@@ -793,16 +816,20 @@ impl<'a> CheckMolecule<'a> {
     ///
     /// Equivalent to CheckMolecule.fromServerData() in JavaScript.
     pub fn from_server_data(molecule_data: &Value) -> Result<Molecule> {
-        let molecular_hash = molecule_data.get("molecularHash")
+        let molecular_hash = molecule_data
+            .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        let bundle_hash = molecule_data.get("bundleHash")
+        let bundle_hash = molecule_data
+            .get("bundleHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        let cell_slug = molecule_data.get("cellSlug")
+        let cell_slug = molecule_data
+            .get("cellSlug")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        let status = molecule_data.get("status")
+        let status = molecule_data
+            .get("status")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         let created_at = Self::normalize_created_at(molecule_data.get("createdAt"));
@@ -941,7 +968,8 @@ impl<'a> CheckMolecule<'a> {
     ///
     /// Equivalent to CheckMolecule.verifyFromServerData() in JavaScript.
     pub fn verify_from_server_data(molecule_data: &Value) -> MoleculeIntegrityResult {
-        let molecular_hash = molecule_data.get("molecularHash")
+        let molecular_hash = molecule_data
+            .get("molecularHash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
@@ -967,9 +995,15 @@ impl<'a> CheckMolecule<'a> {
         #[cfg(feature = "parallel")]
         if molecules.len() >= PARALLEL_MIN_MOLECULES {
             use rayon::prelude::*;
-            return molecules.par_iter().map(|m| Self::verify_from_server_data(m)).collect();
+            return molecules
+                .par_iter()
+                .map(|m| Self::verify_from_server_data(m))
+                .collect();
         }
-        molecules.iter().map(|m| Self::verify_from_server_data(m)).collect()
+        molecules
+            .iter()
+            .map(|m| Self::verify_from_server_data(m))
+            .collect()
     }
 
     /// Internal helper that attempts verification and returns Result for error propagation.
@@ -980,7 +1014,9 @@ impl<'a> CheckMolecule<'a> {
     /// the last failure is returned.
     fn try_verify_server_data(molecule_data: &Value) -> Result<()> {
         let first = Self::verify_molecule(&Self::from_server_data(molecule_data)?);
-        if !matches!(first, Err(KnishIOError::MolecularHashMismatch)) || Self::has_served_atom_version(molecule_data) {
+        if !matches!(first, Err(KnishIOError::MolecularHashMismatch))
+            || Self::has_served_atom_version(molecule_data)
+        {
             return first;
         }
         let mut result = first;
@@ -1002,9 +1038,14 @@ impl<'a> CheckMolecule<'a> {
     }
 
     fn has_served_atom_version(molecule_data: &Value) -> bool {
-        molecule_data.get("atoms")
+        molecule_data
+            .get("atoms")
             .and_then(|v| v.as_array())
-            .is_some_and(|atoms| atoms.iter().any(|a| a.get("version").is_some_and(|v| !v.is_null())))
+            .is_some_and(|atoms| {
+                atoms
+                    .iter()
+                    .any(|a| a.get("version").is_some_and(|v| !v.is_null()))
+            })
     }
 }
 
@@ -1018,7 +1059,7 @@ mod tests {
     fn test_check_molecule_creation() {
         let mut molecule = Molecule::new();
         molecule.molecular_hash = Some("test_hash".to_string());
-        
+
         // Add a test atom
         let atom = Atom::create(AtomCreateParams {
             position: Some("test_position".to_string()),
@@ -1039,16 +1080,22 @@ mod tests {
     fn test_missing_molecular_hash() {
         let molecule = Molecule::new();
         let check_molecule = CheckMolecule::new(&molecule);
-        assert!(matches!(check_molecule.unwrap_err(), KnishIOError::MolecularHashMissing));
+        assert!(matches!(
+            check_molecule.unwrap_err(),
+            KnishIOError::MolecularHashMissing
+        ));
     }
 
     #[test]
     fn test_missing_atoms() {
         let mut molecule = Molecule::new();
         molecule.molecular_hash = Some("test_hash".to_string());
-        
+
         let check_molecule = CheckMolecule::new(&molecule);
-        assert!(matches!(check_molecule.unwrap_err(), KnishIOError::AtomsMissing));
+        assert!(matches!(
+            check_molecule.unwrap_err(),
+            KnishIOError::AtomsMissing
+        ));
     }
 
     #[test]
@@ -1059,7 +1106,8 @@ mod tests {
 
     #[test]
     fn verify_payload_skips_only_the_signature() -> Result<()> {
-        let fixture: Value = serde_json::from_str(include_str!("../tests/fixtures/served-molecules.json"))?;
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/served-molecules.json"))?;
 
         // otsFragment is not hashed, so a forged signature keeps the molecular hash intact.
         let mut forged = CheckMolecule::from_server_data(&fixture["v1"])?;
@@ -1067,14 +1115,26 @@ mod tests {
         let first = if fragment.starts_with('A') { "B" } else { "A" };
         forged.atoms[0].ots_fragment = Some(format!("{first}{}", &fragment[1..]));
         let check = CheckMolecule::new(&forged)?;
-        assert!(check.verify(None).is_err(), "verify must reject a forged signature");
-        assert!(matches!(check.verify_payload(None), Ok(true)), "verify_payload must not check the signature");
+        assert!(
+            check.verify(None).is_err(),
+            "verify must reject a forged signature"
+        );
+        assert!(
+            matches!(check.verify_payload(None), Ok(true)),
+            "verify_payload must not check the signature"
+        );
 
         let mut rehashed = CheckMolecule::from_server_data(&fixture["v1"])?;
         rehashed.molecular_hash = Some("0".repeat(64));
         let check = CheckMolecule::new(&rehashed)?;
-        assert!(matches!(check.verify(None), Err(KnishIOError::MolecularHashMismatch)));
-        assert!(matches!(check.verify_payload(None), Err(KnishIOError::MolecularHashMismatch)));
+        assert!(matches!(
+            check.verify(None),
+            Err(KnishIOError::MolecularHashMismatch)
+        ));
+        assert!(matches!(
+            check.verify_payload(None),
+            Err(KnishIOError::MolecularHashMismatch)
+        ));
         Ok(())
     }
 
@@ -1147,7 +1207,11 @@ mod tests {
 
         let molecule = CheckMolecule::from_server_data(&server_data).unwrap();
         assert_eq!(molecule.atoms[0].meta.len(), 2);
-        let meta_keys: Vec<&str> = molecule.atoms[0].meta.iter().map(|m| m.key.as_str()).collect();
+        let meta_keys: Vec<&str> = molecule.atoms[0]
+            .meta
+            .iter()
+            .map(|m| m.key.as_str())
+            .collect();
         assert!(meta_keys.contains(&"color"));
         assert!(meta_keys.contains(&"size"));
     }
@@ -1164,7 +1228,9 @@ mod tests {
                     "index": 0
                 }]
             });
-            let mut meta = CheckMolecule::from_server_data(&server_data).unwrap().atoms[0].meta.clone();
+            let mut meta = CheckMolecule::from_server_data(&server_data).unwrap().atoms[0]
+                .meta
+                .clone();
             meta.sort_by(|a, b| a.key.cmp(&b.key));
             meta
         };
@@ -1173,13 +1239,21 @@ mod tests {
             MetaItem::new("e", ""),
             MetaItem::new("f", "1.5"),
             MetaItem::new("i", "7"),
-            MetaItem { key: "n".to_string(), value: None },
+            MetaItem {
+                key: "n".to_string(),
+                value: None,
+            },
             MetaItem::new("w", "2"),
         ];
-        assert_eq!(metas(r#"{"n":null,"e":"","i":7,"f":1.5,"w":2.0,"b":true}"#), expected);
         assert_eq!(
-            metas(r#"[{"key":"n","value":null},{"key":"e","value":""},{"key":"i","value":7},
-                     {"key":"f","value":1.5},{"key":"w","value":2.0},{"key":"b","value":true}]"#),
+            metas(r#"{"n":null,"e":"","i":7,"f":1.5,"w":2.0,"b":true}"#),
+            expected
+        );
+        assert_eq!(
+            metas(
+                r#"[{"key":"n","value":null},{"key":"e","value":""},{"key":"i","value":7},
+                     {"key":"f","value":1.5},{"key":"w","value":2.0},{"key":"b","value":true}]"#
+            ),
             expected
         );
     }
@@ -1257,7 +1331,12 @@ mod tests {
         })
     }
 
-    fn bundle_atom(isotope: Isotope, value: f64, meta_type: Option<&str>, meta_id: Option<&str>) -> Atom {
+    fn bundle_atom(
+        isotope: Isotope,
+        value: f64,
+        meta_type: Option<&str>,
+        meta_id: Option<&str>,
+    ) -> Atom {
         Atom::create(AtomCreateParams {
             isotope,
             position: Some("pos".to_string()),
@@ -1271,7 +1350,13 @@ mod tests {
         })
     }
 
-    fn user_atom(isotope: Isotope, token: &str, meta_type: Option<&str>, meta_id: Option<&str>, meta: Vec<MetaItem>) -> Atom {
+    fn user_atom(
+        isotope: Isotope,
+        token: &str,
+        meta_type: Option<&str>,
+        meta_id: Option<&str>,
+        meta: Vec<MetaItem>,
+    ) -> Atom {
         Atom::create(AtomCreateParams {
             isotope,
             position: Some("pos".to_string()),
@@ -1291,16 +1376,32 @@ mod tests {
 
     #[test]
     fn test_isotope_b_rejects_wrong_meta_type() {
-        let molecule = checkable(vec![bundle_atom(Isotope::B, 5.0, Some("wrongType"), Some("b1"))]);
+        let molecule = checkable(vec![bundle_atom(
+            Isotope::B,
+            5.0,
+            Some("wrongType"),
+            Some("b1"),
+        )]);
         let checker = CheckMolecule::new(&molecule).unwrap();
-        assert!(matches!(checker.isotope_b().unwrap_err(), KnishIOError::MetaMissing));
+        assert!(matches!(
+            checker.isotope_b().unwrap_err(),
+            KnishIOError::MetaMissing
+        ));
     }
 
     #[test]
     fn test_isotope_b_rejects_missing_meta_id() {
-        let molecule = checkable(vec![bundle_atom(Isotope::B, 5.0, Some("walletBundle"), None)]);
+        let molecule = checkable(vec![bundle_atom(
+            Isotope::B,
+            5.0,
+            Some("walletBundle"),
+            None,
+        )]);
         let checker = CheckMolecule::new(&molecule).unwrap();
-        assert!(matches!(checker.isotope_b().unwrap_err(), KnishIOError::MetaMissing));
+        assert!(matches!(
+            checker.isotope_b().unwrap_err(),
+            KnishIOError::MetaMissing
+        ));
     }
 
     #[test]
@@ -1310,7 +1411,10 @@ mod tests {
             bundle_atom(Isotope::B, 30.0, Some("walletBundle"), Some("b1")),
         ]);
         let checker = CheckMolecule::new(&molecule).unwrap();
-        assert!(matches!(checker.isotope_b().unwrap_err(), KnishIOError::TransferUnbalanced));
+        assert!(matches!(
+            checker.isotope_b().unwrap_err(),
+            KnishIOError::TransferUnbalanced
+        ));
     }
 
     #[test]
@@ -1327,9 +1431,17 @@ mod tests {
 
     #[test]
     fn test_isotope_f_rejects_negative_value() {
-        let molecule = checkable(vec![bundle_atom(Isotope::F, -5.0, Some("walletBundle"), Some("f1"))]);
+        let molecule = checkable(vec![bundle_atom(
+            Isotope::F,
+            -5.0,
+            Some("walletBundle"),
+            Some("f1"),
+        )]);
         let checker = CheckMolecule::new(&molecule).unwrap();
-        assert!(matches!(checker.isotope_f().unwrap_err(), KnishIOError::TransferMalformed));
+        assert!(matches!(
+            checker.isotope_f().unwrap_err(),
+            KnishIOError::TransferMalformed
+        ));
     }
 
     #[test]
@@ -1339,35 +1451,68 @@ mod tests {
             bundle_atom(Isotope::F, 30.0, Some("walletBundle"), Some("f1")),
         ]);
         let checker = CheckMolecule::new(&molecule).unwrap();
-        assert!(matches!(checker.isotope_f().unwrap_err(), KnishIOError::TransferUnbalanced));
+        assert!(matches!(
+            checker.isotope_f().unwrap_err(),
+            KnishIOError::TransferUnbalanced
+        ));
     }
 
     #[test]
     fn test_isotope_a_rejects_non_user_token() {
-        let molecule = checkable(vec![user_atom(Isotope::A, "NOTUSER", Some("t"), Some("i"), vec![meta_item("action", "x")])]);
+        let molecule = checkable(vec![user_atom(
+            Isotope::A,
+            "NOTUSER",
+            Some("t"),
+            Some("i"),
+            vec![meta_item("action", "x")],
+        )]);
         let checker = CheckMolecule::new(&molecule).unwrap();
-        assert!(matches!(checker.isotope_a().unwrap_err(), KnishIOError::WrongTokenType));
+        assert!(matches!(
+            checker.isotope_a().unwrap_err(),
+            KnishIOError::WrongTokenType
+        ));
     }
 
     #[test]
     fn test_isotope_a_rejects_missing_action_meta() {
-        let molecule = checkable(vec![user_atom(Isotope::A, "USER", Some("t"), Some("i"), vec![])]);
+        let molecule = checkable(vec![user_atom(
+            Isotope::A,
+            "USER",
+            Some("t"),
+            Some("i"),
+            vec![],
+        )]);
         let checker = CheckMolecule::new(&molecule).unwrap();
-        assert!(matches!(checker.isotope_a().unwrap_err(), KnishIOError::MetaMissing));
+        assert!(matches!(
+            checker.isotope_a().unwrap_err(),
+            KnishIOError::MetaMissing
+        ));
     }
 
     #[test]
     fn test_isotope_p_rejects_non_user_token() {
-        let molecule = checkable(vec![user_atom(Isotope::P, "NOTUSER", None, None, vec![meta_item("peerHost", "h")])]);
+        let molecule = checkable(vec![user_atom(
+            Isotope::P,
+            "NOTUSER",
+            None,
+            None,
+            vec![meta_item("peerHost", "h")],
+        )]);
         let checker = CheckMolecule::new(&molecule).unwrap();
-        assert!(matches!(checker.isotope_p().unwrap_err(), KnishIOError::WrongTokenType));
+        assert!(matches!(
+            checker.isotope_p().unwrap_err(),
+            KnishIOError::WrongTokenType
+        ));
     }
 
     #[test]
     fn test_isotope_p_rejects_missing_peer_host() {
         let molecule = checkable(vec![user_atom(Isotope::P, "USER", None, None, vec![])]);
         let checker = CheckMolecule::new(&molecule).unwrap();
-        assert!(matches!(checker.isotope_p().unwrap_err(), KnishIOError::MetaMissing));
+        assert!(matches!(
+            checker.isotope_p().unwrap_err(),
+            KnishIOError::MetaMissing
+        ));
     }
 
     /// A returning user's login is signed from the ContinuID pointer with its USER wallet, so a
@@ -1381,7 +1526,10 @@ mod tests {
         }
         let molecule = checkable(vec![user_atom(Isotope::U, "TEST", None, None, vec![])]);
         let checker = CheckMolecule::new(&molecule)?;
-        assert!(matches!(checker.isotope_u(), Err(KnishIOError::WrongTokenType)));
+        assert!(matches!(
+            checker.isotope_u(),
+            Err(KnishIOError::WrongTokenType)
+        ));
         Ok(())
     }
 
@@ -1391,7 +1539,10 @@ mod tests {
     fn test_bypass_not_over_broad_two_atom() {
         let molecule = checkable(vec![v_atom(-100.0, "src", 0), v_atom(30.0, "dst", 1)]);
         let checker = CheckMolecule::new(&molecule).unwrap();
-        assert!(matches!(checker.isotope_v(None).unwrap_err(), KnishIOError::TransferUnbalanced));
+        assert!(matches!(
+            checker.isotope_v(None).unwrap_err(),
+            KnishIOError::TransferUnbalanced
+        ));
     }
 
     #[test]
@@ -1402,18 +1553,32 @@ mod tests {
             v_atom(10.0, "d2", 2),
         ]);
         let checker = CheckMolecule::new(&molecule).unwrap();
-        assert!(matches!(checker.isotope_v(None).unwrap_err(), KnishIOError::TransferUnbalanced));
+        assert!(matches!(
+            checker.isotope_v(None).unwrap_err(),
+            KnishIOError::TransferUnbalanced
+        ));
     }
 
     /// Without a sender wallet only V-only conservation applies: the validator and served-molecule
     /// checks verify transfers this way, and a transfer's last V atom is its non-zero remainder.
     #[test]
     fn test_isotope_v_without_sender_accepts_a_balanced_remainder() {
-        let molecule = checkable(vec![v_atom(-10.0, "src", 0), v_atom(4.0, "dst", 1), v_atom(6.0, "rem", 2)]);
+        let molecule = checkable(vec![
+            v_atom(-10.0, "src", 0),
+            v_atom(4.0, "dst", 1),
+            v_atom(6.0, "rem", 2),
+        ]);
         let checker = CheckMolecule::new(&molecule).unwrap();
         assert!(checker.isotope_v(None).is_ok());
-        let unbalanced = checkable(vec![v_atom(-10.0, "src", 0), v_atom(4.0, "dst", 1), v_atom(5.0, "rem", 2)]);
+        let unbalanced = checkable(vec![
+            v_atom(-10.0, "src", 0),
+            v_atom(4.0, "dst", 1),
+            v_atom(5.0, "rem", 2),
+        ]);
         let checker = CheckMolecule::new(&unbalanced).unwrap();
-        assert!(matches!(checker.isotope_v(None).unwrap_err(), KnishIOError::TransferUnbalanced));
+        assert!(matches!(
+            checker.isotope_v(None).unwrap_err(),
+            KnishIOError::TransferUnbalanced
+        ));
     }
 }

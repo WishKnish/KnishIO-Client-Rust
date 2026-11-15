@@ -10,7 +10,10 @@ use std::error::Error;
 type TestResult = Result<(), Box<dyn Error>>;
 
 fn fixture() -> Result<Value, Box<dyn Error>> {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/served-molecules.json");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/served-molecules.json"
+    );
     Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?)
 }
 
@@ -22,7 +25,11 @@ fn served_molecules_verify() -> TestResult {
         assert!(result.verified, "{name} must verify, got {result:?}");
         assert!(result.error.is_none(), "{name} error: {:?}", result.error);
         let molecule = CheckMolecule::from_server_data(&fixture[name])?;
-        let created: Vec<_> = molecule.atoms.iter().map(|a| a.created_at.clone()).collect();
+        let created: Vec<_> = molecule
+            .atoms
+            .iter()
+            .map(|a| a.created_at.clone())
+            .collect();
         println!("{name} verified {} createdAt {created:?}", result.verified);
     }
     Ok(())
@@ -42,7 +49,11 @@ fn server_created_at_normalizes_to_epoch_millis() -> TestResult {
         let mut value = fixture["v1"].clone();
         value["atoms"][0]["createdAt"] = input.clone();
         let molecule = CheckMolecule::from_server_data(&value)?;
-        assert_eq!(molecule.atoms[0].created_at.as_str(), expected, "input {input}");
+        assert_eq!(
+            molecule.atoms[0].created_at.as_str(),
+            expected,
+            "input {input}"
+        );
     }
     Ok(())
 }
@@ -68,8 +79,12 @@ fn version4_molecule_served_without_version_verifies() -> TestResult {
 
 #[test]
 fn version4_molecule_served_with_version_verifies() -> TestResult {
-    let result = CheckMolecule::verify_from_server_data(&with_atom_version(&fixture()?["v2ts"], "4"));
-    assert!(result.verified, "v2ts with version must verify, got {result:?}");
+    let result =
+        CheckMolecule::verify_from_server_data(&with_atom_version(&fixture()?["v2ts"], "4"));
+    assert!(
+        result.verified,
+        "v2ts with version must verify, got {result:?}"
+    );
     Ok(())
 }
 
@@ -77,7 +92,10 @@ fn version4_molecule_served_with_version_verifies() -> TestResult {
 fn tampered_version4_molecule_fails() -> TestResult {
     let mut value = fixture()?["v2ts"].clone();
     let metas = value["atoms"][0]["metasJson"].as_str().ok_or("metasJson")?;
-    assert!(metas.contains("f1"), "fixture atom 0 metasJson must contain f1");
+    assert!(
+        metas.contains("f1"),
+        "fixture atom 0 metasJson must contain f1"
+    );
     value["atoms"][0]["metasJson"] = Value::from(metas.replace("f1", "f2"));
     let result = CheckMolecule::verify_from_server_data(&value);
     assert!(!result.verified, "tampered v2ts must fail");
@@ -114,9 +132,13 @@ fn v3rust_served_with_version_verifies() -> TestResult {
 
 #[test]
 fn v3rust_served_without_version_verifies() -> TestResult {
-    let result = CheckMolecule::verify_from_server_data(&without_atom_version(&fixture()?["v3rust"]));
+    let result =
+        CheckMolecule::verify_from_server_data(&without_atom_version(&fixture()?["v3rust"]));
     println!("v3rust without version verified {}", result.verified);
-    assert!(result.verified, "v3rust without version must verify, got {result:?}");
+    assert!(
+        result.verified,
+        "v3rust without version must verify, got {result:?}"
+    );
     assert!(result.error.is_none());
     Ok(())
 }

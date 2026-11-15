@@ -4,11 +4,11 @@
 //! microtransactions within Molecules. The implementation maintains 100%
 //! compatibility with the JavaScript SDK.
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-use crate::crypto::{shake256, shake256_incremental, hex_to_base17};
+use crate::crypto::{hex_to_base17, shake256, shake256_incremental};
 use crate::error::KnishIOError;
 use crate::types::{Isotope, MetaItem};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Represents a single atomic operation within a molecular transaction
 ///
@@ -20,52 +20,52 @@ use crate::types::{Isotope, MetaItem};
 pub struct Atom {
     /// Position of the wallet (required)
     pub position: String,
-    
+
     /// Wallet address (required)
     #[serde(rename = "walletAddress")]
     pub wallet_address: String,
-    
+
     /// Isotope type indicating the operation type (required)
     pub isotope: Isotope,
-    
+
     /// Token slug (required)
     pub token: String,
-    
+
     /// Value for the operation (optional, stored as string)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
-    
+
     /// Batch ID for grouping related operations (optional)
     #[serde(rename = "batchId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub batch_id: Option<String>,
-    
+
     /// Metadata type (optional)
     #[serde(rename = "metaType")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta_type: Option<String>,
-    
+
     /// Metadata ID (optional)
     #[serde(rename = "metaId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta_id: Option<String>,
-    
+
     /// Metadata key-value pairs (always present but may be empty)
     pub meta: Vec<MetaItem>,
-    
+
     /// OTS fragment for quantum-resistant signatures (excluded from hashing)
     #[serde(rename = "otsFragment")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ots_fragment: Option<String>,
-    
+
     /// Index for sorting atoms within a molecule (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub index: Option<u32>,
-    
+
     /// Creation timestamp (automatically set)
     #[serde(rename = "createdAt")]
     pub created_at: String,
-    
+
     /// Version identifier (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
@@ -93,7 +93,7 @@ impl Atom {
         token: impl Into<String>,
     ) -> Self {
         let timestamp = Self::generate_timestamp();
-        
+
         Atom {
             position: position.into(),
             wallet_address: wallet_address.into(),
@@ -110,7 +110,7 @@ impl Atom {
             version: None,
         }
     }
-    
+
     /// Generate timestamp for atom creation
     /// Use environment variable for deterministic testing
     fn generate_timestamp() -> String {
@@ -121,7 +121,7 @@ impl Atom {
             chrono::Utc::now().timestamp_millis().to_string()
         }
     }
-    
+
     /// Create an Atom using the builder pattern (matches JS Atom.create)
     ///
     /// # Arguments
@@ -139,7 +139,7 @@ impl Atom {
     /// A new Atom instance configured with the provided parameters
     pub fn create(params: AtomCreateParams) -> Self {
         let timestamp = Self::generate_timestamp();
-        
+
         let mut atom = Atom {
             position: params.position.unwrap_or_default(),
             wallet_address: params.wallet_address.unwrap_or_default(),
@@ -155,7 +155,7 @@ impl Atom {
             created_at: timestamp,
             version: params.version,
         };
-        
+
         // If wallet info provided, use it
         if let Some(wallet_info) = params.wallet_info {
             atom.position = wallet_info.position;
@@ -165,10 +165,10 @@ impl Atom {
                 atom.batch_id = wallet_info.batch_id;
             }
         }
-        
+
         atom
     }
-    
+
     /// Convert JSON string to Atom object (matches JS Atom.jsonToObject)
     ///
     /// # Arguments
@@ -182,7 +182,7 @@ impl Atom {
         let atom: Atom = serde_json::from_str(json)?;
         Ok(atom)
     }
-    
+
     /// Get the list of properties that are included in hashing
     ///
     /// This matches the JavaScript implementation exactly, excluding `otsFragment`
@@ -205,7 +205,7 @@ impl Atom {
             "createdAt",
         ]
     }
-    
+
     /// Get the list of properties that are unclaimed (excluded from serialization in some contexts)
     ///
     /// # Returns
@@ -214,7 +214,7 @@ impl Atom {
     pub fn get_unclaimed_props() -> Vec<&'static str> {
         vec!["otsFragment"]
     }
-    
+
     /// Hash a collection of atoms to produce a molecular hash
     ///
     /// This function produces the same output as the JavaScript implementation
@@ -232,40 +232,39 @@ impl Atom {
         if atoms.is_empty() {
             return Err(KnishIOError::AtomsMissing);
         }
-        
+
         // Sort atoms using JavaScript-compatible sorting
         let sorted_atoms = Self::sort_atoms(atoms);
-        
+
         // Check if all atoms have versions and use versioned hashing if so
         let all_have_versions = sorted_atoms.iter().all(|atom| atom.version.is_some());
-        
+
         let hex_hash = if all_have_versions {
             // GAP-03-005: Versioned hashing — replicate SDK's HashAtom.structure() algorithm:
             // 1. Extract only 12 Version4 properties (exclude otsFragment)
             // 2. Sort keys alphabetically
             // 3. Wrap each key-value as a single-key object in an array
             // 4. Recursively structure nested objects (meta items)
-            let atom_views: Vec<serde_json::Value> = sorted_atoms.iter()
-                .map(Self::structure_atom_v4)
-                .collect();
+            let atom_views: Vec<serde_json::Value> =
+                sorted_atoms.iter().map(Self::structure_atom_v4).collect();
             shake256(&serde_json::to_string(&atom_views)?, 256)
         } else {
             // JavaScript legacy hashing: exact match pattern
-            let num_atoms = atoms.len().to_string();  // Use original length, not sorted
+            let num_atoms = atoms.len().to_string(); // Use original length, not sorted
             let mut hash_values = Vec::new();
-            
+
             for atom in &sorted_atoms {
                 // Add number of atoms for EACH atom (matches JS "Add number of atoms (???)")
                 hash_values.push(num_atoms.clone());
-                
+
                 // Add atom's hashable values
                 hash_values.extend(atom.get_hashable_values());
             }
-            
+
             // Use incremental hashing to match JavaScript SDK exactly
             shake256_incremental(&hash_values, 256)
         };
-        
+
         // Return in requested format
         match output {
             "hex" => Ok(hex_hash),
@@ -286,7 +285,7 @@ impl Atom {
             }
         }
     }
-    
+
     /// Produce the Version4 structured view for a single atom.
     ///
     /// Replicates the SDK's HashAtom.structure() algorithm:
@@ -358,7 +357,7 @@ impl Atom {
         });
         sorted
     }
-    
+
     /// Get the hashable values for this atom - matches JavaScript implementation exactly
     ///
     /// This method extracts values from the atom's properties that should be
@@ -369,17 +368,17 @@ impl Atom {
     /// Vector of strings representing the hashable values
     pub fn get_hashable_values(&self) -> Vec<String> {
         let mut hashable_values = Vec::new();
-        
+
         // Process properties in the exact order as JavaScript getHashableProps()
         for property in Self::get_hashable_props() {
             let value = self.get_property_value(property);
-            
+
             // JavaScript: All nullable values are not hashed (only custom keys)
             // Skip null values except for position and walletAddress
             if value.is_none() && !["position", "walletAddress"].contains(&property) {
                 continue;
             }
-            
+
             // JavaScript: Hashing individual meta keys and values
             if property == "meta" {
                 for meta_item in &self.meta {
@@ -395,10 +394,10 @@ impl Atom {
                 hashable_values.push(value.unwrap_or_default());
             }
         }
-        
+
         hashable_values
     }
-    
+
     /// Get aggregated metadata from stored normalized metadata
     ///
     /// # Returns
@@ -406,16 +405,16 @@ impl Atom {
     /// HashMap containing aggregated metadata; items whose value is null are left out
     pub fn aggregated_meta(&self) -> HashMap<String, String> {
         let mut aggregated = HashMap::new();
-        
+
         for meta_item in &self.meta {
             if let Some(value) = &meta_item.value {
                 aggregated.insert(meta_item.key.clone(), value.clone());
             }
         }
-        
+
         aggregated
     }
-    
+
     /// Enhanced JSON serialization for cross-SDK compatibility (Rust 2025 best practices)
     ///
     /// Provides clean serialization of atomic operations with optional OTS fragments.
@@ -428,7 +427,10 @@ impl Atom {
     /// # Returns
     ///
     /// Result containing JSON-serializable Value
-    pub fn to_json(&self, options: crate::types::AtomJsonOptions) -> Result<serde_json::Value, KnishIOError> {
+    pub fn to_json(
+        &self,
+        options: crate::types::AtomJsonOptions,
+    ) -> Result<serde_json::Value, KnishIOError> {
         // Validate required fields if requested
         if options.validate_fields {
             let required_fields = vec!["position", "walletAddress", "isotope", "token"];
@@ -475,7 +477,7 @@ impl Atom {
     }
 
     /// Enhanced JSON deserialization for cross-SDK compatibility (Rust 2025 best practices)
-    /// 
+    ///
     /// Handles cross-SDK atom deserialization with robust error handling.
     /// Essential for reconstructing atoms from other SDK implementations.
     ///
@@ -487,38 +489,47 @@ impl Atom {
     /// # Returns
     ///
     /// Result containing reconstructed Atom instance
-    pub fn from_json(json: &serde_json::Value, options: crate::types::AtomFromJsonOptions) -> Result<Self, KnishIOError> {
+    pub fn from_json(
+        json: &serde_json::Value,
+        options: crate::types::AtomFromJsonOptions,
+    ) -> Result<Self, KnishIOError> {
         // Validate required fields in strict mode
         if options.strict_mode || options.validate_structure {
             let required_fields = vec!["position", "walletAddress", "isotope", "token"];
             for field in required_fields {
-                if json.get(field).and_then(|v| v.as_str()).map_or(true, |s| s.is_empty()) {
+                if json
+                    .get(field)
+                    .and_then(|v| v.as_str())
+                    .map_or(true, |s| s.is_empty())
+                {
                     return Err(KnishIOError::custom(format!(
-                        "Required field '{}' is missing or empty", field
+                        "Required field '{}' is missing or empty",
+                        field
                     )));
                 }
             }
         }
 
         // Extract required fields
-        let position = json.get("position")
+        let position = json
+            .get("position")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
 
-        let wallet_address = json.get("walletAddress")
+        let wallet_address = json
+            .get("walletAddress")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
 
-        let isotope_str = json.get("isotope")
-            .and_then(|v| v.as_str())
-            .unwrap_or("V");
-        
+        let isotope_str = json.get("isotope").and_then(|v| v.as_str()).unwrap_or("V");
+
         let isotope = Isotope::from_str(isotope_str)
             .ok_or_else(|| KnishIOError::custom(format!("Invalid isotope: {}", isotope_str)))?;
 
-        let token = json.get("token")
+        let token = json
+            .get("token")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
@@ -553,7 +564,8 @@ impl Atom {
 
         // Handle meta array
         if let Some(meta_array) = json.get("meta").and_then(|v| v.as_array()) {
-            atom.meta = meta_array.iter()
+            atom.meta = meta_array
+                .iter()
                 .filter_map(|meta_item| {
                     let key = meta_item.get("key").and_then(|k| k.as_str())?;
                     // null -> None, string -> Some; other values are skipped.
@@ -562,7 +574,10 @@ impl Atom {
                         serde_json::Value::Null => None,
                         _ => return None,
                     };
-                    Some(MetaItem { key: key.to_string(), value })
+                    Some(MetaItem {
+                        key: key.to_string(),
+                        value,
+                    })
                 })
                 .collect();
         }
@@ -578,7 +593,7 @@ impl Atom {
 
         Ok(atom)
     }
-    
+
     /// Configure optional fields for the atom (builder pattern)
     ///
     /// This method allows setting optional fields after creating an atom with
@@ -674,7 +689,6 @@ impl Default for AtomCreateParams {
     }
 }
 
-
 impl WalletInfo {
     /// Create WalletInfo from a Wallet reference.
     ///
@@ -726,28 +740,30 @@ impl Atom {
     pub fn to_json_string(&self) -> crate::error::Result<String> {
         self.toJSON()
     }
-    
+
     /// Rust-style method (satisfies compiler warnings)
     pub fn from_json_string(json: &str) -> crate::error::Result<Self> {
         Self::fromJSON(json)
     }
-    
+
     /// JavaScript-style toJSON() convenience method
     /// Returns JSON string directly, matching JavaScript SDK pattern  
     #[allow(non_snake_case)]
     pub fn toJSON(&self) -> crate::error::Result<String> {
         let options = crate::types::AtomJsonOptions::default();
         let json_value = self.to_json(options)?;
-        serde_json::to_string(&json_value)
-            .map_err(|e| crate::error::KnishIOError::custom(format!("JSON serialization failed: {}", e)))
+        serde_json::to_string(&json_value).map_err(|e| {
+            crate::error::KnishIOError::custom(format!("JSON serialization failed: {}", e))
+        })
     }
-    
+
     /// JavaScript-style fromJSON() convenience method
     /// Creates Atom instance from JSON string, matching JavaScript SDK pattern
     #[allow(non_snake_case)]
     pub fn fromJSON(json: &str) -> crate::error::Result<Self> {
-        let json_value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|e| crate::error::KnishIOError::custom(format!("JSON parsing failed: {}", e)))?;
+        let json_value: serde_json::Value = serde_json::from_str(json).map_err(|e| {
+            crate::error::KnishIOError::custom(format!("JSON parsing failed: {}", e))
+        })?;
         let options = crate::types::AtomFromJsonOptions::default();
         Self::from_json(&json_value, options)
     }
@@ -765,10 +781,7 @@ impl Atom {
         atoms
             .iter()
             .filter(|atom| atom.isotope == Isotope::V && atom.value.is_some())
-            .filter_map(|atom| {
-                atom.value.as_ref()
-                    .and_then(|v| v.parse::<f64>().ok())
-            })
+            .filter_map(|atom| atom.value.as_ref().and_then(|v| v.parse::<f64>().ok()))
             .sum()
     }
 
@@ -782,13 +795,12 @@ impl Atom {
     /// # Returns
     /// HashMap mapping isotope types to vectors of atoms
     pub fn group_by_isotope(atoms: &[Atom]) -> std::collections::HashMap<String, Vec<Atom>> {
-        let mut groups: std::collections::HashMap<String, Vec<Atom>> = std::collections::HashMap::new();
+        let mut groups: std::collections::HashMap<String, Vec<Atom>> =
+            std::collections::HashMap::new();
 
         for atom in atoms {
             let isotope_key = atom.isotope.as_str().to_string();
-            groups.entry(isotope_key)
-                .or_default()
-                .push(atom.clone());
+            groups.entry(isotope_key).or_default().push(atom.clone());
         }
 
         groups
@@ -842,7 +854,7 @@ mod tests {
     #[test]
     fn test_atom_creation() {
         let atom = Atom::new("pos123", "addr456", Isotope::V, "TEST");
-        
+
         assert_eq!(atom.position, "pos123");
         assert_eq!(atom.wallet_address, "addr456");
         assert_eq!(atom.isotope, Isotope::V);
@@ -851,7 +863,7 @@ mod tests {
         assert!(atom.batch_id.is_none());
         assert!(!atom.created_at.is_empty());
     }
-    
+
     #[test]
     fn test_atom_create_with_params() {
         let meta = vec![MetaItem::new("key1", "value1")];
@@ -861,7 +873,7 @@ mod tests {
             token: "WALLET_TOKEN".to_string(),
             batch_id: Some("batch123".to_string()),
         };
-        
+
         let params = AtomCreateParams {
             isotope: Isotope::M,
             value: Some(100.0),
@@ -871,9 +883,9 @@ mod tests {
             wallet_info: Some(wallet_info),
             ..Default::default()
         };
-        
+
         let atom = Atom::create(params);
-        
+
         assert_eq!(atom.isotope, Isotope::M);
         assert_eq!(atom.value, Some("100".to_string()));
         assert_eq!(atom.position, "wallet_pos");
@@ -883,7 +895,7 @@ mod tests {
         assert_eq!(atom.meta_type, Some("document".to_string()));
         assert_eq!(atom.meta.len(), 1);
     }
-    
+
     #[test]
     fn test_hashable_props() {
         let props = Atom::get_hashable_props();
@@ -895,21 +907,21 @@ mod tests {
         assert!(!props.contains(&"otsFragment"));
         assert!(!props.contains(&"index"));
     }
-    
+
     #[test]
     fn test_unclaimed_props() {
         let props = Atom::get_unclaimed_props();
         assert!(props.contains(&"otsFragment"));
     }
-    
+
     #[test]
     fn test_get_hashable_values() {
         let mut atom = Atom::new("pos123", "addr456", Isotope::V, "TEST");
         atom.value = Some("100".to_string());
         atom.meta = vec![MetaItem::new("key1", "value1")];
-        
+
         let values = atom.get_hashable_values();
-        
+
         // Should contain position, walletAddress, isotope, token, value, createdAt, and meta key-value pairs
         assert!(values.contains(&"pos123".to_string()));
         assert!(values.contains(&"addr456".to_string()));
@@ -919,26 +931,26 @@ mod tests {
         assert!(values.contains(&"key1".to_string()));
         assert!(values.contains(&"value1".to_string()));
     }
-    
+
     #[test]
     fn test_sort_atoms() {
         let mut atom1 = Atom::new("pos1", "addr1", Isotope::V, "TEST");
         atom1.index = Some(2);
-        
+
         let mut atom2 = Atom::new("pos2", "addr2", Isotope::V, "TEST");
         atom2.index = Some(1);
-        
+
         let mut atom3 = Atom::new("pos3", "addr3", Isotope::V, "TEST");
         atom3.index = Some(3);
-        
+
         let atoms = vec![atom1, atom2, atom3];
         let sorted = Atom::sort_atoms(&atoms);
-        
+
         assert_eq!(sorted[0].index, Some(1));
         assert_eq!(sorted[1].index, Some(2));
         assert_eq!(sorted[2].index, Some(3));
     }
-    
+
     #[test]
     fn test_aggregated_meta() {
         let mut atom = Atom::new("pos", "addr", Isotope::M, "TEST");
@@ -946,12 +958,12 @@ mod tests {
             MetaItem::new("key1", "value1"),
             MetaItem::new("key2", "value2"),
         ];
-        
+
         let aggregated = atom.aggregated_meta();
         assert_eq!(aggregated.get("key1"), Some(&"value1".to_string()));
         assert_eq!(aggregated.get("key2"), Some(&"value2".to_string()));
     }
-    
+
     #[test]
     fn test_json_serialization() {
         let mut atom = Atom::new("pos", "addr", Isotope::V, "TEST");
@@ -980,7 +992,7 @@ mod tests {
         assert!(!no_ots.contains("otsFragment"));
         assert!(!no_ots.contains("sig_fragment"));
     }
-    
+
     #[test]
     fn test_json_deserialization() {
         let json = r#"{
@@ -992,7 +1004,7 @@ mod tests {
             "meta": [],
             "createdAt": "1640995200000"
         }"#;
-        
+
         let atom = Atom::json_to_object(json).unwrap();
         assert_eq!(atom.position, "test_pos");
         assert_eq!(atom.wallet_address, "test_addr");
@@ -1020,7 +1032,10 @@ mod tests {
         assert_eq!(
             atom.meta,
             vec![
-                MetaItem { key: "nul".to_string(), value: None },
+                MetaItem {
+                    key: "nul".to_string(),
+                    value: None
+                },
                 MetaItem::new("blank", ""),
                 MetaItem::new("set", "x"),
             ]
@@ -1030,7 +1045,7 @@ mod tests {
         assert!(!hashable.contains(&"nul".to_string()));
         assert!(hashable.contains(&"blank".to_string()));
     }
-    
+
     #[test]
     fn test_hash_atoms_empty() {
         let atoms: Vec<Atom> = vec![];
@@ -1038,29 +1053,29 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), KnishIOError::AtomsMissing));
     }
-    
+
     #[test]
     fn test_hash_atoms_basic() {
         let mut atom1 = Atom::new("pos1", "addr1", Isotope::V, "TEST");
         atom1.index = Some(1);
         atom1.value = Some("100".to_string());
-        
+
         let mut atom2 = Atom::new("pos2", "addr2", Isotope::V, "TEST");
         atom2.index = Some(2);
         atom2.value = Some("200".to_string());
-        
+
         let atoms = vec![atom1, atom2];
         let hash_hex = Atom::hash_atoms(&atoms, "hex").unwrap();
         let hash_base17 = Atom::hash_atoms(&atoms, "base17").unwrap();
-        
+
         // Hash should be 64 characters hex
         assert_eq!(hash_hex.len(), 64);
         assert!(hash_hex.chars().all(|c| c.is_ascii_hexdigit()));
-        
+
         // Base17 should be 64 characters
         assert_eq!(hash_base17.len(), 64);
     }
-    
+
     #[test]
     fn test_hex_to_base17() {
         let hex = "0123456789abcdef";
@@ -1072,4 +1087,3 @@ mod tests {
         assert_eq!(zero_base17, "0".repeat(64));
     }
 }
-

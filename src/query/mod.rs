@@ -4,7 +4,7 @@
 //! equivalent to the JavaScript query classes.
 
 use crate::error::{KnishIOError, Result};
-use crate::graphql::{GraphQLClient, GraphQLRequest, create_query_request};
+use crate::graphql::{create_query_request, GraphQLClient, GraphQLRequest};
 use crate::response::Response;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -14,18 +14,18 @@ use std::collections::HashMap;
 pub trait Query: Send + Sync {
     /// Get the GraphQL query string
     fn get_query(&self) -> &str;
-    
+
     /// Get compiled variables for the query
     fn compiled_variables(&self, variables: Option<Value>) -> Option<Value>;
-    
+
     /// Create a response from the JSON data
     fn create_response(&self, json: Value) -> Box<dyn Response>;
-    
+
     /// Create query context for authentication
     fn create_query_context(&self) -> HashMap<String, Value> {
         HashMap::new()
     }
-    
+
     /// Execute the query
     async fn execute(
         &self,
@@ -66,46 +66,48 @@ impl BaseQuery {
             compiled_vars: None,
         }
     }
-    
+
     /// Set variables for the query
     pub fn with_variables(mut self, variables: Value) -> Self {
         self.variables = Some(variables);
         self
     }
-    
+
     /// Get the stored response (equivalent to response() in JS)
     #[allow(clippy::borrowed_box)] // returns the stored boxed trait object by-ref; API stability
     pub fn response(&self) -> Option<&Box<dyn Response>> {
         self.response.as_ref()
     }
-    
+
     /// Get the compiled variables (equivalent to variables() in JS)
     pub fn variables(&self) -> Option<&Value> {
         self.compiled_vars.as_ref()
     }
-    
+
     /// Get the stored request
     pub fn request(&self) -> Option<&GraphQLRequest> {
         self.request.as_ref()
     }
-    
+
     /// Create a query request (equivalent to createQuery in JS)
     pub fn create_query(&mut self, variables: Option<Value>) -> Result<GraphQLRequest> {
         // Compile variables
         self.compiled_vars = self.compiled_variables(variables);
-        
+
         // Validate query string is not empty
         if self.query_string.is_empty() {
-            return Err(KnishIOError::Code("Query string was not initialized!".to_string()));
+            return Err(KnishIOError::Code(
+                "Query string was not initialized!".to_string(),
+            ));
         }
-        
+
         // Create the request
         let request = create_query_request(&self.query_string, self.compiled_vars.clone());
         self.request = Some(request.clone());
-        
+
         Ok(request)
     }
-    
+
     /// Create a raw response (equivalent to createResponseRaw in JS)
     pub fn create_response_raw(&self, response: Value) -> Box<dyn Response> {
         self.create_response(response)
@@ -117,11 +119,11 @@ impl Query for BaseQuery {
     fn get_query(&self) -> &str {
         &self.query_string
     }
-    
+
     fn compiled_variables(&self, variables: Option<Value>) -> Option<Value> {
         variables.or_else(|| self.variables.clone())
     }
-    
+
     fn create_response(&self, json: Value) -> Box<dyn Response> {
         match crate::response::BaseResponse::new(json) {
             Ok(resp) => Box::new(resp),
@@ -131,7 +133,7 @@ impl Query for BaseQuery {
             }
         }
     }
-    
+
     /// Execute the query with enhanced functionality matching JS
     async fn execute(
         &self,
@@ -147,21 +149,21 @@ impl Query for BaseQuery {
             request: None,
             compiled_vars: None,
         };
-        
+
         // Create the query request
         let request = query.create_query(variables)?;
-        
+
         // Merge context
         let mut merged_context = context.unwrap_or_default();
         merged_context.extend(self.create_query_context());
-        
+
         // Execute the query
         match client.query(request).await {
             Ok(response) => {
                 // Re-wrap under "data" so `data.<Field>` data_keys navigate (mutation-path parity).
                 let json_data = json!({ "data": response.data });
                 let response_obj = query.create_response_raw(json_data);
-                
+
                 // Note: In Rust, we can't mutate self in an async trait method
                 // The response is returned directly instead of being stored
                 Ok(response_obj)
@@ -203,7 +205,7 @@ pub use balance::QueryBalance;
 pub use batch::QueryBatch;
 pub use batch_history::QueryBatchHistory;
 pub use continu_id::QueryContinuId;
-pub use meta_type::{QueryMetaType, MetaTypeValue};
+pub use meta_type::{MetaTypeValue, QueryMetaType};
 pub use meta_type_via_atom::{QueryMetaTypeViaAtom, QueryMetaTypeViaAtomParams};
 pub use policy::QueryPolicy;
 pub use token::QueryToken;

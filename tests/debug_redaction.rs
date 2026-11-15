@@ -12,9 +12,15 @@ const TOKEN: &str = "JWT-eyJhbGciOiJIUzI1NiJ9";
 
 fn assert_redacted(debug: &str, secrets: &[&str]) {
     for secret in secrets {
-        assert!(!debug.contains(secret), "Debug output leaks {secret}: {debug}");
+        assert!(
+            !debug.contains(secret),
+            "Debug output leaks {secret}: {debug}"
+        );
     }
-    assert!(debug.contains("[REDACTED]"), "Debug output should mark the redacted field: {debug}");
+    assert!(
+        debug.contains("[REDACTED]"),
+        "Debug output should mark the redacted field: {debug}"
+    );
 }
 
 #[test]
@@ -23,7 +29,10 @@ fn molecule_debug_hides_the_secret() {
     molecule.secret = Some(SECRET.to_string());
     let debug = format!("{molecule:?}");
     assert_redacted(&debug, &[SECRET]);
-    assert!(debug.contains("created_at"), "non-secret fields stay visible: {debug}");
+    assert!(
+        debug.contains("created_at"),
+        "non-secret fields stay visible: {debug}"
+    );
 }
 
 #[test]
@@ -40,7 +49,11 @@ fn auth_types_debug_hide_the_token() {
     let token = AuthToken::new(TOKEN.to_string(), Some(4_102_444_800), Some(false), None);
     assert_redacted(&format!("{token:?}"), &[TOKEN]);
 
-    let data = AuthData { token: TOKEN.to_string(), pubkey: None, wallet: None };
+    let data = AuthData {
+        token: TOKEN.to_string(),
+        pubkey: None,
+        wallet: None,
+    };
     assert_redacted(&format!("{data:?}"), &[TOKEN]);
 
     let snapshot = AuthTokenSnapshot {
@@ -48,7 +61,13 @@ fn auth_types_debug_hide_the_token() {
         expires_at: None,
         pubkey: None,
         encrypt: None,
-        wallet: WalletSnapshot { position: None, characters: None, mlkem_parameter_set: None, token: None, ots_version: None },
+        wallet: WalletSnapshot {
+            position: None,
+            characters: None,
+            mlkem_parameter_set: None,
+            token: None,
+            ots_version: None,
+        },
     };
     assert_redacted(&format!("{snapshot:?}"), &[TOKEN]);
 }

@@ -14,14 +14,13 @@ async fn os_keychain_secret_storage_provider_lifecycle() {
     let alias = "test_wallet";
     let backend = Arc::new(MemoryStorageBackend::new());
 
-    let provider = match OsKeychainSecretStorageProvider::new(
-        backend.clone(),
-        Some(&service),
-        Some(alias),
-    ) {
-        Ok(p) => p,
-        Err(e) => panic!("needs an OS keychain; run with -- --ignored on a host that has one ({e})"),
-    };
+    let provider =
+        match OsKeychainSecretStorageProvider::new(backend.clone(), Some(&service), Some(alias)) {
+            Ok(p) => p,
+            Err(e) => {
+                panic!("needs an OS keychain; run with -- --ignored on a host that has one ({e})")
+            }
+        };
 
     let user = format!("knishio:kek:{}", alias);
     let entry = keyring::Entry::new(&service, &user).expect("keyring entry");
@@ -45,12 +44,9 @@ async fn os_keychain_secret_storage_provider_lifecycle() {
     assert_eq!(retrieved, secret);
 
     // Second instance same service/alias/backend reads the secret
-    let provider2 = OsKeychainSecretStorageProvider::new(
-        backend.clone(),
-        Some(&service),
-        Some(alias),
-    )
-    .expect("second instance on existing keychain");
+    let provider2 =
+        OsKeychainSecretStorageProvider::new(backend.clone(), Some(&service), Some(alias))
+            .expect("second instance on existing keychain");
     let retrieved2 = provider2
         .retrieve_secret(bundle_hash, StorageOptions::default())
         .await
@@ -60,13 +56,21 @@ async fn os_keychain_secret_storage_provider_lifecycle() {
 
     // StorageOptions.passphrase must be rejected
     let bad_options = StorageOptions::with_passphrase("illegal-passphrase");
-    let store_bad = provider.store_secret("bundle2", "secret2", bad_options.clone()).await;
+    let store_bad = provider
+        .store_secret("bundle2", "secret2", bad_options.clone())
+        .await;
     assert!(store_bad.is_err());
-    assert!(store_bad.unwrap_err().to_string().contains("passphrase is not accepted"));
+    assert!(store_bad
+        .unwrap_err()
+        .to_string()
+        .contains("passphrase is not accepted"));
 
     let retrieve_bad = provider.retrieve_secret(bundle_hash, bad_options).await;
     assert!(retrieve_bad.is_err());
-    assert!(retrieve_bad.unwrap_err().to_string().contains("passphrase is not accepted"));
+    assert!(retrieve_bad
+        .unwrap_err()
+        .to_string()
+        .contains("passphrase is not accepted"));
 
     // Check metadata contract in backend
     let raw = backend
@@ -78,7 +82,10 @@ async fn os_keychain_secret_storage_provider_lifecycle() {
 
     assert_eq!(metadata["bundleHash"], serde_json::json!(bundle_hash));
     assert_eq!(metadata["hardwareBacked"], serde_json::json!(false));
-    assert_eq!(metadata["providerType"], serde_json::json!("os-keychain-aes-gcm"));
+    assert_eq!(
+        metadata["providerType"],
+        serde_json::json!("os-keychain-aes-gcm")
+    );
     assert!(!metadata.contains_key("label"), "label omitted when unset");
 
     // Cleanup credential from OS keychain
@@ -92,14 +99,13 @@ async fn os_keychain_secret_storage_provider_recovery_lifecycle() {
     let alias1 = "test_wallet_orig";
     let backend = Arc::new(MemoryStorageBackend::new());
 
-    let provider1 = match OsKeychainSecretStorageProvider::new(
-        backend.clone(),
-        Some(&service),
-        Some(alias1),
-    ) {
-        Ok(p) => p,
-        Err(e) => panic!("needs an OS keychain; run with -- --ignored on a host that has one ({e})"),
-    };
+    let provider1 =
+        match OsKeychainSecretStorageProvider::new(backend.clone(), Some(&service), Some(alias1)) {
+            Ok(p) => p,
+            Err(e) => {
+                panic!("needs an OS keychain; run with -- --ignored on a host that has one ({e})")
+            }
+        };
 
     let bundle_hash = "deadbeef1111222233334444555566667777888899990000aaaabbbbccccdddd";
     let secret = "SECRET-FOR-OS-KEYCHAIN-RECOVERY";
@@ -129,16 +135,18 @@ async fn os_keychain_secret_storage_provider_recovery_lifecycle() {
 
     // Create a new provider on a new alias (fresh KEK)
     let alias2 = "test_wallet_new";
-    let provider2 = OsKeychainSecretStorageProvider::new(
-        backend.clone(),
-        Some(&service),
-        Some(alias2),
-    )
-    .expect("create provider with new alias");
+    let provider2 =
+        OsKeychainSecretStorageProvider::new(backend.clone(), Some(&service), Some(alias2))
+            .expect("create provider with new alias");
 
     // Primary retrieval fails because provider2 doesn't have the original KEK
-    let retrieve_fail = provider2.retrieve_secret(bundle_hash, StorageOptions::default()).await;
-    assert!(retrieve_fail.is_err(), "retrieval under different keychain KEK must fail");
+    let retrieve_fail = provider2
+        .retrieve_secret(bundle_hash, StorageOptions::default())
+        .await;
+    assert!(
+        retrieve_fail.is_err(),
+        "retrieval under different keychain KEK must fail"
+    );
 
     // Recovery re-enrolls the secret under provider2's KEK
     provider2
@@ -154,7 +162,10 @@ async fn os_keychain_secret_storage_provider_recovery_lifecycle() {
     assert_eq!(recovered, secret);
 
     // delete_secret removes both primary and recovery records
-    provider2.delete_secret(bundle_hash).await.expect("delete secret");
+    provider2
+        .delete_secret(bundle_hash)
+        .await
+        .expect("delete secret");
     assert!(backend.get_item(&prim_key).unwrap().is_none());
     assert!(backend.get_item(&rec_key).unwrap().is_none());
 

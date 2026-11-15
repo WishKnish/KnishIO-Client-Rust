@@ -10,7 +10,9 @@ fn main() {
     match args[1].as_str() {
         "seal" | "seal-recovery" => {
             if args.len() < 5 {
-                eprintln!("Usage: secret_storage_cli seal <passphrase> <secret> <bundle_hash> [label]");
+                eprintln!(
+                    "Usage: secret_storage_cli seal <passphrase> <secret> <bundle_hash> [label]"
+                );
                 std::process::exit(1);
             }
             let passphrase = &args[2];
@@ -37,7 +39,10 @@ fn main() {
             let payload: EncryptedSecretPayload =
                 serde_json::from_str(payload_json).expect("parse payload failed");
             let plaintext = envelope::open(&payload, passphrase).expect("open failed");
-            println!("{}", String::from_utf8(plaintext.to_vec()).expect("utf8 failed"));
+            println!(
+                "{}",
+                String::from_utf8(plaintext.to_vec()).expect("utf8 failed")
+            );
         }
         cmd => {
             eprintln!("Unknown command: {}", cmd);

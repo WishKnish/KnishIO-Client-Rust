@@ -2,11 +2,11 @@
 //!
 //! Equivalent to HashAtom.js in the JavaScript SDK
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use super::{AtomVersion, StructureUtils};
 use crate::atom::Atom;
 use crate::error::Result;
-use super::{StructureUtils, AtomVersion};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Base class for atom hashing implementations
 ///
@@ -103,11 +103,11 @@ impl AtomVersion for HashAtom {
     fn from_atom(atom: &Atom) -> Self {
         Self::create_from_atom(atom)
     }
-    
+
     fn view(&self) -> Value {
         self.view()
     }
-    
+
     fn version(&self) -> String {
         "base".to_string()
     }
@@ -116,8 +116,8 @@ impl AtomVersion for HashAtom {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use crate::types::Isotope;
+    use serde_json::json;
 
     #[test]
     fn test_hash_atom_new() {
@@ -127,12 +127,7 @@ mod tests {
 
     #[test]
     fn test_create_from_atom() {
-        let atom = Atom::new(
-            "W1",
-            "test-address",
-            Isotope::V,
-            "TEST"
-        );
+        let atom = Atom::new("W1", "test-address", Isotope::V, "TEST");
 
         let hash_atom = HashAtom::create_from_atom(&atom);
         assert_eq!(hash_atom, HashAtom::new());
@@ -146,12 +141,12 @@ mod tests {
         });
 
         let structured = HashAtom::structure(&object);
-        
+
         // Should convert to array with sorted keys
         assert!(structured.is_array());
         let arr = structured.as_array().unwrap();
         assert_eq!(arr.len(), 2);
-        
+
         // Keys should be sorted alphabetically
         assert_eq!(arr[0], json!({"a_key": "value2"}));
         assert_eq!(arr[1], json!({"z_key": "value1"}));
@@ -162,7 +157,7 @@ mod tests {
         // Test objects and arrays
         assert!(HashAtom::is_structure(&json!({"key": "value"})));
         assert!(HashAtom::is_structure(&json!(["item1", "item2"])));
-        
+
         // Test primitives
         assert!(!HashAtom::is_structure(&json!("string")));
         assert!(!HashAtom::is_structure(&json!(123)));
@@ -174,7 +169,7 @@ mod tests {
     fn test_view() {
         let hash_atom = HashAtom::new();
         let view = hash_atom.view();
-        
+
         // View should be structured representation of empty object
         assert!(view.is_array() || view.is_object());
     }
@@ -193,12 +188,12 @@ mod tests {
         };
 
         let view = HashAtom::create_view(&data).unwrap();
-        
+
         // Should create structured representation
         assert!(view.is_array());
         let arr = view.as_array().unwrap();
         assert_eq!(arr.len(), 2);
-        
+
         // Fields should be sorted
         assert!(arr[0].as_object().unwrap().contains_key("field1"));
         assert!(arr[1].as_object().unwrap().contains_key("field2"));
@@ -206,16 +201,11 @@ mod tests {
 
     #[test]
     fn test_atom_version_trait() {
-        let atom = Atom::new(
-            "W1",
-            "test-address",
-            Isotope::C,
-            "TEST"
-        );
+        let atom = Atom::new("W1", "test-address", Isotope::C, "TEST");
 
         let hash_atom = HashAtom::from_atom(&atom);
         assert_eq!(hash_atom.version(), "base");
-        
+
         let view = hash_atom.view();
         assert!(view.is_array() || view.is_object());
     }
@@ -234,17 +224,17 @@ mod tests {
         });
 
         let structured = HashAtom::structure(&complex_object);
-        
+
         // Should convert to array with sorted keys
         assert!(structured.is_array());
         let arr = structured.as_array().unwrap();
         assert_eq!(arr.len(), 3);
-        
+
         // Keys should be sorted: level1, number, simple
         assert!(arr[0].as_object().unwrap().contains_key("level1"));
         assert!(arr[1].as_object().unwrap().contains_key("number"));
         assert!(arr[2].as_object().unwrap().contains_key("simple"));
-        
+
         // Nested objects should also be structured
         let level1_value = arr[0].as_object().unwrap().get("level1").unwrap();
         assert!(level1_value.is_array()); // Nested object becomes array
@@ -260,21 +250,21 @@ mod tests {
         ]);
 
         let structured = HashAtom::structure(&array_with_objects);
-        
+
         // Array should remain array but objects inside should be structured
         assert!(structured.is_array());
         let arr = structured.as_array().unwrap();
         assert_eq!(arr.len(), 4);
-        
+
         // First object should be structured (as array)
         assert!(arr[0].is_array());
-        
+
         // String should remain unchanged
         assert_eq!(arr[1], json!("string_item"));
-        
+
         // Third object should be structured (as array)
         assert!(arr[2].is_array());
-        
+
         // Number should remain unchanged
         assert_eq!(arr[3], json!(123));
     }
@@ -282,12 +272,12 @@ mod tests {
     #[test]
     fn test_javascript_compatibility() {
         // Test that our implementation matches JavaScript SDK patterns
-        
+
         // Test the create method equivalent
         let atom = Atom::new("W1", "addr", Isotope::V, "TOKEN");
         let hash_atom = HashAtom::create_from_atom(&atom);
         assert_eq!(hash_atom.version(), "base");
-        
+
         // Test structure method matches JS behavior
         let js_object = json!({
             "position": "W1",
@@ -295,24 +285,24 @@ mod tests {
             "isotope": "V",
             "token": "TOKEN"
         });
-        
+
         let structured = HashAtom::structure(&js_object);
         assert!(structured.is_array());
-        
+
         let arr = structured.as_array().unwrap();
         assert_eq!(arr.len(), 4);
-        
+
         // Should be sorted: isotope, position, token, walletAddress
         assert!(arr[0].as_object().unwrap().contains_key("isotope"));
         assert!(arr[1].as_object().unwrap().contains_key("position"));
         assert!(arr[2].as_object().unwrap().contains_key("token"));
         assert!(arr[3].as_object().unwrap().contains_key("walletAddress"));
-        
+
         // Test isStructure method
         assert!(HashAtom::is_structure(&json!({"key": "value"})));
         assert!(HashAtom::is_structure(&json!(["item"])));
         assert!(!HashAtom::is_structure(&json!("string")));
-        
+
         // Test view method
         let view = hash_atom.view();
         assert!(view.is_array() || view.is_object());

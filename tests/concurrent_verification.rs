@@ -17,17 +17,27 @@ const POSITION: &str = "0c4e8a12f6b3d97e5a21c8f40b6d3e9a7f15c2e8d04b9a6f3e17c5d2
 /// The four served molecules (all valid) and two tampered copies (both invalid).
 fn inputs() -> Result<Vec<Value>, Box<dyn Error>> {
     let fixture: Value = serde_json::from_str(include_str!("fixtures/served-molecules.json"))?;
-    let mut inputs: Vec<Value> = ["v1", "v2", "v2ts", "v3rust"].iter().map(|k| fixture[*k].clone()).collect();
+    let mut inputs: Vec<Value> = ["v1", "v2", "v2ts", "v3rust"]
+        .iter()
+        .map(|k| fixture[*k].clone())
+        .collect();
 
     let mut metas_tampered = fixture["v2ts"].clone();
-    let metas = metas_tampered["atoms"][0]["metasJson"].as_str().ok_or("v2ts carries metasJson")?.to_string();
+    let metas = metas_tampered["atoms"][0]["metasJson"]
+        .as_str()
+        .ok_or("v2ts carries metasJson")?
+        .to_string();
     metas_tampered["atoms"][0]["metasJson"] = Value::from(metas.replace("f1", "f2"));
     inputs.push(metas_tampered);
 
     let mut signature_tampered = fixture["v1"].clone();
-    let fragment = signature_tampered["atoms"][0]["otsFragment"].as_str().ok_or("v1 carries otsFragment")?.to_string();
+    let fragment = signature_tampered["atoms"][0]["otsFragment"]
+        .as_str()
+        .ok_or("v1 carries otsFragment")?
+        .to_string();
     let first = if fragment.starts_with('A') { "B" } else { "A" };
-    signature_tampered["atoms"][0]["otsFragment"] = Value::from(format!("{first}{}", &fragment[1..]));
+    signature_tampered["atoms"][0]["otsFragment"] =
+        Value::from(format!("{first}{}", &fragment[1..]));
     inputs.push(signature_tampered);
 
     Ok(inputs)

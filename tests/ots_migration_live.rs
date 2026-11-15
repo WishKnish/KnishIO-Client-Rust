@@ -11,11 +11,20 @@ use knishio_client::wallet::{OtsVersion, Wallet};
 use knishio_client::KnishIOClient;
 
 fn test_url() -> Option<String> {
-    std::env::var("OTS_MIGRATION_TEST_URL").ok().filter(|u| !u.is_empty())
+    std::env::var("OTS_MIGRATION_TEST_URL")
+        .ok()
+        .filter(|u| !u.is_empty())
 }
 
 async fn signed_in(uri: &str, secret: &str, ots_version: OtsVersion) -> KnishIOClient {
-    let mut client = KnishIOClient::new(uri, Some("public".to_string()), None, None, None, Some(false));
+    let mut client = KnishIOClient::new(
+        uri,
+        Some("public".to_string()),
+        None,
+        None,
+        None,
+        Some(false),
+    );
     client.set_ots_version(ots_version);
     client
         .request_profile_auth_token(secret, Some(false))
@@ -31,7 +40,10 @@ async fn head(client: &KnishIOClient, bundle: &str) -> (String, String) {
         .await
         .expect("ContinuID query")
         .expect("a ContinuID head");
-    (wallet.position.expect("head position"), wallet.address.expect("head address"))
+    (
+        wallet.position.expect("head position"),
+        wallet.address.expect("head address"),
+    )
 }
 
 fn version(secret: &str, head: &(String, String)) -> Option<OtsVersion> {
@@ -57,9 +69,20 @@ async fn a_client_set_to_ots_v2_moves_a_v1_identity_to_v2() {
     assert_eq!(version(&secret, &h2), Some(OtsVersion::V2));
 
     // The version 2 head signs a molecule
-    let meta_id = format!("ots-migration-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_millis());
+    let meta_id = format!(
+        "ots-migration-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_millis()
+    );
     let meta = second
-        .create_meta("ots-migration", &meta_id, vec![knishio_client::MetaItem::new("k", "v")], None)
+        .create_meta(
+            "ots-migration",
+            &meta_id,
+            vec![knishio_client::MetaItem::new("k", "v")],
+            None,
+        )
         .await
         .expect("createMeta");
     assert!(meta.success(), "createMeta accepted: {:?}", meta.reason());

@@ -1,8 +1,8 @@
 #![cfg(all(feature = "secure-enclave", target_os = "macos"))]
 
 use knishio_client::storage::{
-    AesGcmSecretStorageProvider, MemoryStorageBackend, SecretStorageProvider, StorageBackend,
-    StorageOptions, SecureEnclaveSecretStorageProvider, RECOVERY_KEY_PREFIX,
+    AesGcmSecretStorageProvider, MemoryStorageBackend, SecretStorageProvider,
+    SecureEnclaveSecretStorageProvider, StorageBackend, StorageOptions, RECOVERY_KEY_PREFIX,
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -97,7 +97,8 @@ async fn secure_enclave_custody_lifecycle_and_key_loss_recovery() {
     assert!(rec_raw.contains("\"hardwareBacked\":false"));
 
     // Cross-provider verification: recover via AesGcmSecretStorageProvider directly
-    let aes_provider = AesGcmSecretStorageProvider::new(Some(backend.clone()), Some("rec-pass-12345".to_string()));
+    let aes_provider =
+        AesGcmSecretStorageProvider::new(Some(backend.clone()), Some("rec-pass-12345".to_string()));
     let recovered_via_aes = aes_provider
         .retrieve_secret(bundle_hash, StorageOptions::default())
         .await
@@ -134,8 +135,14 @@ async fn secure_enclave_custody_lifecycle_and_key_loss_recovery() {
     assert_eq!(restored, secret);
 
     // Delete secret
-    assert!(fresh_provider.delete_secret(bundle_hash).await.expect("delete"));
-    assert!(!fresh_provider.has_secret(bundle_hash).await.expect("has_secret after delete"));
+    assert!(fresh_provider
+        .delete_secret(bundle_hash)
+        .await
+        .expect("delete"));
+    assert!(!fresh_provider
+        .has_secret(bundle_hash)
+        .await
+        .expect("has_secret after delete"));
 
     // Clean up
     fresh_provider.unenroll().expect("unenroll clean up");
@@ -150,8 +157,8 @@ fn secure_enclave_requires_recovery_passphrase_unless_allowed() {
         recovery_passphrase: None,
         allow_unrecoverable: false,
     };
-    let err = SecureEnclaveSecretStorageProvider::validate_store_options(&opts_disallowed)
-        .unwrap_err();
+    let err =
+        SecureEnclaveSecretStorageProvider::validate_store_options(&opts_disallowed).unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("requires recovery_passphrase unless allow_unrecoverable is true"),
@@ -186,10 +193,11 @@ fn secure_enclave_rejects_caller_passphrase() {
         allow_unrecoverable: true,
     };
 
-    let err = SecureEnclaveSecretStorageProvider::validate_store_options(&opts_with_pass)
-        .unwrap_err();
+    let err =
+        SecureEnclaveSecretStorageProvider::validate_store_options(&opts_with_pass).unwrap_err();
     assert!(
-        err.to_string().contains("derives its passphrase from the Secure Enclave"),
+        err.to_string()
+            .contains("derives its passphrase from the Secure Enclave"),
         "expected passphrase rejection, got: {err}"
     );
 }
@@ -201,12 +209,15 @@ fn secure_enclave_rejects_corrupted_kek_record() {
     let record_key = format!("knishio:kek:secure-enclave:{alias}");
 
     // 1. Invalid JSON in backend record
-    backend.set_item(&record_key, "not json".to_string()).unwrap();
+    backend
+        .set_item(&record_key, "not json".to_string())
+        .unwrap();
     let err1 = SecureEnclaveSecretStorageProvider::new(backend.clone(), Some(&alias))
         .err()
         .expect("must fail on invalid JSON KEK record");
     assert!(
-        err1.to_string().contains("Corrupted Secure Enclave KEK record"),
+        err1.to_string()
+            .contains("Corrupted Secure Enclave KEK record"),
         "expected corrupted KEK record error, got: {err1}"
     );
 
@@ -215,13 +226,15 @@ fn secure_enclave_rejects_corrupted_kek_record() {
         "version": 1,
         "algorithm": "ECIES-Cofactor-VariableIV-X963-SHA256-AESGCM",
         "wrappedPassphrase": ""
-    }).to_string();
+    })
+    .to_string();
     backend.set_item(&record_key, empty_wrapped).unwrap();
     let err2 = SecureEnclaveSecretStorageProvider::new(backend.clone(), Some(&alias))
         .err()
         .expect("must fail on empty wrappedPassphrase");
     assert!(
-        err2.to_string().contains("Corrupted Secure Enclave KEK record"),
+        err2.to_string()
+            .contains("Corrupted Secure Enclave KEK record"),
         "expected corrupted KEK record error, got: {err2}"
     );
 }

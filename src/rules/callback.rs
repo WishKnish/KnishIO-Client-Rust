@@ -2,12 +2,12 @@
 //!
 //! Equivalent to Callback.js in the JavaScript SDK
 
+use super::{FromJsonObject, RuleArgumentError, ToJsonObject};
+use crate::error::Result;
+use crate::utils::strings::is_numeric;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use crate::error::Result;
-use crate::utils::strings::is_numeric;
-use super::{RuleArgumentError, FromJsonObject, ToJsonObject};
 
 /// Metadata for callbacks
 ///
@@ -44,13 +44,13 @@ impl Meta {
     /// Equivalent to JavaScript Meta creation with dynamic properties
     pub fn from_object(object: &Value) -> Result<Self> {
         let mut properties = HashMap::new();
-        
+
         if let Some(obj) = object.as_object() {
             for (key, value) in obj {
                 properties.insert(key.clone(), value.clone());
             }
         }
-        
+
         Ok(Self { properties })
     }
 
@@ -93,7 +93,8 @@ impl Meta {
 
     /// Convert to JSON Value
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::to_value(&self.properties).unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+        serde_json::to_value(&self.properties)
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
     }
 
     /// Returns the value of the `"key"` field of a `{ key, value }` rule-callback
@@ -174,16 +175,18 @@ impl Callback {
     ) -> Result<Self> {
         if action.is_empty() {
             return Err(RuleArgumentError::new(
-                "Callback structure violated, missing mandatory \"action\" parameter."
-            ).into());
+                "Callback structure violated, missing mandatory \"action\" parameter.",
+            )
+            .into());
         }
 
         // Validate amount if provided (must be numeric)
         if let Some(ref amount_val) = amount {
             if !is_numeric(amount_val) {
                 return Err(RuleArgumentError::new(
-                    "Parameter amount should be a string containing numbers"
-                ).into());
+                    "Parameter amount should be a string containing numbers",
+                )
+                .into());
             }
         }
 
@@ -220,8 +223,9 @@ impl Callback {
     pub fn set_amount(&mut self, amount: String) -> Result<()> {
         if !is_numeric(&amount) {
             return Err(RuleArgumentError::new(
-                "Parameter amount should be a string containing numbers"
-            ).into());
+                "Parameter amount should be a string containing numbers",
+            )
+            .into());
         }
         self.amount = Some(amount);
         Ok(())
@@ -274,16 +278,19 @@ impl Callback {
     ///
     /// New Callback instance
     pub fn from_object(object: &Value) -> Result<Self> {
-        let action = object.get("action")
+        let action = object
+            .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| RuleArgumentError::new("Missing or invalid 'action' field"))?
             .to_string();
 
-        let meta_type = object.get("metaType")
+        let meta_type = object
+            .get("metaType")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let meta_id = object.get("metaId")
+        let meta_id = object
+            .get("metaId")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
@@ -293,23 +300,29 @@ impl Callback {
             None
         };
 
-        let address = object.get("address")
+        let address = object
+            .get("address")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let token = object.get("token")
+        let token = object
+            .get("token")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let amount = object.get("amount")
+        let amount = object
+            .get("amount")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let comparison = object.get("comparison")
+        let comparison = object
+            .get("comparison")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        Self::new(action, meta_type, meta_id, meta, address, token, amount, comparison)
+        Self::new(
+            action, meta_type, meta_id, meta, address, token, amount, comparison,
+        )
     }
 
     /// Convert to JSON object
@@ -332,7 +345,10 @@ impl Callback {
         }
 
         if let Some(ref meta_obj) = self.meta {
-            meta.insert("meta".to_string(), serde_json::to_value(meta_obj).unwrap_or(Value::Null));
+            meta.insert(
+                "meta".to_string(),
+                serde_json::to_value(meta_obj).unwrap_or(Value::Null),
+            );
         }
 
         if let Some(ref address) = self.address {
@@ -366,7 +382,8 @@ impl Callback {
     /// Equivalent to isMeta() in JavaScript
     pub fn is_meta(&self) -> bool {
         let json = self.to_json();
-        let keys: HashSet<String> = json.as_object()
+        let keys: HashSet<String> = json
+            .as_object()
             .map(|obj| obj.keys().cloned().collect())
             .unwrap_or_default();
 
@@ -384,7 +401,8 @@ impl Callback {
     /// Equivalent to isCollect() in JavaScript
     pub fn is_collect(&self) -> bool {
         let json = self.to_json();
-        let keys: HashSet<String> = json.as_object()
+        let keys: HashSet<String> = json
+            .as_object()
             .map(|obj| obj.keys().cloned().collect())
             .unwrap_or_default();
 
@@ -402,7 +420,8 @@ impl Callback {
     /// Equivalent to isBuffer() in JavaScript
     pub fn is_buffer(&self) -> bool {
         let json = self.to_json();
-        let keys: HashSet<String> = json.as_object()
+        let keys: HashSet<String> = json
+            .as_object()
             .map(|obj| obj.keys().cloned().collect())
             .unwrap_or_default();
 
@@ -420,7 +439,8 @@ impl Callback {
     /// Equivalent to isRemit() in JavaScript
     pub fn is_remit(&self) -> bool {
         let json = self.to_json();
-        let keys: HashSet<String> = json.as_object()
+        let keys: HashSet<String> = json
+            .as_object()
             .map(|obj| obj.keys().cloned().collect())
             .unwrap_or_default();
 
@@ -438,7 +458,8 @@ impl Callback {
     /// Equivalent to isBurn() in JavaScript
     pub fn is_burn(&self) -> bool {
         let json = self.to_json();
-        let keys: HashSet<String> = json.as_object()
+        let keys: HashSet<String> = json
+            .as_object()
             .map(|obj| obj.keys().cloned().collect())
             .unwrap_or_default();
 
@@ -506,7 +527,8 @@ mod tests {
             Some("TEST".to_string()),
             Some("100".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(callback.action, "test_action");
         assert_eq!(callback.meta_type, Some("test_meta_type".to_string()));
@@ -519,19 +541,13 @@ mod tests {
 
     #[test]
     fn test_callback_new_empty_action() {
-        let result = Callback::new(
-            "".to_string(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
+        let result = Callback::new("".to_string(), None, None, None, None, None, None, None);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("missing mandatory \"action\" parameter"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("missing mandatory \"action\" parameter"));
     }
 
     #[test]
@@ -548,7 +564,10 @@ mod tests {
         );
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("string containing numbers"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("string containing numbers"));
     }
 
     #[test]
@@ -562,7 +581,8 @@ mod tests {
             None,
             None,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         callback.set_comparison(">=".to_string());
         assert_eq!(callback.comparison, Some(">=".to_string()));
@@ -598,11 +618,15 @@ mod tests {
             None,
             None,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = callback.set_amount("invalid_amount".to_string());
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("string containing numbers"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("string containing numbers"));
     }
 
     #[test]
@@ -663,7 +687,8 @@ mod tests {
             Some("TEST".to_string()),
             Some("100".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         let json_value = callback.to_json();
 
@@ -678,13 +703,43 @@ mod tests {
 
     #[test]
     fn test_callback_is_reject() {
-        let callback = Callback::new("reject".to_string(), None, None, None, None, None, None, None).unwrap();
+        let callback = Callback::new(
+            "reject".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(callback.is_reject());
 
-        let callback2 = Callback::new("REJECT".to_string(), None, None, None, None, None, None, None).unwrap();
+        let callback2 = Callback::new(
+            "REJECT".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(callback2.is_reject());
 
-        let callback3 = Callback::new("collect".to_string(), None, None, None, None, None, None, None).unwrap();
+        let callback3 = Callback::new(
+            "collect".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(!callback3.is_reject());
     }
 
@@ -700,21 +755,14 @@ mod tests {
             None,
             None,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(callback.is_meta());
 
         // Missing required fields
-        let callback2 = Callback::new(
-            "meta".to_string(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ).unwrap();
+        let callback2 =
+            Callback::new("meta".to_string(), None, None, None, None, None, None, None).unwrap();
         assert!(!callback2.is_meta());
     }
 
@@ -729,7 +777,8 @@ mod tests {
             Some("TOKEN".to_string()),
             Some("100".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(callback.is_collect());
 
@@ -743,7 +792,8 @@ mod tests {
             None,
             None,
             None,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(!callback2.is_collect());
     }
 
@@ -758,7 +808,8 @@ mod tests {
             Some("TOKEN".to_string()),
             Some("100".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(callback.is_buffer());
     }
@@ -774,7 +825,8 @@ mod tests {
             Some("TOKEN".to_string()),
             Some("100".to_string()),
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(callback.is_remit());
     }
@@ -790,7 +842,8 @@ mod tests {
             Some("TOKEN".to_string()),
             Some("100".to_string()),
             Some(">=".to_string()),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(callback.is_burn());
     }
@@ -813,16 +866,8 @@ mod tests {
         assert!(valid_callback.is_ok());
 
         // Test empty action validation (matches JS validation)
-        let invalid_callback = Callback::new(
-            "".to_string(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
+        let invalid_callback =
+            Callback::new("".to_string(), None, None, None, None, None, None, None);
         assert!(invalid_callback.is_err());
 
         // Test amount validation (matches JS validation)

@@ -1,8 +1,8 @@
 #![cfg(feature = "tpm")]
 
 use knishio_client::storage::{
-    MemoryStorageBackend, SecretStorageProvider, StorageBackend, StorageOptions,
-    Tpm2Policy, Tpm2SecretStorageProvider, TpmIdentity, RECOVERY_KEY_PREFIX,
+    MemoryStorageBackend, SecretStorageProvider, StorageBackend, StorageOptions, Tpm2Policy,
+    Tpm2SecretStorageProvider, TpmIdentity, RECOVERY_KEY_PREFIX,
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -15,7 +15,9 @@ async fn tpm2_secret_storage_provider_lifecycle() {
 
     let provider = match Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), None) {
         Ok(p) => p,
-        Err(e) => panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})"),
+        Err(e) => {
+            panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})")
+        }
     };
 
     assert_eq!(provider.provider_type(), "tpm2-aes-gcm");
@@ -71,13 +73,21 @@ async fn tpm2_secret_storage_provider_lifecycle() {
 
     // StorageOptions.passphrase must be rejected
     let bad_options = StorageOptions::with_passphrase("illegal-passphrase");
-    let store_bad = provider.store_secret("bundle2", "s2", bad_options.clone()).await;
+    let store_bad = provider
+        .store_secret("bundle2", "s2", bad_options.clone())
+        .await;
     assert!(store_bad.is_err());
-    assert!(store_bad.unwrap_err().to_string().contains("passphrase is not accepted"));
+    assert!(store_bad
+        .unwrap_err()
+        .to_string()
+        .contains("passphrase is not accepted"));
 
     // Corrupted private blob returns Err on unseal
     let tpm_record_key = format!("knishio:kek:tpm2:{}", alias);
-    let tpm_raw = backend.get_item(&tpm_record_key).unwrap().expect("tpm record");
+    let tpm_raw = backend
+        .get_item(&tpm_record_key)
+        .unwrap()
+        .expect("tpm record");
     let mut tpm_json: serde_json::Value = serde_json::from_str(&tpm_raw).unwrap();
     let original_priv = tpm_json["private"].as_str().unwrap();
     // Flip one char
@@ -88,10 +98,13 @@ async fn tpm2_secret_storage_provider_lifecycle() {
         corrupted_priv.replace_range(..1, "A");
     }
     tpm_json["private"] = serde_json::Value::String(corrupted_priv);
-    backend.set_item(&tpm_record_key, serde_json::to_string(&tpm_json).unwrap()).unwrap();
+    backend
+        .set_item(&tpm_record_key, serde_json::to_string(&tpm_json).unwrap())
+        .unwrap();
 
-    let provider_corrupted = Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), None)
-        .expect("create provider with corrupted backend");
+    let provider_corrupted =
+        Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), None)
+            .expect("create provider with corrupted backend");
     let retrieve_corrupted = provider_corrupted
         .retrieve_secret(bundle_hash, StorageOptions::default())
         .await;
@@ -129,7 +142,9 @@ async fn tpm2_secret_storage_provider_recovery_lifecycle() {
 
     let provider = match Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), None) {
         Ok(p) => p,
-        Err(e) => panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})"),
+        Err(e) => {
+            panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})")
+        }
     };
 
     let bundle_hash = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff";
@@ -143,7 +158,10 @@ async fn tpm2_secret_storage_provider_recovery_lifecycle() {
         .expect("store secret with recovery");
 
     // Both primary and recovery records exist in backend
-    assert!(backend.get_item(&format!("knishio:secret:{}", bundle_hash)).unwrap().is_some());
+    assert!(backend
+        .get_item(&format!("knishio:secret:{}", bundle_hash))
+        .unwrap()
+        .is_some());
     let rec_key = format!("{}{}", RECOVERY_KEY_PREFIX, bundle_hash);
     assert!(backend.get_item(&rec_key).unwrap().is_some());
 
@@ -162,8 +180,13 @@ async fn tpm2_secret_storage_provider_recovery_lifecycle() {
         .expect("create new provider");
 
     // Primary retrieval fails (old envelope cannot be decrypted by provider2 with new KEK)
-    let retrieve_fail = provider2.retrieve_secret(bundle_hash, StorageOptions::default()).await;
-    assert!(retrieve_fail.is_err(), "retrieval under different TPM KEK must fail");
+    let retrieve_fail = provider2
+        .retrieve_secret(bundle_hash, StorageOptions::default())
+        .await;
+    assert!(
+        retrieve_fail.is_err(),
+        "retrieval under different TPM KEK must fail"
+    );
 
     // Recovery restores the secret under the new provider's KEK
     provider2
@@ -179,8 +202,14 @@ async fn tpm2_secret_storage_provider_recovery_lifecycle() {
     assert_eq!(recovered, secret);
 
     // Deleting removes both primary and recovery records
-    provider2.delete_secret(bundle_hash).await.expect("delete secret");
-    assert!(backend.get_item(&format!("knishio:secret:{}", bundle_hash)).unwrap().is_none());
+    provider2
+        .delete_secret(bundle_hash)
+        .await
+        .expect("delete secret");
+    assert!(backend
+        .get_item(&format!("knishio:secret:{}", bundle_hash))
+        .unwrap()
+        .is_none());
     assert!(backend.get_item(&rec_key).unwrap().is_none());
 }
 
@@ -193,10 +222,13 @@ async fn tpm2_policy_fail_closed_without_recovery() {
     let backend = Arc::new(MemoryStorageBackend::new());
     let policy = Tpm2Policy::with_pcrs(HashingAlgorithm::Sha256, vec![7]);
 
-    let provider = match Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), Some(policy)) {
-        Ok(p) => p,
-        Err(e) => panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})"),
-    };
+    let provider =
+        match Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), Some(policy)) {
+            Ok(p) => p,
+            Err(e) => {
+                panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})")
+            }
+        };
 
     let bundle_hash = "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef";
     let secret = "SECRET-UNDER-PCR-POLICY";
@@ -205,7 +237,10 @@ async fn tpm2_policy_fail_closed_without_recovery() {
     let err = provider
         .store_secret(bundle_hash, secret, StorageOptions::default())
         .await;
-    assert!(err.is_err(), "storing with PCR policy without recovery must fail");
+    assert!(
+        err.is_err(),
+        "storing with PCR policy without recovery must fail"
+    );
     let err_msg = err.unwrap_err().to_string();
     assert!(
         err_msg.contains("requires recovery_passphrase"),
@@ -235,9 +270,15 @@ async fn tpm2_policy_fail_closed_without_recovery() {
         .expect("store with recovery passphrase");
 
     let tpm_record_key = format!("knishio:kek:tpm2:{}", alias);
-    let tpm_raw = backend.get_item(&tpm_record_key).unwrap().expect("tpm record");
+    let tpm_raw = backend
+        .get_item(&tpm_record_key)
+        .unwrap()
+        .expect("tpm record");
     let tpm_json: serde_json::Value = serde_json::from_str(&tpm_raw).unwrap();
-    assert!(tpm_json.get("policy").is_some(), "sealed record must contain policy info");
+    assert!(
+        tpm_json.get("policy").is_some(),
+        "sealed record must contain policy info"
+    );
     assert_eq!(tpm_json["policy"]["bank"], "sha256");
 }
 
@@ -257,10 +298,13 @@ async fn tpm2_policy_pcr_extend_fails_unseal() {
     let backend = Arc::new(MemoryStorageBackend::new());
     let policy = Tpm2Policy::with_pcrs(HashingAlgorithm::Sha256, vec![7]);
 
-    let provider = match Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), Some(policy)) {
-        Ok(p) => p,
-        Err(e) => panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})"),
-    };
+    let provider =
+        match Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), Some(policy)) {
+            Ok(p) => p,
+            Err(e) => {
+                panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one ({e})")
+            }
+        };
 
     let bundle_hash = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff";
     let secret = "SECRET-SEALED-AGAINST-PCR7";
@@ -281,7 +325,8 @@ async fn tpm2_policy_pcr_extend_fails_unseal() {
     assert_eq!(retrieved, secret);
 
     // 3. Mutate PCR 7 measurement via direct TPM context
-    let tcti_str = std::env::var("KNISHIO_TPM_TCTI").unwrap_or_else(|_| "device:/dev/tpmrm0".to_string());
+    let tcti_str =
+        std::env::var("KNISHIO_TPM_TCTI").unwrap_or_else(|_| "device:/dev/tpmrm0".to_string());
     let tcti_conf = match TctiNameConf::from_str(&tcti_str) {
         Ok(c) => c,
         Err(e) => panic!("needs a TPM 2.0 device; run with -- --ignored on a host that has one (TCTI parse failed: {e})"),
@@ -294,15 +339,20 @@ async fn tpm2_policy_pcr_extend_fails_unseal() {
     let mut dv = DigestValues::new();
     let d = Digest::try_from(vec![0x42u8; 32]).expect("valid 32-byte digest");
     dv.set(HashingAlgorithm::Sha256, d);
-    direct_context.set_sessions((Some(tss_esapi::interface_types::session_handles::AuthSession::Password), None, None));
+    direct_context.set_sessions((
+        Some(tss_esapi::interface_types::session_handles::AuthSession::Password),
+        None,
+        None,
+    ));
     direct_context
         .pcr_extend(PcrHandle::Pcr7, dv)
         .expect("extend PCR 7 to mutate state");
 
     // 4. Create a fresh provider instance on the same backend record.
     // This forces unsealing the KeyedHash under the drifted PCR 7 state.
-    let provider_after_drift = Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), None)
-        .expect("instantiate provider after PCR drift");
+    let provider_after_drift =
+        Tpm2SecretStorageProvider::new(backend.clone(), None, Some(&alias), None)
+            .expect("instantiate provider after PCR drift");
 
     let err = provider_after_drift
         .retrieve_secret(bundle_hash, StorageOptions::default())
@@ -315,7 +365,9 @@ async fn tpm2_policy_pcr_extend_fails_unseal() {
     );
     let err_str = err.unwrap_err().to_string();
     assert!(
-        err_str.contains("TPM unseal failed") || err_str.contains("policy_pcr failed") || err_str.contains("DecryptionFailed"),
+        err_str.contains("TPM unseal failed")
+            || err_str.contains("policy_pcr failed")
+            || err_str.contains("DecryptionFailed"),
         "expected policy/unseal failure error, got: {err_str}"
     );
 }

@@ -9,18 +9,17 @@
 mod fixtures;
 
 mod cross_platform {
-    use std::collections::HashMap;
     use serde::Deserialize;
+    use std::collections::HashMap;
 
     // Import the Rust SDK's public API
     use base64::Engine as _;
-    use knishio_client::{shake256, generate_bundle_hash, Wallet, Atom};
-    use knishio_client::wallet::EncryptedMessage;
-    use knishio_client::types::{Isotope, MetaItem};
     use knishio_client::crypto::{
-        enumerate_hash, normalize_hash,
-        generate_ots_signature, verify_ots_signature,
+        enumerate_hash, generate_ots_signature, normalize_hash, verify_ots_signature,
     };
+    use knishio_client::types::{Isotope, MetaItem};
+    use knishio_client::wallet::EncryptedMessage;
+    use knishio_client::{generate_bundle_hash, shake256, Atom, Wallet};
 
     // ── Test vector JSON structures ─────────────────────────────────────────
 
@@ -269,7 +268,11 @@ mod cross_platform {
         atom.value = a.value.clone();
         atom.meta_type = a.meta_type.clone();
         atom.meta_id = a.meta_id.clone();
-        atom.meta = a.meta.iter().map(|m| MetaItem::new(&m.key, &m.value)).collect();
+        atom.meta = a
+            .meta
+            .iter()
+            .map(|m| MetaItem::new(&m.key, &m.value))
+            .collect();
         atom.index = Some(a.index);
         atom.created_at = a.created_at.clone();
         atom
@@ -328,9 +331,10 @@ mod cross_platform {
                 Some(&test.position),
                 None,
                 None,
-            ).unwrap_or_else(|e| panic!(
-                "Wallet creation failed for vector '{}': {:?}", test.name, e
-            ));
+            )
+            .unwrap_or_else(|e| {
+                panic!("Wallet creation failed for vector '{}': {:?}", test.name, e)
+            });
 
             let bundle = wallet.bundle.as_deref().unwrap_or("");
             assert_eq!(
@@ -358,8 +362,12 @@ mod cross_platform {
 
         for test in &vectors.vectors.hash_normalization.tests {
             let result = enumerate_hash(&test.hash);
-            assert_eq!(result.len(), 64,
-                "enumerate_hash output length must be 64 for '{}'", test.name);
+            assert_eq!(
+                result.len(),
+                64,
+                "enumerate_hash output length must be 64 for '{}'",
+                test.name
+            );
             for (idx_str, &expected) in &test.expected_enumerated {
                 let idx: usize = idx_str.parse().unwrap();
                 assert_eq!(
@@ -377,8 +385,12 @@ mod cross_platform {
 
         for test in &vectors.vectors.hash_normalization.tests {
             let result = normalize_hash(&test.hash);
-            assert_eq!(result.len(), 64,
-                "normalize_hash output length must be 64 for '{}'", test.name);
+            assert_eq!(
+                result.len(),
+                64,
+                "normalize_hash output length must be 64 for '{}'",
+                test.name
+            );
             for (idx_str, &expected) in &test.expected_normalized {
                 let idx: usize = idx_str.parse().unwrap();
                 assert_eq!(
@@ -398,8 +410,11 @@ mod cross_platform {
         for test in &vectors.vectors.hash_normalization.tests {
             let normalized = normalize_hash(&test.hash);
             let sum: i32 = normalized.iter().map(|&v| v as i32).sum();
-            assert_eq!(sum, 0,
-                "Normalized hash sum must be 0 for '{}', got {}", test.name, sum);
+            assert_eq!(
+                sum, 0,
+                "Normalized hash sum must be 0 for '{}', got {}",
+                test.name, sum
+            );
         }
     }
 
@@ -442,15 +457,19 @@ mod cross_platform {
         let mut tampered = atoms.clone();
         tampered[0].token = "TAMPERED".to_string();
         let tampered_hash = Atom::hash_atoms(&tampered, "base17").unwrap();
-        assert_ne!(original_hash, tampered_hash,
-            "Molecular hash must change when atom token is tampered");
+        assert_ne!(
+            original_hash, tampered_hash,
+            "Molecular hash must change when atom token is tampered"
+        );
 
         // Tamper: change the value
         let mut tampered2 = atoms.clone();
         tampered2[0].value = Some("999".to_string());
         let tampered_hash2 = Atom::hash_atoms(&tampered2, "base17").unwrap();
-        assert_ne!(original_hash, tampered_hash2,
-            "Molecular hash must change when atom value is tampered");
+        assert_ne!(
+            original_hash, tampered_hash2,
+            "Molecular hash must change when atom value is tampered"
+        );
 
         std::env::remove_var("KNISHIO_FIXED_TIMESTAMP");
     }
@@ -464,17 +483,25 @@ mod cross_platform {
         let vectors = load_vectors();
 
         for test in &vectors.vectors.wots_signature.tests {
-            let fragments = generate_ots_signature(&test.private_key, &test.molecular_hash).unwrap();
-            assert_eq!(fragments.len(), 16,
-                "OTS must produce 16 fragments for '{}'", test.name);
+            let fragments =
+                generate_ots_signature(&test.private_key, &test.molecular_hash).unwrap();
+            assert_eq!(
+                fragments.len(),
+                16,
+                "OTS must produce 16 fragments for '{}'",
+                test.name
+            );
             // Rust's generate_ots_signature uses normalize_hash + (8-n) iterations,
             // which matches the Kotlin SDK's "compressed signature" output.
             // The Kotlin "fragments" field uses a different intermediate representation.
             let concatenated = fragments.join("");
             assert_eq!(
-                concatenated, test.expected_compressed_signature,
+                concatenated,
+                test.expected_compressed_signature,
                 "OTS signature mismatch for '{}'\n  got len:      {}\n  expected len: {}",
-                test.name, concatenated.len(), test.expected_compressed_signature.len()
+                test.name,
+                concatenated.len(),
+                test.expected_compressed_signature.len()
             );
         }
     }
@@ -490,7 +517,8 @@ mod cross_platform {
         let vectors = load_vectors();
 
         for test in &vectors.vectors.wots_signature.tests {
-            let fragments = generate_ots_signature(&test.private_key, &test.molecular_hash).unwrap();
+            let fragments =
+                generate_ots_signature(&test.private_key, &test.molecular_hash).unwrap();
 
             // Compute expected OTS verification address: hash each key chunk 16 times
             // (matching sign iterations 8-n + verify iterations 8+n = 16), then derive the
@@ -511,8 +539,11 @@ mod cross_platform {
             let ots_address = shake256(&digest, 256);
 
             let verified = verify_ots_signature(&fragments, &test.molecular_hash, &ots_address);
-            assert!(verified,
-                "OTS signature must verify for '{}' with OTS address {}", test.name, ots_address);
+            assert!(
+                verified,
+                "OTS signature must verify for '{}' with OTS address {}",
+                test.name, ots_address
+            );
         }
     }
 
@@ -525,11 +556,17 @@ mod cross_platform {
         let vectors = load_vectors();
         let unicode = &vectors.vectors.edge_cases.tests.unicode_handling;
 
-        for (i, (input, expected)) in unicode.inputs.iter().zip(unicode.expected_hashes.iter()).enumerate() {
+        for (i, (input, expected)) in unicode
+            .inputs
+            .iter()
+            .zip(unicode.expected_hashes.iter())
+            .enumerate()
+        {
             let result = shake256(input, 256);
             assert_eq!(
                 &result, expected,
-                "Unicode SHAKE256 mismatch at index {} for input {:?}", i, input
+                "Unicode SHAKE256 mismatch at index {} for input {:?}",
+                i, input
             );
         }
     }
@@ -539,8 +576,12 @@ mod cross_platform {
         let vectors = load_vectors();
 
         for case in &vectors.vectors.edge_cases.tests.boundary_values.cases {
-            assert_eq!(case.input.len(), case.input_length,
-                "Test vector input length mismatch for '{}'", case.description);
+            assert_eq!(
+                case.input.len(),
+                case.input_length,
+                "Test vector input length mismatch for '{}'",
+                case.description
+            );
             let result = shake256(&case.input, 256);
             assert_eq!(
                 result, case.expected_hash,
@@ -561,7 +602,9 @@ mod cross_platform {
                 assert!(
                     (-8..=8).contains(&val),
                     "enumerate_hash value {} at index {} out of [-8, 8] range for '{}'",
-                    val, i, test.name
+                    val,
+                    i,
+                    test.name
                 );
             }
         }
@@ -583,7 +626,8 @@ mod cross_platform {
             Some(&v.position),
             None,
             Some(knishio_client::MlKemParameterSet::MlKem768),
-        ).unwrap_or_else(|e| panic!("ML-KEM768 keygen wallet creation failed: {:?}", e));
+        )
+        .unwrap_or_else(|e| panic!("ML-KEM768 keygen wallet creation failed: {:?}", e));
 
         // libcrux-ml-kem keygen must byte-match the @noble-derived frozen pubkey.
         assert_eq!(
@@ -605,7 +649,8 @@ mod cross_platform {
             Some(&v.position),
             None,
             Some(knishio_client::MlKemParameterSet::MlKem768),
-        ).unwrap_or_else(|e| panic!("ML-KEM768 decrypt wallet creation failed: {:?}", e));
+        )
+        .unwrap_or_else(|e| panic!("ML-KEM768 decrypt wallet creation failed: {:?}", e));
 
         let em = EncryptedMessage {
             cipher_text: v.cipher_text.clone(),
@@ -613,7 +658,9 @@ mod cross_platform {
         };
 
         // libcrux decapsulation + AES-256-GCM must recover the @noble-encapsulated plaintext.
-        let plaintext = wallet.decrypt_message(&em).await
+        let plaintext = wallet
+            .decrypt_message(&em)
+            .await
             .unwrap_or_else(|e| panic!("ML-KEM768 decrypt failed: {:?}", e));
 
         assert_eq!(
@@ -625,7 +672,11 @@ mod cross_platform {
     #[test]
     fn test_mlkem1024_keygen_cross_platform() {
         let vectors = load_vectors();
-        let v = vectors.vectors.mlkem1024.as_ref().expect("mlkem1024 section missing");
+        let v = vectors
+            .vectors
+            .mlkem1024
+            .as_ref()
+            .expect("mlkem1024 section missing");
         let keygen = &v.keygen;
 
         let wallet = Wallet::create(
@@ -635,7 +686,8 @@ mod cross_platform {
             Some(&keygen.position),
             None,
             None,
-        ).unwrap_or_else(|e| panic!("ML-KEM1024 keygen wallet creation failed: {:?}", e));
+        )
+        .unwrap_or_else(|e| panic!("ML-KEM1024 keygen wallet creation failed: {:?}", e));
 
         assert_eq!(
             wallet.pubkey.as_deref(),
@@ -647,7 +699,11 @@ mod cross_platform {
     #[tokio::test]
     async fn test_mlkem1024_decrypt_cross_platform() {
         let vectors = load_vectors();
-        let v = vectors.vectors.mlkem1024.as_ref().expect("mlkem1024 section missing");
+        let v = vectors
+            .vectors
+            .mlkem1024
+            .as_ref()
+            .expect("mlkem1024 section missing");
         let decrypt = &v.decrypt;
 
         let wallet = Wallet::create(
@@ -657,14 +713,17 @@ mod cross_platform {
             Some(&decrypt.position),
             None,
             None,
-        ).unwrap_or_else(|e| panic!("ML-KEM1024 decrypt wallet creation failed: {:?}", e));
+        )
+        .unwrap_or_else(|e| panic!("ML-KEM1024 decrypt wallet creation failed: {:?}", e));
 
         let em = EncryptedMessage {
             cipher_text: decrypt.cipher_text.clone(),
             encrypted_message: decrypt.encrypted_message.clone(),
         };
 
-        let plaintext = wallet.decrypt_message(&em).await
+        let plaintext = wallet
+            .decrypt_message(&em)
+            .await
             .unwrap_or_else(|e| panic!("ML-KEM1024 decrypt failed: {:?}", e));
 
         assert_eq!(
@@ -679,9 +738,19 @@ mod cross_platform {
     // ════════════════════════════════════════════════════════════════════════
 
     /// Build the wallet from `vectors.mlkem768.decrypt` at an explicit parameter set.
-    fn legacy_decrypt_wallet(v: &Mlkem768Decrypt, set: Option<knishio_client::MlKemParameterSet>) -> Wallet {
-        Wallet::create(Some(&v.secret), None, &v.token, Some(&v.position), None, set)
-            .unwrap_or_else(|e| panic!("wallet creation failed: {:?}", e))
+    fn legacy_decrypt_wallet(
+        v: &Mlkem768Decrypt,
+        set: Option<knishio_client::MlKemParameterSet>,
+    ) -> Wallet {
+        Wallet::create(
+            Some(&v.secret),
+            None,
+            &v.token,
+            Some(&v.position),
+            None,
+            set,
+        )
+        .unwrap_or_else(|e| panic!("wallet creation failed: {:?}", e))
     }
 
     fn decoded_len(b64: &str) -> usize {
@@ -713,11 +782,19 @@ mod cross_platform {
             cipher_text: v.cipher_text.clone(),
             encrypted_message: v.encrypted_message.clone(),
         };
-        assert_eq!(decoded_len(&em.cipher_text), 1088, "frozen envelope must be a 768 ciphertext");
+        assert_eq!(
+            decoded_len(&em.cipher_text),
+            1088,
+            "frozen envelope must be a 768 ciphertext"
+        );
 
         // (a) permissive inbound: the 768 identity is derived on demand from the same wallet seed
-        let plaintext = wallet.decrypt_message(&em).await
-            .unwrap_or_else(|e| panic!("default-1024 wallet failed to decrypt the frozen 768 envelope: {:?}", e));
+        let plaintext = wallet.decrypt_message(&em).await.unwrap_or_else(|e| {
+            panic!(
+                "default-1024 wallet failed to decrypt the frozen 768 envelope: {:?}",
+                e
+            )
+        });
 
         assert_eq!(plaintext.as_str(), Some(v.expected_plaintext.as_str()));
     }
@@ -749,7 +826,8 @@ mod cross_platform {
         let vectors = load_vectors();
         let v = &vectors.vectors.mlkem768.decrypt;
 
-        let wallet_768 = legacy_decrypt_wallet(v, Some(knishio_client::MlKemParameterSet::MlKem768));
+        let wallet_768 =
+            legacy_decrypt_wallet(v, Some(knishio_client::MlKemParameterSet::MlKem768));
         let pubkey_768 = wallet_768.pubkey.as_deref().expect("768 wallet pubkey");
         assert_eq!(decoded_len(pubkey_768), 1184);
 
@@ -769,7 +847,9 @@ mod cross_platform {
         );
 
         // Returns the RAW decrypted text — the frozen payload is a JSON-encoded string.
-        let raw = wallet.decrypt_my_message_ml(&map).await
+        let raw = wallet
+            .decrypt_my_message_ml(&map)
+            .await
             .expect("default-1024 wallet must find and decrypt the 768-addressed envelope");
         let parsed: serde_json::Value = serde_json::from_str(&raw)
             .unwrap_or_else(|e| panic!("raw decrypted text is not JSON: {:?} ({})", e, raw));
@@ -838,17 +918,24 @@ mod cross_platform {
         let molecule = knishio_client::Molecule::fromJSON(&json)
             .unwrap_or_else(|e| panic!("legacy 768 molecule deserialization failed: {:?}", e));
 
-        assert_eq!(molecule.molecular_hash.as_deref(), Some(v.expected_molecular_hash.as_str()));
+        assert_eq!(
+            molecule.molecular_hash.as_deref(),
+            Some(v.expected_molecular_hash.as_str())
+        );
 
         let source_wallet = molecule
             .source_wallet
             .clone()
             .expect("molecule.sourceWallet reconstructed");
 
-        let valid = molecule.check(Some(&source_wallet))
+        let valid = molecule
+            .check(Some(&source_wallet))
             .unwrap_or_else(|e| panic!("legacy 768 molecule check failed: {:?}", e));
 
-        assert!(valid, "a 1024-default build must validate a pre-bump 768 molecule");
+        assert!(
+            valid,
+            "a 1024-default build must validate a pre-bump 768 molecule"
+        );
     }
 
     // Declared at the file root: a `#[path]` inside this inline module would resolve
@@ -859,8 +946,12 @@ mod cross_platform {
     fn test_secret_storage_envelope_constant_matches_master_vector() {
         let v: serde_json::Value = serde_json::from_str(VECTORS_JSON).expect("valid vectors JSON");
         let master_payload = &v["vectors"]["secret_storage_envelope"]["tests"][0]["payload"];
-        let parsed_frozen: serde_json::Value = serde_json::from_str(fixtures::FROZEN_TS_ENVELOPE).expect("valid JSON");
-        assert_eq!(&parsed_frozen, master_payload, "inline FROZEN_TS_ENVELOPE must match the master vector");
+        let parsed_frozen: serde_json::Value =
+            serde_json::from_str(fixtures::FROZEN_TS_ENVELOPE).expect("valid JSON");
+        assert_eq!(
+            &parsed_frozen, master_payload,
+            "inline FROZEN_TS_ENVELOPE must match the master vector"
+        );
     }
 
     #[test]
@@ -883,8 +974,7 @@ mod cross_platform {
         let parsed_frozen: serde_json::Value =
             serde_json::from_str(fixtures::FROZEN_JS_1_1_0_RECOVERY_ENVELOPE).expect("valid JSON");
         assert_eq!(
-            &parsed_frozen,
-            &test1["payload"],
+            &parsed_frozen, &test1["payload"],
             "inline FROZEN_JS_1_1_0_RECOVERY_ENVELOPE must match master vector payload"
         );
     }

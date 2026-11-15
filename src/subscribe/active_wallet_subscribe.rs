@@ -3,12 +3,12 @@
 //! Provides real-time notifications for wallet activity, following
 //! the exact patterns from JavaScript ActiveWalletSubscribe.js
 
-use std::sync::Arc;
-use serde_json::Value;
-use async_trait::async_trait;
+use super::{Subscribe, SubscriptionHandle, SubscriptionManager};
 use crate::error::Result;
 use crate::graphql::GraphQLClient;
-use super::{Subscribe, SubscriptionHandle, SubscriptionManager};
+use async_trait::async_trait;
+use serde_json::Value;
+use std::sync::Arc;
 
 /// Active wallet subscription matching JavaScript ActiveWalletSubscribe class
 pub struct ActiveWalletSubscribe {
@@ -22,13 +22,13 @@ impl Subscribe for ActiveWalletSubscribe {
     /// Create new instance (JavaScript constructor pattern)
     fn new(graphql_client: Arc<GraphQLClient>) -> Self {
         let subscription_manager = SubscriptionManager::new(graphql_client.clone());
-        
+
         Self {
             graphql_client,
             subscription_manager,
         }
     }
-    
+
     /// Get GraphQL subscription query (matches JavaScript $__subscribe)
     fn get_subscription_query(&self) -> &'static str {
         r#"
@@ -71,19 +71,19 @@ impl Subscribe for ActiveWalletSubscribe {
         }
         "#
     }
-    
+
     /// Execute subscription (JavaScript execute() pattern)
     async fn execute(
-        &self, 
-        variables: Value, 
-        closure: Box<dyn Fn(Value) + Send + Sync>
+        &self,
+        variables: Value,
+        closure: Box<dyn Fn(Value) + Send + Sync>,
     ) -> Result<SubscriptionHandle> {
         // Create subscription request (JavaScript createSubscribe() pattern)
         let request = self.subscription_manager.create_subscribe_request(
             self.get_subscription_query(),
-            self.compiled_variables(Some(variables))
+            self.compiled_variables(Some(variables)),
         );
-        
+
         // Execute subscription (JavaScript client.subscribe() pattern)
         self.subscription_manager.subscribe(request, closure).await
     }
@@ -92,12 +92,12 @@ impl Subscribe for ActiveWalletSubscribe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_active_wallet_subscribe_creation() {
         let client = Arc::new(GraphQLClient::new("ws://localhost:8080"));
         let subscription = ActiveWalletSubscribe::new(client);
-        
+
         let query = subscription.get_subscription_query();
         assert!(query.contains("onActiveWallet"));
         assert!(query.contains("$bundle: String!"));

@@ -129,7 +129,9 @@ pub(crate) fn assign_meta(meta: &mut Vec<MetaItem>, key: &str, value: impl Into<
 
 /// The value of `key` in a meta list (JS `Dot.get(meta, key)` on a meta object).
 pub(crate) fn meta_value<'a>(meta: &'a [MetaItem], key: &str) -> Option<&'a str> {
-    meta.iter().find(|item| item.key == key).and_then(|item| item.value.as_deref())
+    meta.iter()
+        .find(|item| item.key == key)
+        .and_then(|item| item.value.as_deref())
 }
 
 // Re-export TokenUnit from the dedicated token_unit module
@@ -255,7 +257,7 @@ mod tests {
         assert_eq!(Isotope::from_str("V"), Some(Isotope::V));
         assert_eq!(Isotope::from_str("X"), None);
     }
-    
+
     #[test]
     fn test_meta_item() {
         let meta = MetaItem::new("key", "value");
@@ -266,7 +268,10 @@ mod tests {
     #[test]
     fn test_meta_item_serde_keeps_null_and_empty_apart() {
         let items = vec![
-            MetaItem { key: "n".to_string(), value: None },
+            MetaItem {
+                key: "n".to_string(),
+                value: None,
+            },
             MetaItem::new("e", ""),
         ];
         let json = serde_json::to_string(&items).unwrap();
@@ -274,13 +279,13 @@ mod tests {
         let back: Vec<MetaItem> = serde_json::from_str(&json).unwrap();
         assert_eq!(back, items);
     }
-    
+
     #[test]
     fn test_isotope_serialization() {
         let isotope = Isotope::V;
         let json = serde_json::to_string(&isotope).unwrap();
         assert_eq!(json, "\"V\"");
-        
+
         let deserialized: Isotope = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, isotope);
     }
@@ -290,7 +295,7 @@ mod tests {
 pub struct AtomJsonOptions {
     /// Include OTS signature fragments (default: true)
     pub include_ots_fragments: bool,
-    /// Validate required fields before serialization (default: false) 
+    /// Validate required fields before serialization (default: false)
     pub validate_fields: bool,
 }
 

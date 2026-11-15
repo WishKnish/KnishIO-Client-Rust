@@ -17,7 +17,9 @@ use knishio_client::wallet::{MlKemParameterSet, OtsVersion};
 use knishio_client::KnishIOClient;
 
 fn test_url() -> Option<String> {
-    std::env::var("CIPHERHASH_TEST_URL").ok().filter(|u| !u.is_empty())
+    std::env::var("CIPHERHASH_TEST_URL")
+        .ok()
+        .filter(|u| !u.is_empty())
 }
 
 fn param_set() -> MlKemParameterSet {
@@ -35,12 +37,25 @@ fn ots_version() -> OtsVersion {
 }
 
 fn assert_session_ots_version(token: &knishio_client::auth::AuthToken) {
-    let wallet = token.get_wallet().expect("the session is bound to a wallet");
-    assert_eq!(wallet.ots_version, ots_version(), "the session wallet carries the requested OTS version");
+    let wallet = token
+        .get_wallet()
+        .expect("the session is bound to a wallet");
+    assert_eq!(
+        wallet.ots_version,
+        ots_version(),
+        "the session wallet carries the requested OTS version"
+    );
 }
 
 fn client_for(uri: &str) -> KnishIOClient {
-    let mut client = KnishIOClient::new(uri, Some("public".to_string()), None, None, None, Some(false));
+    let mut client = KnishIOClient::new(
+        uri,
+        Some("public".to_string()),
+        None,
+        None,
+        None,
+        Some(false),
+    );
     client.set_mlkem_parameter_set(param_set());
     client.set_ots_version(ots_version());
     client

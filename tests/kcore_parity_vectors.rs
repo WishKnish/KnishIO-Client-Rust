@@ -20,7 +20,10 @@ const CASES: usize = 16;
 
 /// A missing fixture fails the test: the vendored copy ships with the crate.
 fn cases() -> Result<Vec<Value>, Box<dyn Error>> {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/kcore-parity-vectors.json");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/kcore-parity-vectors.json"
+    );
     let root: Value = serde_json::from_str(&std::fs::read_to_string(path)?)?;
     let tests = root["vectors"]["molecules"]["tests"]
         .as_array()
@@ -31,11 +34,15 @@ fn cases() -> Result<Vec<Value>, Box<dyn Error>> {
 }
 
 fn text<'a>(value: &'a Value, field: &str) -> Result<&'a str, Box<dyn Error>> {
-    value[field].as_str().ok_or_else(|| format!("field {field} missing").into())
+    value[field]
+        .as_str()
+        .ok_or_else(|| format!("field {field} missing").into())
 }
 
 fn load(case: &Value) -> Result<Molecule, Box<dyn Error>> {
-    Ok(Molecule::fromJSON(&serde_json::to_string(&case["molecule"])?)?)
+    Ok(Molecule::fromJSON(&serde_json::to_string(
+        &case["molecule"],
+    )?)?)
 }
 
 fn ots_version(case: &Value) -> Result<OtsVersion, Box<dyn Error>> {
@@ -63,9 +70,15 @@ fn expected_fragments(case: &Value) -> Result<Vec<Option<String>>, Box<dyn Error
 #[test]
 fn backend_matches_build() {
     #[cfg(feature = "kcore")]
-    assert!(knishio_client::kcore::available(), "kcore feature compiled in but kcore is not available");
+    assert!(
+        knishio_client::kcore::available(),
+        "kcore feature compiled in but kcore is not available"
+    );
     #[cfg(not(feature = "kcore"))]
-    assert!(!knishio_client::kcore::available(), "kcore reported available without the kcore feature");
+    assert!(
+        !knishio_client::kcore::available(),
+        "kcore reported available without the kcore feature"
+    );
 }
 
 /// (a) Each JS-signed molecule hashes to its declared hash and its OTS signature verifies.
@@ -76,10 +89,21 @@ fn molecules_verify() -> TestResult {
         let name = text(&case, "name")?;
         let molecule = load(&case)?;
         let hash = Atom::hash_atoms(&molecule.atoms, "base17")?;
-        assert_eq!(hash, expected_hash(&case)?, "{name}: recomputed molecular hash");
-        assert_eq!(molecule.molecular_hash.as_deref(), Some(hash.as_str()), "{name}: declared molecular hash");
+        assert_eq!(
+            hash,
+            expected_hash(&case)?,
+            "{name}: recomputed molecular hash"
+        );
+        assert_eq!(
+            molecule.molecular_hash.as_deref(),
+            Some(hash.as_str()),
+            "{name}: declared molecular hash"
+        );
         let ots = CheckMolecule::new(&molecule)?.ots();
-        assert!(matches!(ots, Ok(true)), "{name}: OTS verification, got {ots:?}");
+        assert!(
+            matches!(ots, Ok(true)),
+            "{name}: OTS verification, got {ots:?}"
+        );
         ran += 1;
     }
     assert_eq!(ran, CASES, "cases verified");
@@ -112,9 +136,21 @@ fn resigning_reproduces_js_fragments() -> TestResult {
             atom.ots_fragment = None;
         }
         molecule.sign(None, false, true)?;
-        assert_eq!(molecule.molecular_hash.as_deref(), Some(expected_hash(&case)?), "{name}: re-signed molecular hash");
-        let actual: Vec<Option<String>> = molecule.atoms.iter().map(|atom| atom.ots_fragment.clone()).collect();
-        assert_eq!(actual, expected_fragments(&case)?, "{name}: re-signed fragments");
+        assert_eq!(
+            molecule.molecular_hash.as_deref(),
+            Some(expected_hash(&case)?),
+            "{name}: re-signed molecular hash"
+        );
+        let actual: Vec<Option<String>> = molecule
+            .atoms
+            .iter()
+            .map(|atom| atom.ots_fragment.clone())
+            .collect();
+        assert_eq!(
+            actual,
+            expected_fragments(&case)?,
+            "{name}: re-signed fragments"
+        );
         ran += 1;
     }
     assert_eq!(ran, CASES, "cases re-signed");

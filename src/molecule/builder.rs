@@ -2,7 +2,7 @@
 //!
 //! Production-grade molecule construction using Rust 2025 type-level programming patterns.
 //! Ensures correct molecular transaction composition at compile time with zero runtime overhead.
-//! 
+//!
 //! # Features
 //!
 //! - **Type-Level State Machine**: Compile-time validation of construction states
@@ -41,33 +41,33 @@
 
 use std::marker::PhantomData;
 
-use crate::molecule::Molecule;
 use crate::atom::Atom;
-use crate::wallet::Wallet;
-use crate::types::{Isotope, MetaItem};
-use crate::meta::AtomMeta;
 use crate::error::{KnishIOError, Result};
+use crate::meta::AtomMeta;
+use crate::molecule::Molecule;
+use crate::types::{Isotope, MetaItem};
+use crate::wallet::Wallet;
 
 /// Type-level states for compile-time validation
 pub mod states {
     /// Empty molecule - no configuration yet
     pub struct Empty;
-    
+
     /// Has source wallet configured
     pub struct WithSourceWallet;
-    
+
     /// Has atoms added to the molecule
     pub struct WithAtoms;
-    
+
     /// Ready for signing - all required components present
     pub struct ReadyToSign;
-    
+
     /// Signed molecule - ready to build
     pub struct Signed;
 }
 
 /// Type-safe molecule builder using phantom types for compile-time validation
-/// 
+///
 /// This builder ensures that molecules are constructed correctly and all required
 /// components are present before allowing finalization. The type system prevents
 /// invalid states from being represented.
@@ -80,8 +80,7 @@ pub struct TypeSafeMoleculeBuilder<State> {
 }
 
 /// Parameters for creating a Value isotope atom
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ValueAtomParams {
     pub position: String,
     pub wallet_address: String,
@@ -90,7 +89,6 @@ pub struct ValueAtomParams {
     pub batch_id: Option<String>,
     pub meta: Option<Vec<MetaItem>>,
 }
-
 
 /// Parameters for creating a Metadata isotope atom
 #[derive(Debug, Clone)]
@@ -211,10 +209,13 @@ impl TypeSafeMoleculeBuilder<states::Empty> {
     /// # Returns
     ///
     /// Builder in WithSourceWallet state
-    pub fn with_source_wallet(mut self, wallet: Wallet) -> TypeSafeMoleculeBuilder<states::WithSourceWallet> {
+    pub fn with_source_wallet(
+        mut self,
+        wallet: Wallet,
+    ) -> TypeSafeMoleculeBuilder<states::WithSourceWallet> {
         self.molecule.source_wallet = Some(wallet.clone());
         self.molecule.bundle = wallet.bundle.clone();
-        
+
         TypeSafeMoleculeBuilder {
             molecule: self.molecule,
             secret: self.secret,
@@ -281,10 +282,21 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
     /// # Returns
     ///
     /// Builder in WithAtoms state
-    pub fn add_value_atom(self, params: ValueAtomParams) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
-        self.add_atom_internal(Isotope::V, params.position, params.wallet_address, 
-                              params.token, params.value, params.batch_id, 
-                              None, None, params.meta)
+    pub fn add_value_atom(
+        self,
+        params: ValueAtomParams,
+    ) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
+        self.add_atom_internal(
+            Isotope::V,
+            params.position,
+            params.wallet_address,
+            params.token,
+            params.value,
+            params.batch_id,
+            None,
+            None,
+            params.meta,
+        )
     }
 
     /// Add a Metadata isotope atom to the molecule
@@ -296,10 +308,21 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
     /// # Returns
     ///
     /// Builder in WithAtoms state
-    pub fn add_meta_atom(self, params: MetaAtomParams) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
-        self.add_atom_internal(Isotope::M, params.position, params.wallet_address,
-                              params.token, None, params.batch_id,
-                              Some(params.meta_type), Some(params.meta_id), Some(params.meta))
+    pub fn add_meta_atom(
+        self,
+        params: MetaAtomParams,
+    ) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
+        self.add_atom_internal(
+            Isotope::M,
+            params.position,
+            params.wallet_address,
+            params.token,
+            None,
+            params.batch_id,
+            Some(params.meta_type),
+            Some(params.meta_id),
+            Some(params.meta),
+        )
     }
 
     /// Add an Identity isotope atom to the molecule
@@ -311,10 +334,21 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
     /// # Returns
     ///
     /// Builder in WithAtoms state
-    pub fn add_identity_atom(self, params: IdentityAtomParams) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
-        self.add_atom_internal(Isotope::I, params.position, params.wallet_address,
-                              params.token, None, params.batch_id,
-                              None, None, Some(params.meta))
+    pub fn add_identity_atom(
+        self,
+        params: IdentityAtomParams,
+    ) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
+        self.add_atom_internal(
+            Isotope::I,
+            params.position,
+            params.wallet_address,
+            params.token,
+            None,
+            params.batch_id,
+            None,
+            None,
+            Some(params.meta),
+        )
     }
 
     /// Add a Token Request isotope atom to the molecule
@@ -326,31 +360,75 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
     /// # Returns
     ///
     /// Builder in WithAtoms state
-    pub fn add_token_request_atom(self, params: TokenRequestAtomParams) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
-        self.add_atom_internal(Isotope::T, params.position, params.wallet_address,
-                              params.token, None, params.batch_id,
-                              None, None, Some(params.meta))
+    pub fn add_token_request_atom(
+        self,
+        params: TokenRequestAtomParams,
+    ) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
+        self.add_atom_internal(
+            Isotope::T,
+            params.position,
+            params.wallet_address,
+            params.token,
+            None,
+            params.batch_id,
+            None,
+            None,
+            Some(params.meta),
+        )
     }
 
     /// Add a Buffer Deposit isotope atom (B-isotope) to the molecule
-    pub fn add_buffer_deposit_atom(self, params: BufferDepositAtomParams) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
-        self.add_atom_internal(Isotope::B, params.position, params.wallet_address,
-                              params.token, Some(params.value), params.batch_id,
-                              params.meta_type, params.meta_id, None)
+    pub fn add_buffer_deposit_atom(
+        self,
+        params: BufferDepositAtomParams,
+    ) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
+        self.add_atom_internal(
+            Isotope::B,
+            params.position,
+            params.wallet_address,
+            params.token,
+            Some(params.value),
+            params.batch_id,
+            params.meta_type,
+            params.meta_id,
+            None,
+        )
     }
 
     /// Add a Buffer Withdraw isotope atom (B-isotope) to the molecule
-    pub fn add_buffer_withdraw_atom(self, params: BufferWithdrawAtomParams) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
-        self.add_atom_internal(Isotope::B, params.position, params.wallet_address,
-                              params.token, Some(params.value), params.batch_id,
-                              params.meta_type, params.meta_id, None)
+    pub fn add_buffer_withdraw_atom(
+        self,
+        params: BufferWithdrawAtomParams,
+    ) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
+        self.add_atom_internal(
+            Isotope::B,
+            params.position,
+            params.wallet_address,
+            params.token,
+            Some(params.value),
+            params.batch_id,
+            params.meta_type,
+            params.meta_id,
+            None,
+        )
     }
 
     /// Add a Fusion isotope atom (F-isotope) to the molecule
-    pub fn add_fusion_atom(self, params: FusionAtomParams) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
-        self.add_atom_internal(Isotope::F, params.position, params.wallet_address,
-                              params.token, params.value, params.batch_id,
-                              params.meta_type, params.meta_id, None)
+    pub fn add_fusion_atom(
+        self,
+        params: FusionAtomParams,
+    ) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
+        self.add_atom_internal(
+            Isotope::F,
+            params.position,
+            params.wallet_address,
+            params.token,
+            params.value,
+            params.batch_id,
+            params.meta_type,
+            params.meta_id,
+            None,
+        )
     }
 
     /// Add a complete stackable token transfer (UTXO pattern with batch_id).
@@ -369,10 +447,15 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
     /// # Returns
     ///
     /// Builder in WithAtoms state with 2-3 V-isotope atoms added
-    pub fn add_stackable_transfer(mut self, params: StackableTransferParams) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
+    pub fn add_stackable_transfer(
+        mut self,
+        params: StackableTransferParams,
+    ) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
         // Clone the wallets so we can split token_units without disturbing the builder's
         // (which are returned for signing — signing doesn't depend on token_units).
-        let mut source_wallet = self.source_wallet.clone()
+        let mut source_wallet = self
+            .source_wallet
+            .clone()
             .ok_or_else(|| KnishIOError::custom("Source wallet is required"))?;
 
         let source_balance = source_wallet.balance_as_i128();
@@ -389,8 +472,9 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
         // so the validator's Phase 2a moves per-unit ownership (it reads SENT from the source atom
         // and KEPT from the remainder atom). Fungible (units empty) emits no meta — unchanged.
         let mut remainder_wallet = if remainder > 0 {
-            Some(self.remainder_wallet.clone()
-                .ok_or_else(|| KnishIOError::custom("Remainder wallet required when transfer < source balance"))?)
+            Some(self.remainder_wallet.clone().ok_or_else(|| {
+                KnishIOError::custom("Remainder wallet required when transfer < source balance")
+            })?)
         } else {
             None
         };
@@ -419,7 +503,8 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
             source_wallet.address.as_deref().unwrap_or(""),
             Isotope::V,
             &params.token,
-        ).with_optional_fields(
+        )
+        .with_optional_fields(
             None, // Set via string below for i128 precision
             params.batch_id.as_deref(),
             None,
@@ -435,7 +520,8 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
             &params.recipient_address,
             Isotope::V,
             &params.token,
-        ).with_optional_fields(
+        )
+        .with_optional_fields(
             None,
             params.batch_id.as_deref(),
             Some("walletBundle"),
@@ -454,7 +540,8 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
                     rem.address.as_deref().unwrap_or(""),
                     Isotope::V,
                     &params.token,
-                ).with_optional_fields(
+                )
+                .with_optional_fields(
                     None,
                     params.batch_id.as_deref(),
                     Some("walletBundle"),
@@ -488,12 +575,7 @@ impl TypeSafeMoleculeBuilder<states::WithSourceWallet> {
         meta_id: Option<String>,
         meta: Option<Vec<MetaItem>>,
     ) -> Result<TypeSafeMoleculeBuilder<states::WithAtoms>> {
-        let atom = Atom::new(
-            &position,
-            &wallet_address,
-            isotope,
-            &token,
-        ).with_optional_fields(
+        let atom = Atom::new(&position, &wallet_address, isotope, &token).with_optional_fields(
             value,
             batch_id.as_deref(),
             meta_type.as_deref(),
@@ -529,7 +611,8 @@ impl TypeSafeMoleculeBuilder<states::WithAtoms> {
             &params.wallet_address,
             Isotope::V,
             &params.token,
-        ).with_optional_fields(
+        )
+        .with_optional_fields(
             params.value,
             params.batch_id.as_deref(),
             None,
@@ -556,7 +639,8 @@ impl TypeSafeMoleculeBuilder<states::WithAtoms> {
             &params.wallet_address,
             Isotope::M,
             &params.token,
-        ).with_optional_fields(
+        )
+        .with_optional_fields(
             None,
             params.batch_id.as_deref(),
             Some(&params.meta_type),
@@ -583,7 +667,8 @@ impl TypeSafeMoleculeBuilder<states::WithAtoms> {
             &params.wallet_address,
             Isotope::I,
             &params.token,
-        ).with_optional_fields(
+        )
+        .with_optional_fields(
             None,
             params.batch_id.as_deref(),
             None,
@@ -610,7 +695,8 @@ impl TypeSafeMoleculeBuilder<states::WithAtoms> {
             &params.wallet_address,
             Isotope::T,
             &params.token,
-        ).with_optional_fields(
+        )
+        .with_optional_fields(
             None,
             params.batch_id.as_deref(),
             None,
@@ -629,7 +715,8 @@ impl TypeSafeMoleculeBuilder<states::WithAtoms> {
             &params.wallet_address,
             Isotope::B,
             &params.token,
-        ).with_optional_fields(
+        )
+        .with_optional_fields(
             Some(params.value),
             params.batch_id.as_deref(),
             params.meta_type.as_deref(),
@@ -648,7 +735,8 @@ impl TypeSafeMoleculeBuilder<states::WithAtoms> {
             &params.wallet_address,
             Isotope::B,
             &params.token,
-        ).with_optional_fields(
+        )
+        .with_optional_fields(
             Some(params.value),
             params.batch_id.as_deref(),
             params.meta_type.as_deref(),
@@ -667,7 +755,8 @@ impl TypeSafeMoleculeBuilder<states::WithAtoms> {
             &params.wallet_address,
             Isotope::F,
             &params.token,
-        ).with_optional_fields(
+        )
+        .with_optional_fields(
             params.value,
             params.batch_id.as_deref(),
             params.meta_type.as_deref(),
@@ -685,7 +774,9 @@ impl TypeSafeMoleculeBuilder<states::WithAtoms> {
     ///
     /// Result containing builder in same state with remainder atom added
     pub fn add_remainder_atom(mut self) -> Result<Self> {
-        let remainder_wallet = self.remainder_wallet.as_ref()
+        let remainder_wallet = self
+            .remainder_wallet
+            .as_ref()
             .ok_or_else(|| KnishIOError::custom("Remainder wallet not configured"))?;
 
         // Calculate the next position for the remainder atom
@@ -693,11 +784,15 @@ impl TypeSafeMoleculeBuilder<states::WithAtoms> {
 
         let remainder_atom = Atom::new(
             &next_position,
-            remainder_wallet.address.as_ref()
-                .ok_or_else(|| KnishIOError::custom("Remainder wallet has no address"))?.as_str(),
+            remainder_wallet
+                .address
+                .as_ref()
+                .ok_or_else(|| KnishIOError::custom("Remainder wallet has no address"))?
+                .as_str(),
             Isotope::V,
             &remainder_wallet.token,
-        ).with_optional_fields(
+        )
+        .with_optional_fields(
             Some(0.0), // Remainder value will be calculated during signing
             None,
             None,
@@ -742,7 +837,9 @@ impl TypeSafeMoleculeBuilder<states::ReadyToSign> {
     ///
     /// Result containing builder in Signed state
     pub async fn sign(mut self) -> Result<TypeSafeMoleculeBuilder<states::Signed>> {
-        let secret = self.secret.as_ref()
+        let secret = self
+            .secret
+            .as_ref()
             .ok_or_else(|| KnishIOError::custom("Secret is required for signing"))?;
 
         // Sign the molecule using the existing signing logic
@@ -766,7 +863,9 @@ impl TypeSafeMoleculeBuilder<states::ReadyToSign> {
     ///
     /// Result containing builder in Signed state
     pub fn sign_sync(mut self) -> Result<TypeSafeMoleculeBuilder<states::Signed>> {
-        let secret = self.secret.as_ref()
+        let secret = self
+            .secret
+            .as_ref()
             .ok_or_else(|| KnishIOError::custom("Secret is required for signing"))?;
 
         // Set the secret on the molecule
@@ -779,11 +878,8 @@ impl TypeSafeMoleculeBuilder<states::ReadyToSign> {
 
         // Call the synchronous sign method directly; compressed (base64) as JS sign() and
         // the async sign() do
-        self.molecule.sign(
-            self.molecule.bundle.clone(),
-            false,
-            true,
-        )?;
+        self.molecule
+            .sign(self.molecule.bundle.clone(), false, true)?;
 
         Ok(TypeSafeMoleculeBuilder {
             molecule: self.molecule,
@@ -819,13 +915,16 @@ impl TypeSafeMoleculeBuilder<states::ReadyToSign> {
         }
 
         // Check for duplicate positions
-        let positions: Vec<_> = self.molecule.atoms.iter()
+        let positions: Vec<_> = self
+            .molecule
+            .atoms
+            .iter()
             .map(|atom| &atom.position)
             .collect();
         let mut unique_positions = positions.clone();
         unique_positions.sort();
         unique_positions.dedup();
-        
+
         if positions.len() != unique_positions.len() {
             return Err(KnishIOError::custom("Duplicate atom positions detected"));
         }
@@ -914,7 +1013,10 @@ impl<State> TypeSafeMoleculeBuilder<State> {
     ///
     /// True if the isotope is present, false otherwise
     pub fn has_isotope(&self, isotope: Isotope) -> bool {
-        self.molecule.atoms.iter().any(|atom| atom.isotope == isotope)
+        self.molecule
+            .atoms
+            .iter()
+            .any(|atom| atom.isotope == isotope)
     }
 
     /// Get atoms of a specific isotope type
@@ -927,7 +1029,9 @@ impl<State> TypeSafeMoleculeBuilder<State> {
     ///
     /// Vector of atoms matching the isotope type
     pub fn get_atoms_by_isotope(&self, isotope: Isotope) -> Vec<&Atom> {
-        self.molecule.atoms.iter()
+        self.molecule
+            .atoms
+            .iter()
             .filter(|atom| atom.isotope == isotope)
             .collect()
     }
@@ -941,14 +1045,8 @@ mod tests {
     #[tokio::test]
     async fn test_type_safe_builder_basic_flow() {
         // Create test wallet
-        let wallet = Wallet::create(
-            Some("test-secret-12345"),
-            None,
-            "TEST",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let wallet =
+            Wallet::create(Some("test-secret-12345"), None, "TEST", None, None, None).unwrap();
 
         // Build molecule using type-safe builder
         let molecule = TypeSafeMoleculeBuilder::new("test-secret")
@@ -978,8 +1076,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_type_safe_builder_with_remainder() {
-        let source_wallet = Wallet::create(Some("source-secret"), None, "TEST", None, None, None).unwrap();
-        let remainder_wallet = Wallet::create(Some("remainder-secret"), None, "TEST", None, None, None).unwrap();
+        let source_wallet =
+            Wallet::create(Some("source-secret"), None, "TEST", None, None, None).unwrap();
+        let remainder_wallet =
+            Wallet::create(Some("remainder-secret"), None, "TEST", None, None, None).unwrap();
 
         let molecule = TypeSafeMoleculeBuilder::new("test-secret")
             .with_source_wallet(source_wallet.clone())
@@ -1063,7 +1163,7 @@ mod tests {
 
         // Validation should pass
         assert!(builder.validate().is_ok());
-        
+
         // Check utility functions
         assert_eq!(builder.atom_count(), 1);
         assert!(builder.has_isotope(Isotope::V));
@@ -1248,14 +1348,8 @@ mod tests {
         // Verify synchronous signing works without tokio runtime.
         // Uses C-isotope (token creation) which has minimal validation requirements,
         // avoiding the M-isotope "USER" token + ContinuID I-atom dependency.
-        let wallet = Wallet::create(
-            Some("offline-secret"),
-            None,
-            "MYTOKEN",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let wallet =
+            Wallet::create(Some("offline-secret"), None, "MYTOKEN", None, None, None).unwrap();
 
         let signed = TypeSafeMoleculeBuilder::new("offline-secret")
             .with_source_wallet(wallet.clone())
@@ -1277,15 +1371,24 @@ mod tests {
 
         let molecule = signed.as_molecule();
         // Verify that sign_sync produced a molecular hash
-        assert!(molecule.molecular_hash.is_some(), "Should have molecular hash");
+        assert!(
+            molecule.molecular_hash.is_some(),
+            "Should have molecular hash"
+        );
         // Verify that OTS fragments were generated and distributed
-        assert!(molecule.atoms[0].ots_fragment.is_some(), "First atom should have OTS fragment");
+        assert!(
+            molecule.atoms[0].ots_fragment.is_some(),
+            "First atom should have OTS fragment"
+        );
         // Verify the hash is a proper base17 string (non-empty)
         let hash = molecule.molecular_hash.as_ref().unwrap();
         assert!(!hash.is_empty(), "Molecular hash should not be empty");
         // The fragments are compressed (base64), as JS sign() writes them
         assert!(
-            molecule.atoms[0].ots_fragment.as_deref().is_some_and(|f| !f.chars().all(|c| c.is_ascii_hexdigit())),
+            molecule.atoms[0]
+                .ots_fragment
+                .as_deref()
+                .is_some_and(|f| !f.chars().all(|c| c.is_ascii_hexdigit())),
             "sign_sync() must compress the OTS"
         );
     }
@@ -1294,8 +1397,15 @@ mod tests {
     fn rs3_ready_to_sign() -> Result<TypeSafeMoleculeBuilder<states::ReadyToSign>> {
         let secret = crate::crypto::generate_secret("fleet-audit-2026-11");
         let wallet = Wallet::new_with_ots_version(
-            Some(&secret), None, Some("MYTOKEN"), None, Some(&"aa".repeat(32)),
-            None, None, None, crate::wallet::OtsVersion::V1,
+            Some(&secret),
+            None,
+            Some("MYTOKEN"),
+            None,
+            Some(&"aa".repeat(32)),
+            None,
+            None,
+            None,
+            crate::wallet::OtsVersion::V1,
         )?;
         let mut builder = TypeSafeMoleculeBuilder::new(secret)
             .with_source_wallet(wallet.clone())
@@ -1317,7 +1427,11 @@ mod tests {
     }
 
     fn fragments(molecule: &Molecule) -> String {
-        molecule.atoms.iter().filter_map(|a| a.ots_fragment.clone()).collect()
+        molecule
+            .atoms
+            .iter()
+            .filter_map(|a| a.ots_fragment.clone())
+            .collect()
     }
 
     #[tokio::test]
@@ -1329,28 +1443,32 @@ mod tests {
         let sync_fragments = fragments(&sync_signed);
 
         // Printed by the JS reference `Molecule.signSync()` for the same atom (KNISHIO_KCORE=off).
-        assert_eq!(sync_signed.molecular_hash.as_deref(), Some("0570gc78bgd4d2a89f76e2ec9e1714f230ec766a3dc7edc13aabg5fd59246dga"));
-        assert!(!sync_fragments.chars().all(|c| c.is_ascii_hexdigit()), "sign_sync() compresses (base64) as JS does");
+        assert_eq!(
+            sync_signed.molecular_hash.as_deref(),
+            Some("0570gc78bgd4d2a89f76e2ec9e1714f230ec766a3dc7edc13aabg5fd59246dga")
+        );
+        assert!(
+            !sync_fragments.chars().all(|c| c.is_ascii_hexdigit()),
+            "sign_sync() compresses (base64) as JS does"
+        );
         assert_eq!(sync_fragments.len(), 1368);
         assert_eq!(
             hex::encode(Sha256::digest(sync_fragments.as_bytes())),
             "bfd8559954f9f50666151a2990d2ac1abfc8e5429618d56372207171ad3cf0c2"
         );
-        assert_eq!(sync_fragments, fragments(&async_signed), "sign_sync() and sign().await sign the same bytes");
+        assert_eq!(
+            sync_fragments,
+            fragments(&async_signed),
+            "sign_sync() and sign().await sign the same bytes"
+        );
         Ok(())
     }
 
     #[test]
     fn test_json_roundtrip_signed() {
         // Verify toJSON/fromJSON roundtrip preserves signature
-        let wallet = Wallet::create(
-            Some("roundtrip-secret"),
-            None,
-            "TEST",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let wallet =
+            Wallet::create(Some("roundtrip-secret"), None, "TEST", None, None, None).unwrap();
 
         let original = TypeSafeMoleculeBuilder::new("roundtrip-secret")
             .with_source_wallet(wallet.clone())
@@ -1373,12 +1491,19 @@ mod tests {
         let json_str = original.toJSON().unwrap();
         let restored = crate::molecule::Molecule::fromJSON(&json_str).unwrap();
 
-        assert_eq!(original.molecular_hash, restored.molecular_hash,
-            "Molecular hash should survive roundtrip");
-        assert_eq!(original.atoms.len(), restored.atoms.len(),
-            "Atom count should match");
-        assert_eq!(original.atoms[0].ots_fragment, restored.atoms[0].ots_fragment,
-            "OTS fragment should survive roundtrip");
+        assert_eq!(
+            original.molecular_hash, restored.molecular_hash,
+            "Molecular hash should survive roundtrip"
+        );
+        assert_eq!(
+            original.atoms.len(),
+            restored.atoms.len(),
+            "Atom count should match"
+        );
+        assert_eq!(
+            original.atoms[0].ots_fragment, restored.atoms[0].ots_fragment,
+            "OTS fragment should survive roundtrip"
+        );
     }
 
     // ── GAP-07-009: Stackable token transfer tests ──────────────────────
@@ -1386,14 +1511,8 @@ mod tests {
     #[test]
     fn test_stackable_transfer() {
         // Create source wallet with balance "1000" and batch_id
-        let mut source_wallet = Wallet::create(
-            Some("stackable-secret"),
-            None,
-            "TICKETS",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let mut source_wallet =
+            Wallet::create(Some("stackable-secret"), None, "TICKETS", None, None, None).unwrap();
         source_wallet.set_balance_i128(1000);
         source_wallet.batch_id = Some("batch-001".to_string());
 
@@ -1405,17 +1524,12 @@ mod tests {
             Some("W2"),
             None,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         // Create recipient wallet
-        let recipient_wallet = Wallet::create(
-            Some("recipient-secret"),
-            None,
-            "TICKETS",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let recipient_wallet =
+            Wallet::create(Some("recipient-secret"), None, "TICKETS", None, None, None).unwrap();
 
         let builder = TypeSafeMoleculeBuilder::new("stackable-secret")
             .with_source_wallet(source_wallet.clone())
@@ -1452,15 +1566,17 @@ mod tests {
         assert_eq!(atoms[2].batch_id, Some("batch-001".to_string()));
 
         // Sign and verify
-        let signed = builder
-            .ready_to_sign()
-            .unwrap()
-            .sign_sync()
-            .unwrap();
+        let signed = builder.ready_to_sign().unwrap().sign_sync().unwrap();
 
         let molecule = signed.as_molecule();
-        assert!(molecule.molecular_hash.is_some(), "Should have molecular hash");
-        assert!(molecule.atoms[0].ots_fragment.is_some(), "Should have OTS fragment");
+        assert!(
+            molecule.molecular_hash.is_some(),
+            "Should have molecular hash"
+        );
+        assert!(
+            molecule.atoms[0].ots_fragment.is_some(),
+            "Should have OTS fragment"
+        );
     }
 
     #[test]
@@ -1477,8 +1593,15 @@ mod tests {
             TokenUnit::new("u2".to_string(), "Unit Two".to_string(), None),
         ];
 
-        let remainder_wallet =
-            Wallet::create(Some("stk-units-secret"), None, "NFT", Some("W2"), None, None).unwrap();
+        let remainder_wallet = Wallet::create(
+            Some("stk-units-secret"),
+            None,
+            "NFT",
+            Some("W2"),
+            None,
+            None,
+        )
+        .unwrap();
         let recipient_wallet =
             Wallet::create(Some("recipient-secret"), None, "NFT", None, None, None).unwrap();
 
@@ -1503,12 +1626,22 @@ mod tests {
         assert_eq!(atoms[1].value, Some("1".to_string()));
         assert_eq!(atoms[2].value, Some("1".to_string()));
 
-        let units_of = |i: usize| atoms[i].meta.iter().find(|m| m.key == "tokenUnits").and_then(|m| m.value.clone());
+        let units_of = |i: usize| {
+            atoms[i]
+                .meta
+                .iter()
+                .find(|m| m.key == "tokenUnits")
+                .and_then(|m| m.value.clone())
+        };
 
         // SENT (u1) on the source atom — and NOT the kept u2.
         let src = units_of(0).expect("source atom carries tokenUnits");
         assert!(src.contains("u1"), "source SENT contains u1: {}", src);
-        assert!(!src.contains("u2"), "source SENT excludes the kept u2: {}", src);
+        assert!(
+            !src.contains("u2"),
+            "source SENT excludes the kept u2: {}",
+            src
+        );
 
         // SENT (u1) on the recipient atom too (cross-SDK wire form).
         let rec = units_of(1).expect("recipient atom carries tokenUnits");
@@ -1517,30 +1650,22 @@ mod tests {
         // KEPT (u2) on the remainder atom — and NOT the sent u1.
         let rem = units_of(2).expect("remainder atom carries tokenUnits");
         assert!(rem.contains("u2"), "remainder KEPT contains u2: {}", rem);
-        assert!(!rem.contains("u1"), "remainder KEPT excludes the sent u1: {}", rem);
+        assert!(
+            !rem.contains("u1"),
+            "remainder KEPT excludes the sent u1: {}",
+            rem
+        );
     }
 
     #[test]
     fn test_stackable_transfer_exact_amount() {
         // Transfer the entire balance — no remainder atom needed
-        let mut source_wallet = Wallet::create(
-            Some("exact-secret"),
-            None,
-            "COINS",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let mut source_wallet =
+            Wallet::create(Some("exact-secret"), None, "COINS", None, None, None).unwrap();
         source_wallet.set_balance_i128(500);
 
-        let recipient_wallet = Wallet::create(
-            Some("recipient-exact"),
-            None,
-            "COINS",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let recipient_wallet =
+            Wallet::create(Some("recipient-exact"), None, "COINS", None, None, None).unwrap();
 
         let builder = TypeSafeMoleculeBuilder::new("exact-secret")
             .with_source_wallet(source_wallet.clone())
@@ -1556,21 +1681,19 @@ mod tests {
             .unwrap();
 
         // Exact amount: only 2 atoms (source debit + recipient credit, no remainder)
-        assert_eq!(builder.molecule().atoms.len(), 2, "Should have 2 atoms when amount == balance");
+        assert_eq!(
+            builder.molecule().atoms.len(),
+            2,
+            "Should have 2 atoms when amount == balance"
+        );
         assert_eq!(builder.molecule().atoms[0].value, Some("-500".to_string()));
         assert_eq!(builder.molecule().atoms[1].value, Some("500".to_string()));
     }
 
     #[test]
     fn test_stackable_transfer_insufficient_balance() {
-        let mut source_wallet = Wallet::create(
-            Some("poor-secret"),
-            None,
-            "RARE",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let mut source_wallet =
+            Wallet::create(Some("poor-secret"), None, "RARE", None, None, None).unwrap();
         source_wallet.set_balance_i128(100);
 
         let result = TypeSafeMoleculeBuilder::new("poor-secret")
@@ -1594,14 +1717,8 @@ mod tests {
     /// Whitepaper: V-atom values MUST sum to exactly 0 (conservation law).
     #[test]
     fn test_sign_check_v_isotope_roundtrip() {
-        let mut source_wallet = Wallet::create(
-            Some("v-check-secret"),
-            None,
-            "VCHECK",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let mut source_wallet =
+            Wallet::create(Some("v-check-secret"), None, "VCHECK", None, None, None).unwrap();
         source_wallet.set_balance_i128(500);
         source_wallet.batch_id = Some("batch-v".to_string());
 
@@ -1612,16 +1729,11 @@ mod tests {
             Some("W2"),
             None,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
-        let recipient = Wallet::create(
-            Some("v-recipient"),
-            None,
-            "VCHECK",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let recipient =
+            Wallet::create(Some("v-recipient"), None, "VCHECK", None, None, None).unwrap();
 
         // Keep a clone for check() — sender_wallet is consumed by the builder
         let sender_for_check = source_wallet.clone();
@@ -1647,7 +1759,9 @@ mod tests {
         let molecule = signed.as_molecule();
 
         // Conservation law: sum of all V-atom values MUST be 0
-        let sum: i128 = molecule.atoms.iter()
+        let sum: i128 = molecule
+            .atoms
+            .iter()
             .filter(|a| a.isotope == Isotope::V)
             .filter_map(|a| a.value.as_ref().and_then(|v| v.parse::<i128>().ok()))
             .sum();
@@ -1655,7 +1769,11 @@ mod tests {
 
         // Molecule must pass full check() with sender wallet (for remainder validation)
         let check_result = molecule.check(Some(&sender_for_check));
-        assert!(check_result.is_ok(), "V-isotope molecule must pass check(): {:?}", check_result.err());
+        assert!(
+            check_result.is_ok(),
+            "V-isotope molecule must pass check(): {:?}",
+            check_result.err()
+        );
     }
 
     /// Token request (T-isotope) sign + molecular hash verification.
@@ -1663,14 +1781,8 @@ mod tests {
     /// so we verify signing correctness and OTS fragment distribution instead.
     #[test]
     fn test_sign_check_token_request_roundtrip() {
-        let wallet = Wallet::create(
-            Some("t-check-secret"),
-            None,
-            "NEWTOKEN",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let wallet =
+            Wallet::create(Some("t-check-secret"), None, "NEWTOKEN", None, None, None).unwrap();
 
         let signed = TypeSafeMoleculeBuilder::new("t-check-secret")
             .with_source_wallet(wallet.clone())
@@ -1691,49 +1803,39 @@ mod tests {
             .unwrap();
 
         let molecule = signed.as_molecule();
-        assert!(molecule.molecular_hash.is_some(), "Should have molecular hash");
+        assert!(
+            molecule.molecular_hash.is_some(),
+            "Should have molecular hash"
+        );
 
         // OTS fragments distributed across atoms (first atom gets the signature)
-        assert!(molecule.atoms[0].ots_fragment.is_some(), "First atom must have OTS fragment");
+        assert!(
+            molecule.atoms[0].ots_fragment.is_some(),
+            "First atom must have OTS fragment"
+        );
 
         // Molecular hash must be a valid base17 string (64 chars, hex + 'g')
         let hash = molecule.molecular_hash.as_ref().unwrap();
         assert_eq!(hash.len(), 64, "Molecular hash must be 64 chars");
-        assert!(hash.chars().all(|c| "0123456789abcdefg".contains(c)),
-            "Molecular hash must contain only base17 characters");
+        assert!(
+            hash.chars().all(|c| "0123456789abcdefg".contains(c)),
+            "Molecular hash must contain only base17 characters"
+        );
     }
 
     /// Stackable transfer conservation: 3 atoms (debit, credit, remainder)
     /// with values summing exactly to 0.
     #[test]
     fn test_stackable_transfer_conservation_law() {
-        let mut source_wallet = Wallet::create(
-            Some("cons-secret"),
-            None,
-            "STKTEST",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let mut source_wallet =
+            Wallet::create(Some("cons-secret"), None, "STKTEST", None, None, None).unwrap();
         source_wallet.set_balance_i128(1000);
 
-        let remainder_wallet = Wallet::create(
-            Some("cons-secret"),
-            None,
-            "STKTEST",
-            Some("W2"),
-            None,
-            None,
-        ).unwrap();
+        let remainder_wallet =
+            Wallet::create(Some("cons-secret"), None, "STKTEST", Some("W2"), None, None).unwrap();
 
-        let recipient = Wallet::create(
-            Some("cons-recipient"),
-            None,
-            "STKTEST",
-            None,
-            None,
-            None,
-        ).unwrap();
+        let recipient =
+            Wallet::create(Some("cons-recipient"), None, "STKTEST", None, None, None).unwrap();
 
         let signed = TypeSafeMoleculeBuilder::new("cons-secret")
             .with_source_wallet(source_wallet)
@@ -1756,20 +1858,43 @@ mod tests {
         let molecule = signed.as_molecule();
 
         // Must have 3 V-atoms: sender(-1000), recipient(+350), remainder(+650)
-        let v_atoms: Vec<_> = molecule.atoms.iter()
+        let v_atoms: Vec<_> = molecule
+            .atoms
+            .iter()
             .filter(|a| a.isotope == Isotope::V)
             .collect();
-        assert_eq!(v_atoms.len(), 3, "Stackable transfer must produce 3 V-atoms");
+        assert_eq!(
+            v_atoms.len(),
+            3,
+            "Stackable transfer must produce 3 V-atoms"
+        );
 
         // Verify individual values
-        assert_eq!(v_atoms[0].value, Some("-1000".to_string()), "Sender debits full balance");
-        assert_eq!(v_atoms[1].value, Some("350".to_string()), "Recipient receives amount");
-        assert_eq!(v_atoms[2].value, Some("650".to_string()), "Remainder receives change");
+        assert_eq!(
+            v_atoms[0].value,
+            Some("-1000".to_string()),
+            "Sender debits full balance"
+        );
+        assert_eq!(
+            v_atoms[1].value,
+            Some("350".to_string()),
+            "Recipient receives amount"
+        );
+        assert_eq!(
+            v_atoms[2].value,
+            Some("650".to_string()),
+            "Remainder receives change"
+        );
 
         // Conservation: sum MUST be 0
-        let sum: i128 = v_atoms.iter()
+        let sum: i128 = v_atoms
+            .iter()
             .filter_map(|a| a.value.as_ref().and_then(|v| v.parse::<i128>().ok()))
             .sum();
-        assert_eq!(sum, 0, "Stackable transfer values must sum to 0, got {}", sum);
+        assert_eq!(
+            sum, 0,
+            "Stackable transfer values must sum to 0, got {}",
+            sum
+        );
     }
 }

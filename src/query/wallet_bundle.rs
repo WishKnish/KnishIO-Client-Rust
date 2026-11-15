@@ -157,7 +157,7 @@ mod tests {
     fn test_add_bundle_hashes() {
         let initial_hashes = vec!["hash1".to_string()];
         let additional_hashes = vec!["hash2".to_string(), "hash3".to_string()];
-        
+
         let query = QueryWalletBundle::with_bundle_hashes(initial_hashes)
             .add_bundle_hashes(additional_hashes);
 
@@ -171,7 +171,7 @@ mod tests {
     fn test_set_bundle_hashes() {
         let mut query = QueryWalletBundle::new().add_bundle_hash("original");
         let new_hashes = vec!["new1".to_string(), "new2".to_string()];
-        
+
         query.set_bundle_hashes(new_hashes.clone());
         assert_eq!(query.bundle_hashes(), new_hashes.as_slice());
     }
@@ -181,7 +181,7 @@ mod tests {
         let mut query = QueryWalletBundle::new()
             .add_bundle_hash("hash1")
             .add_bundle_hash("hash2");
-        
+
         assert_eq!(query.bundle_hashes().len(), 2);
         query.clear_bundle_hashes();
         assert_eq!(query.bundle_hashes().len(), 0);
@@ -212,7 +212,7 @@ mod tests {
         let hashes = vec!["hash1".to_string(), "hash2".to_string()];
         let query = QueryWalletBundle::with_bundle_hashes(hashes.clone());
         let variables = query.compiled_variables(None).unwrap();
-        
+
         assert_eq!(variables["bundleHashes"], json!(hashes));
     }
 
@@ -223,15 +223,18 @@ mod tests {
             "bundleHashes": ["provided-hash1", "provided-hash2"]
         });
         let variables = query.compiled_variables(Some(provided_vars)).unwrap();
-        
-        assert_eq!(variables["bundleHashes"], json!(["provided-hash1", "provided-hash2"]));
+
+        assert_eq!(
+            variables["bundleHashes"],
+            json!(["provided-hash1", "provided-hash2"])
+        );
     }
 
     #[test]
     fn test_query_string() {
         let query = QueryWalletBundle::new();
         let query_string = query.get_query();
-        
+
         // Check that the query string contains expected fields
         assert!(query_string.contains("WalletBundle( bundleHashes: $bundleHashes )"));
         assert!(query_string.contains("bundleHash"));

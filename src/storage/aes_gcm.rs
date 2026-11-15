@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use std::sync::Arc;
 const KEY_PREFIX: &str = "knishio:secret:";
 
-
 /// AES-GCM envelope encryption secret storage provider
 pub struct AesGcmSecretStorageProvider {
     backend: Arc<dyn StorageBackend>,
@@ -36,28 +35,39 @@ impl AesGcmSecretStorageProvider {
     }
 
     /// Execute a closure with the unwrapped secret and zeroize memory upon completion
-    pub async fn with_secret<T, F>(&self, bundle_hash: &str, options: StorageOptions, f: F) -> Result<T>
+    pub async fn with_secret<T, F>(
+        &self,
+        bundle_hash: &str,
+        options: StorageOptions,
+        f: F,
+    ) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&str) -> Result<T> + Send,
     {
-        let raw = self.backend.get_item(&format!("{KEY_PREFIX}{bundle_hash}"))?
+        let raw = self
+            .backend
+            .get_item(&format!("{KEY_PREFIX}{bundle_hash}"))?
             .ok_or_else(|| KnishIOError::SecretNotFound(bundle_hash.to_string()))?;
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e)))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e))
+        })?;
 
         let passphrase = options
             .passphrase
             .as_ref()
             .or(self.default_passphrase.as_ref())
-            .ok_or_else(|| KnishIOError::SecretStorage("Passphrase required for secret decryption".to_string()))?;
+            .ok_or_else(|| {
+                KnishIOError::SecretStorage("Passphrase required for secret decryption".to_string())
+            })?;
 
         let decrypted = envelope::open(&payload, passphrase)?;
 
         with_secure_bytes(decrypted.to_vec(), |bytes| {
-            let secret_string = String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e)))?;
+            let secret_string = String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e))
+            })?;
             f(&secret_string)
         })
     }
@@ -88,19 +98,32 @@ impl SecretStorageProvider for AesGcmSecretStorageProvider {
         true
     }
 
-    async fn store_secret(&self, bundle_hash: &str, secret: &str, options: StorageOptions) -> Result<()> {
+    async fn store_secret(
+        &self,
+        bundle_hash: &str,
+        secret: &str,
+        options: StorageOptions,
+    ) -> Result<()> {
         if bundle_hash.is_empty() {
-            return Err(KnishIOError::SecretStorage("Bundle hash cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Bundle hash cannot be empty".to_string(),
+            ));
         }
         if secret.is_empty() {
-            return Err(KnishIOError::SecretStorage("Secret cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Secret cannot be empty".to_string(),
+            ));
         }
 
         let passphrase = options
             .passphrase
             .as_ref()
             .or(self.default_passphrase.as_ref())
-            .ok_or_else(|| KnishIOError::SecretStorage("Passphrase required for envelope encryption".to_string()))?;
+            .ok_or_else(|| {
+                KnishIOError::SecretStorage(
+                    "Passphrase required for envelope encryption".to_string(),
+                )
+            })?;
 
         let metadata = SecretStorageMetadata {
             bundle_hash: bundle_hash.to_string(),
@@ -114,7 +137,8 @@ impl SecretStorageProvider for AesGcmSecretStorageProvider {
         let json_str = serde_json::to_string(&payload)
             .map_err(|e| KnishIOError::SecretStorage(format!("Serialization failed: {}", e)))?;
 
-        self.backend.set_item(&format!("{KEY_PREFIX}{bundle_hash}"), json_str)?;
+        self.backend
+            .set_item(&format!("{KEY_PREFIX}{bundle_hash}"), json_str)?;
 
         if let Some(recovery_passphrase) = options.recovery_passphrase.as_ref() {
             let recovery_metadata = SecretStorageMetadata {
@@ -124,47 +148,69 @@ impl SecretStorageProvider for AesGcmSecretStorageProvider {
                 hardware_backed: false,
                 provider_type: "aes-gcm".to_string(),
             };
-            let recovery_payload = envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
+            let recovery_payload =
+                envelope::seal(secret, recovery_passphrase.as_str(), recovery_metadata)?;
             let recovery_json = serde_json::to_string(&recovery_payload)
                 .map_err(|e| KnishIOError::SecretStorage(format!("Serialization failed: {e}")))?;
-            self.backend
-                .set_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"), recovery_json)?;
+            self.backend.set_item(
+                &format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"),
+                recovery_json,
+            )?;
         }
 
         Ok(())
     }
 
-    async fn retrieve_secret(&self, bundle_hash: &str, options: StorageOptions) -> Result<Option<String>> {
-        let raw = match self.backend.get_item(&format!("{KEY_PREFIX}{bundle_hash}"))? {
+    async fn retrieve_secret(
+        &self,
+        bundle_hash: &str,
+        options: StorageOptions,
+    ) -> Result<Option<String>> {
+        let raw = match self
+            .backend
+            .get_item(&format!("{KEY_PREFIX}{bundle_hash}"))?
+        {
             Some(val) => val,
             None => return Ok(None),
         };
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e)))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted payload format: {}", e))
+        })?;
 
         let passphrase = options
             .passphrase
             .as_ref()
             .or(self.default_passphrase.as_ref())
-            .ok_or_else(|| KnishIOError::SecretStorage("Passphrase required for secret decryption".to_string()))?;
+            .ok_or_else(|| {
+                KnishIOError::SecretStorage("Passphrase required for secret decryption".to_string())
+            })?;
 
         let decrypted = envelope::open(&payload, passphrase)?;
 
         with_secure_bytes(decrypted.to_vec(), |bytes| {
-            String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e)))
-        }).map(Some)
+            String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext: {}", e))
+            })
+        })
+        .map(Some)
     }
 
     async fn delete_secret(&self, bundle_hash: &str) -> Result<bool> {
-        let removed_primary = self.backend.remove_item(&format!("{KEY_PREFIX}{bundle_hash}"))?;
-        let _ = self.backend.remove_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"));
+        let removed_primary = self
+            .backend
+            .remove_item(&format!("{KEY_PREFIX}{bundle_hash}"))?;
+        let _ = self
+            .backend
+            .remove_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"));
         Ok(removed_primary)
     }
 
     async fn has_secret(&self, bundle_hash: &str) -> Result<bool> {
-        Ok(self.backend.get_item(&format!("{KEY_PREFIX}{bundle_hash}"))?.is_some())
+        Ok(self
+            .backend
+            .get_item(&format!("{KEY_PREFIX}{bundle_hash}"))?
+            .is_some())
     }
 
     async fn list_secrets(&self) -> Result<Vec<SecretStorageMetadata>> {
@@ -188,25 +234,35 @@ impl SecretStorageProvider for AesGcmSecretStorageProvider {
         options: StorageOptions,
     ) -> Result<()> {
         if bundle_hash.is_empty() {
-            return Err(KnishIOError::SecretStorage("Bundle hash cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Bundle hash cannot be empty".to_string(),
+            ));
         }
         if recovery_passphrase.is_empty() {
-            return Err(KnishIOError::SecretStorage("Recovery passphrase cannot be empty".to_string()));
+            return Err(KnishIOError::SecretStorage(
+                "Recovery passphrase cannot be empty".to_string(),
+            ));
         }
 
         let raw = self
             .backend
             .get_item(&format!("{RECOVERY_KEY_PREFIX}{bundle_hash}"))?
-            .ok_or_else(|| KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}")))?;
+            .ok_or_else(|| {
+                KnishIOError::SecretNotFound(format!("Recovery record not found for {bundle_hash}"))
+            })?;
 
-        let payload: EncryptedSecretPayload = serde_json::from_str(&raw)
-            .map_err(|e| KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}")))?;
+        let payload: EncryptedSecretPayload = serde_json::from_str(&raw).map_err(|e| {
+            KnishIOError::DecryptionFailed(format!("Corrupted recovery payload format: {e}"))
+        })?;
 
         let decrypted = envelope::open(&payload, recovery_passphrase)?;
 
         let secret_str = with_secure_bytes(decrypted.to_vec(), |bytes| {
-            String::from_utf8(bytes.to_vec())
-                .map_err(|e| KnishIOError::DecryptionFailed(format!("Invalid UTF-8 plaintext in recovery envelope: {e}")))
+            String::from_utf8(bytes.to_vec()).map_err(|e| {
+                KnishIOError::DecryptionFailed(format!(
+                    "Invalid UTF-8 plaintext in recovery envelope: {e}"
+                ))
+            })
         })?;
 
         let mut reenroll_options = options;
@@ -214,9 +270,11 @@ impl SecretStorageProvider for AesGcmSecretStorageProvider {
             reenroll_options.passphrase = Some(recovery_passphrase.to_string());
         }
         if reenroll_options.recovery_passphrase.is_none() {
-            reenroll_options.recovery_passphrase = Some(zeroize::Zeroizing::new(recovery_passphrase.to_string()));
+            reenroll_options.recovery_passphrase =
+                Some(zeroize::Zeroizing::new(recovery_passphrase.to_string()));
         }
 
-        self.store_secret(bundle_hash, &secret_str, reenroll_options).await
+        self.store_secret(bundle_hash, &secret_str, reenroll_options)
+            .await
     }
 }

@@ -3,9 +3,9 @@
 //! This module handles authentication tokens for API access.
 //! Maintains exact compatibility with JavaScript AuthToken.js implementation.
 
-use serde::{Deserialize, Serialize};
-use crate::wallet::{MlKemParameterSet, OtsVersion, Wallet};
 use crate::error::{KnishIOError, Result};
+use crate::wallet::{MlKemParameterSet, OtsVersion, Wallet};
+use serde::{Deserialize, Serialize};
 
 /// Snapshot structure for token restoration
 #[derive(Clone, Serialize, Deserialize)]
@@ -118,7 +118,7 @@ impl AuthToken {
             wallet: None,
         }
     }
-    
+
     /// Create AuthToken with data and wallet (matches JS AuthToken.create)
     ///
     /// # Arguments
@@ -143,7 +143,7 @@ impl AuthToken {
         auth_token.set_wallet(wallet);
         auth_token
     }
-    
+
     /// Restore AuthToken from snapshot and secret (matches JS AuthToken.restore)
     ///
     /// The restored wallet's ML-KEM parameter set is resolved in three tiers:
@@ -191,7 +191,7 @@ impl AuthToken {
             Some(mlkem_parameter_set),
             ots_version,
         )?;
-        
+
         Ok(Self::create(
             snapshot.token,
             snapshot.expires_at,
@@ -210,9 +210,11 @@ impl AuthToken {
         snapshot
             .wallet
             .ots_version
-            .map_or(Ok(OtsVersion::V1), |version| OtsVersion::try_from(version).map_err(KnishIOError::Custom))
+            .map_or(Ok(OtsVersion::V1), |version| {
+                OtsVersion::try_from(version).map_err(KnishIOError::Custom)
+            })
     }
-    
+
     /// Set associated wallet (matches JS setWallet)
     ///
     /// # Arguments
@@ -221,7 +223,7 @@ impl AuthToken {
     pub fn set_wallet(&mut self, wallet: Wallet) {
         self.wallet = Some(wallet);
     }
-    
+
     /// Get associated wallet (matches JS getWallet)
     ///
     /// # Returns
@@ -230,7 +232,7 @@ impl AuthToken {
     pub fn get_wallet(&self) -> Option<&Wallet> {
         self.wallet.as_ref()
     }
-    
+
     /// Get mutable reference to associated wallet
     ///
     /// # Returns
@@ -239,7 +241,7 @@ impl AuthToken {
     pub fn get_wallet_mut(&mut self) -> Option<&mut Wallet> {
         self.wallet.as_mut()
     }
-    
+
     /// Get snapshot for persistence (matches JS getSnapshot)
     ///
     /// # Returns
@@ -263,7 +265,7 @@ impl AuthToken {
                 ots_version: None,
             }
         };
-        
+
         AuthTokenSnapshot {
             token: self.token.clone(),
             expires_at: self.expires_at,
@@ -272,7 +274,7 @@ impl AuthToken {
             wallet: wallet_snapshot,
         }
     }
-    
+
     /// Get the token string (matches JS getToken)
     ///
     /// # Returns
@@ -281,7 +283,7 @@ impl AuthToken {
     pub fn get_token(&self) -> &str {
         &self.token
     }
-    
+
     /// Get the public key (matches JS getPubkey)
     ///
     /// # Returns
@@ -290,7 +292,7 @@ impl AuthToken {
     pub fn get_pubkey(&self) -> Option<&str> {
         self.pubkey.as_deref()
     }
-    
+
     /// Get expiration interval in milliseconds (matches JS getExpireInterval)
     ///
     /// # Returns
@@ -303,7 +305,7 @@ impl AuthToken {
             0
         }
     }
-    
+
     /// Check if the token is expired (matches JS isExpired)
     ///
     /// # Returns
@@ -316,7 +318,7 @@ impl AuthToken {
             true // No expiration time means expired
         }
     }
-    
+
     /// Get authentication data for GraphQL client (matches JS getAuthData)
     ///
     /// # Returns
@@ -329,7 +331,7 @@ impl AuthToken {
             wallet: self.wallet.clone(),
         }
     }
-    
+
     /// Get the token string (alias for compatibility)
     ///
     /// # Returns
@@ -338,12 +340,12 @@ impl AuthToken {
     pub fn as_str(&self) -> &str {
         &self.token
     }
-    
+
     /// Get the token field directly (for field access compatibility)
     pub fn token(&self) -> &str {
         &self.token
     }
-    
+
     /// Get the wallet bundle if wallet exists
     pub fn wallet_bundle(&self) -> Option<String> {
         self.wallet.as_ref().and_then(|w| w.bundle.clone())
@@ -368,7 +370,7 @@ impl<'de> Deserialize<'de> for AuthToken {
         D: serde::Deserializer<'de>,
     {
         let snapshot = AuthTokenSnapshot::deserialize(deserializer)?;
-        
+
         // Create minimal AuthToken without wallet (wallet requires secret)
         Ok(AuthToken {
             token: snapshot.token,
@@ -383,7 +385,7 @@ impl<'de> Deserialize<'de> for AuthToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_auth_token_creation() {
         let auth_token = AuthToken::new(
@@ -392,46 +394,27 @@ mod tests {
             Some(true),
             Some("test-pubkey".to_string()),
         );
-        
+
         assert_eq!(auth_token.get_token(), "test-token");
         assert_eq!(auth_token.get_pubkey(), Some("test-pubkey"));
         assert!(auth_token.is_expired()); // Should be expired by now
     }
-    
+
     #[test]
     fn test_auth_token_with_wallet() {
-        let wallet = Wallet::create(
-            Some("test-secret"),
-            None,
-            "AUTH",
-            None,
-            None,
-            None,
-        ).unwrap();
-        
-        let auth_token = AuthToken::create(
-            "test-token".to_string(),
-            None,
-            Some(false),
-            None,
-            wallet,
-        );
-        
+        let wallet = Wallet::create(Some("test-secret"), None, "AUTH", None, None, None).unwrap();
+
+        let auth_token =
+            AuthToken::create("test-token".to_string(), None, Some(false), None, wallet);
+
         assert!(auth_token.get_wallet().is_some());
         assert_eq!(auth_token.get_wallet().unwrap().token, "AUTH");
     }
-    
+
     #[test]
     fn test_snapshot() {
-        let wallet = Wallet::create(
-            Some("test-secret"),
-            None,
-            "AUTH",
-            None,
-            None,
-            None,
-        ).unwrap();
-        
+        let wallet = Wallet::create(Some("test-secret"), None, "AUTH", None, None, None).unwrap();
+
         let auth_token = AuthToken::create(
             "test-token".to_string(),
             Some(1640995200),
@@ -439,27 +422,20 @@ mod tests {
             Some("test-pubkey".to_string()),
             wallet,
         );
-        
+
         let snapshot = auth_token.get_snapshot();
-        
+
         assert_eq!(snapshot.token, "test-token");
         assert_eq!(snapshot.expires_at, Some(1640995200));
         assert_eq!(snapshot.pubkey, Some("test-pubkey".to_string()));
         assert_eq!(snapshot.encrypt, Some(true));
         assert!(snapshot.wallet.position.is_some());
     }
-    
+
     #[test]
     fn test_auth_data() {
-        let wallet = Wallet::create(
-            Some("test-secret"),
-            None,
-            "AUTH",
-            None,
-            None,
-            None,
-        ).unwrap();
-        
+        let wallet = Wallet::create(Some("test-secret"), None, "AUTH", None, None, None).unwrap();
+
         let auth_token = AuthToken::create(
             "test-token".to_string(),
             None,
@@ -467,28 +443,24 @@ mod tests {
             Some("test-pubkey".to_string()),
             wallet,
         );
-        
+
         let auth_data = auth_token.get_auth_data();
-        
+
         assert_eq!(auth_data.token, "test-token");
         assert_eq!(auth_data.pubkey, Some("test-pubkey".to_string()));
         assert!(auth_data.wallet.is_some());
     }
-    
+
     #[test]
     fn test_expiration() {
         // Future expiration
         let future_timestamp = chrono::Utc::now().timestamp() + 3600; // 1 hour from now
-        let auth_token = AuthToken::new(
-            "test-token".to_string(),
-            Some(future_timestamp),
-            None,
-            None,
-        );
-        
+        let auth_token =
+            AuthToken::new("test-token".to_string(), Some(future_timestamp), None, None);
+
         assert!(!auth_token.is_expired());
         assert!(auth_token.get_expire_interval() > 0);
-        
+
         // Past expiration
         let auth_token_expired = AuthToken::new(
             "test-token".to_string(),
@@ -496,7 +468,7 @@ mod tests {
             None,
             None,
         );
-        
+
         assert!(auth_token_expired.is_expired());
         assert!(auth_token_expired.get_expire_interval() < 0);
     }
@@ -505,8 +477,7 @@ mod tests {
     // ML-KEM parameter set persistence across a session snapshot round trip
     // ────────────────────────────────────────────────────────────────────────
 
-    const RESTORE_SECRET: &str =
-        "6f4a2c1b8e7d5039a1c4b6e8d2f70519ac3b5d7e9f1024638a5c7e9b1d3f5072";
+    const RESTORE_SECRET: &str = "6f4a2c1b8e7d5039a1c4b6e8d2f70519ac3b5d7e9f1024638a5c7e9b1d3f5072";
     const RESTORE_POSITION: &str =
         "3333333333333333333333333333333333333333333333333333333333333333";
 
@@ -547,15 +518,18 @@ mod tests {
             "the snapshot must record the wallet's parameter set"
         );
 
-        let restored = AuthToken::restore(snapshot, RESTORE_SECRET)
-            .expect("restore should succeed");
+        let restored =
+            AuthToken::restore(snapshot, RESTORE_SECRET).expect("restore should succeed");
         let restored_wallet = restored.get_wallet().expect("restored wallet");
 
         assert_eq!(
             restored_wallet.mlkem_parameter_set,
             MlKemParameterSet::MlKem768
         );
-        assert_eq!(restored_wallet.pubkey.as_deref(), Some(original_pubkey.as_str()));
+        assert_eq!(
+            restored_wallet.pubkey.as_deref(),
+            Some(original_pubkey.as_str())
+        );
     }
 
     /// A pre-bump snapshot literal carries NO parameter set. It must resolve to ML-KEM-768 from
@@ -585,8 +559,8 @@ mod tests {
             "absent must stay distinguishable from present"
         );
 
-        let restored = AuthToken::restore(snapshot, RESTORE_SECRET)
-            .expect("restore should succeed");
+        let restored =
+            AuthToken::restore(snapshot, RESTORE_SECRET).expect("restore should succeed");
         let restored_pubkey = restored
             .get_wallet()
             .and_then(|w| w.pubkey.as_deref())
@@ -608,7 +582,8 @@ mod tests {
     /// that same wallet (token USER, same address and ML-KEM key), not an AUTH wallet at the
     /// same position, whose different key could not decrypt the session's CipherHash replies.
     #[test]
-    fn test_snapshot_round_trip_preserves_the_user_wallet_token() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn test_snapshot_round_trip_preserves_the_user_wallet_token(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let wallet = Wallet::create(
             Some(RESTORE_SECRET),
             None,
@@ -619,12 +594,15 @@ mod tests {
         )?;
         let address = wallet.address.clone();
         let pubkey = wallet.pubkey.clone();
-        let auth_token = AuthToken::create("session-token".to_string(), None, Some(false), None, wallet);
+        let auth_token =
+            AuthToken::create("session-token".to_string(), None, Some(false), None, wallet);
 
         let persisted = serde_json::to_string(&auth_token.get_snapshot())?;
         let snapshot: AuthTokenSnapshot = serde_json::from_str(&persisted)?;
         let restored = AuthToken::restore(snapshot, RESTORE_SECRET)?;
-        let restored_wallet = restored.get_wallet().ok_or("restored token has no wallet")?;
+        let restored_wallet = restored
+            .get_wallet()
+            .ok_or("restored token has no wallet")?;
 
         assert_eq!(restored_wallet.token, "USER");
         assert_eq!(restored_wallet.address, address);
@@ -634,14 +612,24 @@ mod tests {
 
     /// A snapshot written before the wallet token was persisted restores the AUTH wallet it came from.
     #[test]
-    fn test_restore_snapshot_without_wallet_token_restores_auth() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn test_restore_snapshot_without_wallet_token_restores_auth(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let legacy = format!(
             r#"{{"token":"legacy-session","expires_at":null,"pubkey":null,"encrypt":false,"wallet":{{"position":"{RESTORE_POSITION}","characters":null,"mlkem_parameter_set":"MlKem1024"}}}}"#
         );
         let snapshot: AuthTokenSnapshot = serde_json::from_str(&legacy)?;
         let restored = AuthToken::restore(snapshot, RESTORE_SECRET)?;
-        let expected = Wallet::create(Some(RESTORE_SECRET), None, "AUTH", Some(RESTORE_POSITION), None, None)?;
-        let restored_wallet = restored.get_wallet().ok_or("restored token has no wallet")?;
+        let expected = Wallet::create(
+            Some(RESTORE_SECRET),
+            None,
+            "AUTH",
+            Some(RESTORE_POSITION),
+            None,
+            None,
+        )?;
+        let restored_wallet = restored
+            .get_wallet()
+            .ok_or("restored token has no wallet")?;
 
         assert_eq!(restored_wallet.token, "AUTH");
         assert_eq!(restored_wallet.address, expected.address);
@@ -650,16 +638,33 @@ mod tests {
 
     /// The snapshot records the session wallet's OTS version and restore re-derives that wallet.
     #[test]
-    fn test_snapshot_round_trip_preserves_ots_version_2() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn test_snapshot_round_trip_preserves_ots_version_2(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let wallet = Wallet::new_with_ots_version(
-            Some(RESTORE_SECRET), None, Some("AUTH"), None, Some(RESTORE_POSITION), None, None, None, OtsVersion::V2,
+            Some(RESTORE_SECRET),
+            None,
+            Some("AUTH"),
+            None,
+            Some(RESTORE_POSITION),
+            None,
+            None,
+            None,
+            OtsVersion::V2,
         )?;
-        let auth_token = AuthToken::create("v2-session".to_string(), None, Some(false), None, wallet.clone());
+        let auth_token = AuthToken::create(
+            "v2-session".to_string(),
+            None,
+            Some(false),
+            None,
+            wallet.clone(),
+        );
 
         let persisted = serde_json::to_value(auth_token.get_snapshot())?;
         assert_eq!(persisted["wallet"]["otsVersion"], serde_json::json!(2));
         let restored = AuthToken::restore(serde_json::from_value(persisted)?, RESTORE_SECRET)?;
-        let restored_wallet = restored.get_wallet().ok_or("restored token has no wallet")?;
+        let restored_wallet = restored
+            .get_wallet()
+            .ok_or("restored token has no wallet")?;
 
         assert_eq!(restored_wallet.ots_version, OtsVersion::V2);
         assert_eq!(restored_wallet.address, wallet.address);
@@ -668,21 +673,36 @@ mod tests {
 
     /// A snapshot without `otsVersion` restores at OTS v1; an unknown version is refused.
     #[test]
-    fn test_restore_snapshot_without_ots_version_restores_v1() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn test_restore_snapshot_without_ots_version_restores_v1(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let legacy = format!(
             r#"{{"token":"legacy-session","expires_at":null,"pubkey":null,"encrypt":false,"wallet":{{"position":"{RESTORE_POSITION}","characters":null,"mlkem_parameter_set":"MlKem1024","token":"AUTH"}}}}"#
         );
         let snapshot: AuthTokenSnapshot = serde_json::from_str(&legacy)?;
         let restored = AuthToken::restore(snapshot, RESTORE_SECRET)?;
-        let expected = Wallet::create(Some(RESTORE_SECRET), None, "AUTH", Some(RESTORE_POSITION), None, None)?;
-        let restored_wallet = restored.get_wallet().ok_or("restored token has no wallet")?;
+        let expected = Wallet::create(
+            Some(RESTORE_SECRET),
+            None,
+            "AUTH",
+            Some(RESTORE_POSITION),
+            None,
+            None,
+        )?;
+        let restored_wallet = restored
+            .get_wallet()
+            .ok_or("restored token has no wallet")?;
         assert_eq!(restored_wallet.ots_version, OtsVersion::V1);
         assert_eq!(restored_wallet.address, expected.address);
 
         let mut snapshot: AuthTokenSnapshot = serde_json::from_str(&legacy)?;
         snapshot.wallet.ots_version = Some(3);
-        let err = AuthToken::restore(snapshot, RESTORE_SECRET).err().ok_or("version 3 must be refused")?;
-        assert_eq!(err.to_string(), "KnishIO: unsupported OTS version 3; expected 1 or 2.");
+        let err = AuthToken::restore(snapshot, RESTORE_SECRET)
+            .err()
+            .ok_or("version 3 must be refused")?;
+        assert_eq!(
+            err.to_string(),
+            "KnishIO: unsupported OTS version 3; expected 1 or 2."
+        );
         Ok(())
     }
 }

@@ -37,7 +37,11 @@ impl QueryWalletList {
     }
 
     /// Set both bundle hash and token slug
-    pub fn with_filters(mut self, bundle_hash: impl Into<String>, token_slug: impl Into<String>) -> Self {
+    pub fn with_filters(
+        mut self,
+        bundle_hash: impl Into<String>,
+        token_slug: impl Into<String>,
+    ) -> Self {
         self.bundle_hash = Some(bundle_hash.into());
         self.token_slug = Some(token_slug.into());
         self
@@ -137,7 +141,10 @@ impl QueryWalletList {
     }
 
     /// Query wallets by both bundle hash and token slug
-    pub fn by_bundle_and_token(bundle_hash: impl Into<String>, token_slug: impl Into<String>) -> Self {
+    pub fn by_bundle_and_token(
+        bundle_hash: impl Into<String>,
+        token_slug: impl Into<String>,
+    ) -> Self {
         Self::new().with_filters(bundle_hash, token_slug)
     }
 
@@ -214,14 +221,14 @@ mod tests {
         // Only bundle hash
         let query = QueryWalletList::new().with_bundle_hash("test-bundle");
         let variables = query.compiled_variables(None).unwrap();
-        
+
         assert_eq!(variables["bundleHash"], json!("test-bundle"));
         assert!(!variables.as_object().unwrap().contains_key("tokenSlug"));
 
         // Only token slug
         let query = QueryWalletList::new().with_token_slug("KNISH");
         let variables = query.compiled_variables(None).unwrap();
-        
+
         assert!(!variables.as_object().unwrap().contains_key("bundleHash"));
         assert_eq!(variables["tokenSlug"], json!("KNISH"));
     }
@@ -230,7 +237,7 @@ mod tests {
     fn test_compiled_variables_empty() {
         let query = QueryWalletList::new();
         let variables = query.compiled_variables(None).unwrap();
-        
+
         let obj = variables.as_object().unwrap();
         assert!(!obj.contains_key("bundleHash"));
         assert!(!obj.contains_key("tokenSlug"));
@@ -240,7 +247,7 @@ mod tests {
     fn test_query_string() {
         let query = QueryWalletList::new();
         let query_string = query.get_query();
-        
+
         // Check that the query string contains expected fields
         assert!(query_string.contains("Wallet( bundleHash: $bundleHash, tokenSlug: $tokenSlug )"));
         assert!(query_string.contains("address"));
@@ -255,7 +262,7 @@ mod tests {
         assert!(query_string.contains("createdAt"));
         assert!(query_string.contains("tokenUnits"));
         assert!(query_string.contains("tradeRates"));
-        
+
         // Check nested structures
         assert!(query_string.contains("name"));
         assert!(query_string.contains("fungibility"));

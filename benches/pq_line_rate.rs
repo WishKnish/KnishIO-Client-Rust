@@ -17,7 +17,6 @@
 //! cargo bench --bench pq_line_rate
 //! ```
 
-use std::time::Instant;
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
@@ -25,12 +24,19 @@ use aes_gcm::{
 use knishio_client::{MlKemParameterSet, Wallet};
 use libcrux_ml_kem::{mlkem1024, mlkem768};
 use rand::Rng;
-use ring::aead::{Aad, BoundKey, Nonce as RingNonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM};
+use ring::aead::{
+    Aad, BoundKey, Nonce as RingNonce, NonceSequence, OpeningKey, SealingKey, UnboundKey,
+    AES_256_GCM,
+};
+use std::time::Instant;
 
 struct OneNonce(Option<[u8; 12]>);
 impl NonceSequence for OneNonce {
     fn advance(&mut self) -> Result<RingNonce, ring::error::Unspecified> {
-        self.0.take().map(RingNonce::assume_unique_for_key).ok_or(ring::error::Unspecified)
+        self.0
+            .take()
+            .map(RingNonce::assume_unique_for_key)
+            .ok_or(ring::error::Unspecified)
     }
 }
 
@@ -79,18 +85,38 @@ macro_rules! bench_kem {
 
             println!("\n  {}", $heading);
             println!("  ------------------------------------------------------------------");
-            println!("  Keygen:        {:>7.2} µs/op | {:>9.1} ops/sec", keygen_us, keygen_ops);
-            println!("  Encapsulate:   {:>7.2} µs/op | {:>9.1} ops/sec", enc_us, enc_ops);
-            println!("  Decapsulate:   {:>7.2} µs/op | {:>9.1} ops/sec", dec_us, dec_ops);
-            println!("  Round-Trip Handshake KEM (Enc + Dec): {:.2} µs", enc_us + dec_us);
+            println!(
+                "  Keygen:        {:>7.2} µs/op | {:>9.1} ops/sec",
+                keygen_us, keygen_ops
+            );
+            println!(
+                "  Encapsulate:   {:>7.2} µs/op | {:>9.1} ops/sec",
+                enc_us, enc_ops
+            );
+            println!(
+                "  Decapsulate:   {:>7.2} µs/op | {:>9.1} ops/sec",
+                dec_us, dec_ops
+            );
+            println!(
+                "  Round-Trip Handshake KEM (Enc + Dec): {:.2} µs",
+                enc_us + dec_us
+            );
 
             (keygen_us, enc_us, dec_us)
         }
     };
 }
 
-bench_kem!(bench_mlkem1024, mlkem1024, "[1a] ML-KEM-1024 (NIST FIPS 203) Key Encapsulation — shipped transport default");
-bench_kem!(bench_mlkem768, mlkem768, "[1b] ML-KEM-768 (NIST FIPS 203) Key Encapsulation — opt-in step-back");
+bench_kem!(
+    bench_mlkem1024,
+    mlkem1024,
+    "[1a] ML-KEM-1024 (NIST FIPS 203) Key Encapsulation — shipped transport default"
+);
+bench_kem!(
+    bench_mlkem768,
+    mlkem768,
+    "[1b] ML-KEM-768 (NIST FIPS 203) Key Encapsulation — opt-in step-back"
+);
 
 #[allow(dead_code)]
 struct PerfRow {
@@ -120,7 +146,9 @@ fn bench_hardware_aes_gcm(sizes: &[(&str, usize, usize)]) -> Vec<PerfRow> {
         for _ in 0..iters {
             let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).expect("valid key");
             let mut sealing_key = SealingKey::new(unbound, OneNonce(Some([0u8; 12])));
-            let tag = sealing_key.seal_in_place_separate_tag(Aad::empty(), &mut buf).expect("seal");
+            let tag = sealing_key
+                .seal_in_place_separate_tag(Aad::empty(), &mut buf)
+                .expect("seal");
             last_tag = Some(tag);
         }
         let enc_dur = start.elapsed();
@@ -140,7 +168,9 @@ fn bench_hardware_aes_gcm(sizes: &[(&str, usize, usize)]) -> Vec<PerfRow> {
             let mut ct = ciphertext_with_tag.clone();
             let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).expect("valid key");
             let mut opening_key = OpeningKey::new(unbound, OneNonce(Some([0u8; 12])));
-            let _ = opening_key.open_in_place(Aad::empty(), &mut ct).expect("open");
+            let _ = opening_key
+                .open_in_place(Aad::empty(), &mut ct)
+                .expect("open");
         }
         let dec_dur = start.elapsed();
         let dec_mb_s = total_mb / dec_dur.as_secs_f64();
@@ -187,7 +217,9 @@ fn bench_rustcrypto_aes_gcm(sizes: &[(&str, usize, usize)]) -> Vec<PerfRow> {
         let start = Instant::now();
         let mut ct = Vec::new();
         for _ in 0..iters {
-            ct = cipher.encrypt(&nonce, plaintext.as_slice()).expect("encrypt");
+            ct = cipher
+                .encrypt(&nonce, plaintext.as_slice())
+                .expect("encrypt");
         }
         let enc_dur = start.elapsed();
         let total_mb = (size_bytes * iters) as f64 / (1024.0 * 1024.0);
@@ -234,8 +266,24 @@ async fn bench_discrete_envelope(set: MlKemParameterSet, heading: &str) {
 
     const POS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
     // Parameter set passed explicitly so the heading is always true whatever the Wallet default is.
-    let sender = Wallet::create(Some("bench-sender-secret-0123456789ABCDEF"), None, "AUTH", Some(POS), None, Some(set)).expect("sender wallet");
-    let receiver = Wallet::create(Some("bench-receiver-secret-0123456789ABCDEF"), None, "AUTH", Some(POS), None, Some(set)).expect("receiver wallet");
+    let sender = Wallet::create(
+        Some("bench-sender-secret-0123456789ABCDEF"),
+        None,
+        "AUTH",
+        Some(POS),
+        None,
+        Some(set),
+    )
+    .expect("sender wallet");
+    let receiver = Wallet::create(
+        Some("bench-receiver-secret-0123456789ABCDEF"),
+        None,
+        "AUTH",
+        Some(POS),
+        None,
+        Some(set),
+    )
+    .expect("receiver wallet");
     let receiver_pubkey = receiver.pubkey.clone().expect("receiver pubkey");
 
     // 1,200 B WebRTC payload
@@ -244,7 +292,10 @@ async fn bench_discrete_envelope(set: MlKemParameterSet, heading: &str) {
     let start = Instant::now();
     let mut last_env = None;
     for _ in 0..iters {
-        let env = sender.encrypt_message(&webrtc_msg, &receiver_pubkey).await.expect("encrypt");
+        let env = sender
+            .encrypt_message(&webrtc_msg, &receiver_pubkey)
+            .await
+            .expect("encrypt");
         last_env = Some(env);
     }
     let enc_dur = start.elapsed();
@@ -263,8 +314,14 @@ async fn bench_discrete_envelope(set: MlKemParameterSet, heading: &str) {
     let dec_mbps = (dec_pps * 1200.0 * 8.0) / 1_000_000.0;
 
     println!("  Payload: 1,200 B (WebRTC packet size)");
-    println!("    Encrypt: {:>7.2} µs ({:>7.0} msg/s) -> {:>6.2} Mbps payload wire throughput", enc_us, enc_pps, enc_mbps);
-    println!("    Decrypt: {:>7.2} µs ({:>7.0} msg/s) -> {:>6.2} Mbps payload wire throughput", dec_us, dec_pps, dec_mbps);
+    println!(
+        "    Encrypt: {:>7.2} µs ({:>7.0} msg/s) -> {:>6.2} Mbps payload wire throughput",
+        enc_us, enc_pps, enc_mbps
+    );
+    println!(
+        "    Decrypt: {:>7.2} µs ({:>7.0} msg/s) -> {:>6.2} Mbps payload wire throughput",
+        dec_us, dec_pps, dec_mbps
+    );
 
     // 64 KB File Chunk payload
     let large_msg = serde_json::json!({ "data": "B".repeat(64 * 1024) });
@@ -272,7 +329,10 @@ async fn bench_discrete_envelope(set: MlKemParameterSet, heading: &str) {
     let start = Instant::now();
     let mut last_large_env = None;
     for _ in 0..iters_l {
-        let env = sender.encrypt_message(&large_msg, &receiver_pubkey).await.expect("encrypt");
+        let env = sender
+            .encrypt_message(&large_msg, &receiver_pubkey)
+            .await
+            .expect("encrypt");
         last_large_env = Some(env);
     }
     let enc_dur_l = start.elapsed();
@@ -291,8 +351,14 @@ async fn bench_discrete_envelope(set: MlKemParameterSet, heading: &str) {
     let dec_mbps_l = (dec_pps_l * 65536.0 * 8.0) / 1_000_000.0;
 
     println!("  Payload: 64 KB (File chunk size)");
-    println!("    Encrypt: {:>7.2} µs ({:>7.0} msg/s) -> {:>6.2} Mbps payload wire throughput", enc_us_l, enc_pps_l, enc_mbps_l);
-    println!("    Decrypt: {:>7.2} µs ({:>7.0} msg/s) -> {:>6.2} Mbps payload wire throughput", dec_us_l, dec_pps_l, dec_mbps_l);
+    println!(
+        "    Encrypt: {:>7.2} µs ({:>7.0} msg/s) -> {:>6.2} Mbps payload wire throughput",
+        enc_us_l, enc_pps_l, enc_mbps_l
+    );
+    println!(
+        "    Decrypt: {:>7.2} µs ({:>7.0} msg/s) -> {:>6.2} Mbps payload wire throughput",
+        dec_us_l, dec_pps_l, dec_mbps_l
+    );
 }
 
 fn print_table(title: &str, rows: &[PerfRow]) {
@@ -333,7 +399,10 @@ async fn main() {
 
     println!("\n  [2] Data Plane AES-256-GCM Throughput & Line Rate Capability");
     let hw_rows = bench_hardware_aes_gcm(&test_sizes);
-    print_table("[2.A] Hardware-Accelerated AES-256-GCM (ARMv8-A Crypto / AES-NI PMULL)", &hw_rows);
+    print_table(
+        "[2.A] Hardware-Accelerated AES-256-GCM (ARMv8-A Crypto / AES-NI PMULL)",
+        &hw_rows,
+    );
 
     let rustcrypto_sizes = [
         ("WebRTC (1,200 B)", 1_200, 20_000),
@@ -342,7 +411,10 @@ async fn main() {
         ("File Chunk 1 MB", 1024 * 1024, 100),
     ];
     let rustcrypto_rows = bench_rustcrypto_aes_gcm(&rustcrypto_sizes);
-    print_table("[2.B] RustCrypto AES-256-GCM (Pure-Rust AEAD with Hardware Intrinsics)", &rustcrypto_rows);
+    print_table(
+        "[2.B] RustCrypto AES-256-GCM (Pure-Rust AEAD with Hardware Intrinsics)",
+        &rustcrypto_rows,
+    );
 
     bench_discrete_envelope(MlKemParameterSet::MlKem1024, "[3a] Knish.IO Wallet Discrete Per-Message KEM Envelope — ML-KEM-1024 (shipped default) Encapsulate + AES-256-GCM + Base64 + JSON").await;
     bench_discrete_envelope(MlKemParameterSet::MlKem768, "[3b] Knish.IO Wallet Discrete Per-Message KEM Envelope — ML-KEM-768 (step-back) Encapsulate + AES-256-GCM + Base64 + JSON").await;
