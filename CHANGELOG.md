@@ -16,6 +16,14 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+### Fixed
+
+- `request_authorization` builds its molecule through `create_molecule`, as the authorize step of JS
+  `requestProfileAuthToken` does (`createMolecule({ secret, sourceWallet })`): the I atom's
+  `previousPosition` is the bundle's ContinuID head (it was the fresh AUTH wallet's own position), the
+  molecule carries the client's cell slug, a Version 4 server gets versioned atoms, and the USER
+  remainder is kept on the client. The login is never relayed from. Signed bytes of the I atom change.
+
 ## [2.3.1] — 2026-11-13
 
 ### Upgrade notes

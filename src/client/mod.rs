@@ -901,7 +901,10 @@ impl KnishIOClient {
 
     // =================== Authentication Token Lifecycle Management ===================
     
-    /// Request authorization from the server (equivalent to requestAuthorization in JS)
+    /// Request authorization from the server: proposes a U molecule signed by a fresh AUTH
+    /// wallet. JS has no `requestAuthorization`; this is the `authorize` step of JS
+    /// `requestProfileAuthToken` (`createMolecule({ secret, sourceWallet })`, then
+    /// `MutationRequestAuthorization.fillMolecule({ meta })` and `execute`).
     ///
     /// # Arguments
     ///
@@ -911,7 +914,7 @@ impl KnishIOClient {
     ///
     /// Result indicating success of authorization request
     pub async fn request_authorization(&mut self, meta: Vec<MetaItem>) -> Result<bool> {
-        use crate::mutation::request_authorization::MutationRequestAuthorization;
+        use crate::mutation::request_authorization::{MutationRequestAuthorization, RequestAuthorizationParams};
         use crate::mutation::Mutation;
 
         // The secret: the client's, or the storage provider's (JS retrieveSecret), never cached
@@ -936,36 +939,28 @@ impl KnishIOClient {
                 self.ots_version,
             )?;
 
-            // Create molecule with secret and source wallet
-            let mut molecule = self.new_molecule();
-            molecule.secret = Some(secret.clone());
-            molecule.source_wallet = Some(auth_wallet.clone());
+            // The molecule from the AUTH wallet (JS createMolecule({ secret, sourceWallet })): its
+            // USER remainder, the bundle's ContinuID position as the I atom's previousPosition,
+            // the cell slug and the server's atom version
+            let molecule = self.create_molecule(Some(secret.clone()), None, Some(auth_wallet), None).await?;
+            let client = self.client.clone().ok_or(KnishIOError::NoClient)?;
 
-            // Initialize authorization on molecule
-            molecule.init_authorization(meta)?;
+            // initAuthorization + sign + check (JS fillMolecule({ meta }))
+            let mut mutation = MutationRequestAuthorization::from_molecule(molecule);
+            mutation.fill_molecule(RequestAuthorizationParams { meta })?;
 
-            // Sign the molecule
-            molecule.sign(None, false, true)?;
+            let response = mutation.execute(&client, None, None).await?;
+            // Never relayed from (JS resets lastMoleculeQuery after an authorization)
+            self.last_molecule_accepted = false;
+            let success = response.success();
 
-            // Check molecule integrity
-            molecule.check(None)?;
-
-            // Create mutation (need GraphQL client)
-            if let Some(ref client) = self.client {
-                let mutation = MutationRequestAuthorization::from_molecule(molecule);
-                let response = mutation.execute(client, None, None).await?;
-                let success = response.success();
-
-                if success {
-                    self.log("info", "Authorization request completed successfully");
-                } else {
-                    self.log("error", &format!("Authorization request failed: {:?}", response.reason()));
-                }
-
-                Ok(success)
+            if success {
+                self.log("info", "Authorization request completed successfully");
             } else {
-                Err(KnishIOError::NoClient)
+                self.log("error", &format!("Authorization request failed: {:?}", response.reason()));
             }
+
+            Ok(success)
         }.await;
 
         // Always reset flag, regardless of success or failure
@@ -4640,6 +4635,30 @@ mod tests {
         assert_eq!(proposals.len(), 1, "one authorization molecule");
         assert_eq!(proposals[0]["atoms"][0]["isotope"], "U");
         assert!(client.secret.is_none(), "the secret read from storage was cached on the client");
+        Ok(())
+    }
+
+    /// `request_authorization` builds its molecule with `create_molecule`, as the authorize step
+    /// of JS `requestProfileAuthToken` does (`createMolecule({ secret, sourceWallet })`): the I
+    /// atom's previousPosition is the bundle's ContinuID head, the molecule carries the cell
+    /// slug, the USER remainder is kept, and the login is never relayed from.
+    #[tokio::test]
+    async fn request_authorization_builds_its_molecule_with_create_molecule() -> TestResult {
+        let secret = generate_secret("request-authorization-create-molecule");
+        let mut stub = stub_validator(continu_id_head(&secret, "USER", None), vec![true]).await?;
+        let mut client = v1_client_for(&stub);
+        client.set_secret(secret.clone());
+
+        assert!(client.request_authorization(Vec::new()).await?);
+
+        let proposals = stub.proposals();
+        assert_eq!(proposals.len(), 1, "one authorization molecule");
+        let atoms = proposals[0]["atoms"].as_array().ok_or("proposal has no atoms")?;
+        assert_eq!(meta_value(atom_with_isotope(atoms, "I")?, "previousPosition").as_deref(), Some(POINTER));
+        assert_eq!(proposals[0]["cellSlug"], "public");
+        assert_eq!(stub.continu_id_queries().len(), 1, "one ContinuID query");
+        assert!(!client.last_molecule_accepted, "the login is relayed from");
+        assert!(client.remainder_wallet.is_some(), "no USER remainder kept");
         Ok(())
     }
 
