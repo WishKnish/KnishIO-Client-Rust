@@ -14,7 +14,7 @@ The SDK can be installed via Cargo:
 ```bash
 # Add to Cargo.toml
 [dependencies]
-knishio-client = "2.3.1"
+knishio-client = "2.3.2"
 
 # Or install from the command line
 cargo add knishio-client

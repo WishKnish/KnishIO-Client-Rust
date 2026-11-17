@@ -1156,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "knishio-client"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "aes",
  "aes-gcm",

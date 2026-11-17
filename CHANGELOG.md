@@ -16,6 +16,14 @@ detail, the entry says so instead of guessing.
 
 ## [Unreleased]
 
+## [2.3.2] — 2026-11-17
+
+### Upgrade notes
+
+- `TokenUnit::create_from_graphql` and `Wallet::from_response_data` return an error for unit `metas`
+  that are not JSON; they read as empty metas before (see Fixed).
+- `request_authorization` signs a different I atom (see Fixed).
+
 ### Changed
 
 - The crate is formatted with rustfmt's default settings, and CI checks it (`cargo fmt --check`,
@@ -835,7 +843,8 @@ Published to crates.io; no corresponding git tag exists in this repository.
 commit messages do not support accurate reconstruction. See the git history and
 the [crates.io version list](https://crates.io/crates/knishio-client/versions).
 
-[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/2.3.1...HEAD
+[Unreleased]: https://github.com/WishKnish/KnishIO-Client-Rust/compare/2.3.2...HEAD
+[2.3.2]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.3.2
 [2.3.1]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.3.1
 [2.3.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.3.0
 [2.2.0]: https://github.com/WishKnish/KnishIO-Client-Rust/releases/tag/2.2.0
