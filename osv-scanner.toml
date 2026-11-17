@@ -6,3 +6,8 @@
 id = "RUSTSEC-2026-0173"
 ignoreUntil = 2027-01-24
 reason = "proc-macro-error2 2.0.1 is unmaintained (informational, no fixed release). It is a build-time proc-macro reached through libcrux-ml-kem -> libcrux-intrinsics -> core-models -> hax-lib -> hax-lib-macros and is not linked into the library. Clears when libcrux drops hax-lib-macros or the macro gains a maintained successor."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0543"
+ignoreUntil = 2027-02-17
+reason = "chrono 0.4.45 is unmaintained (informational, every version affected, no fixed release, no known vulnerability). It is a direct dependency used for wall-clock timestamps (Utc::now) and one RFC 3339 parse in check_molecule.rs, plus the self-test and integration-test binaries. Clears when chrono is replaced by std::time and the time (or jiff) crate."
