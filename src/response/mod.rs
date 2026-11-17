@@ -2122,8 +2122,11 @@ impl ResponseWalletList {
         // Handle token units (equivalent to JS tokenUnits processing)
         if let Some(token_units) = data.get("tokenUnits").and_then(|v| v.as_array()) {
             for unit_data in token_units {
-                if let Ok(token_unit) = TokenUnit::create_from_graphql(unit_data) {
-                    wallet.token_units.push(token_unit);
+                match TokenUnit::create_from_graphql(unit_data) {
+                    Ok(token_unit) => wallet.token_units.push(token_unit),
+                    // Metas that are not JSON: JS throws, so no wallet is built
+                    Err(KnishIOError::Serialization(_)) => return None,
+                    Err(_) => {}
                 }
             }
         }
@@ -2433,5 +2436,18 @@ mod tests {
         assert!(response.success());
         assert_eq!(response.status(), "accepted");
         assert_eq!(response.molecular_hash(), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn test_wallet_from_data_rejects_metas_that_are_not_json() {
+        let data = json!({
+            "bundleHash": "test-bundle",
+            "tokenSlug": "TEST",
+            "amount": "1",
+            "tokenUnits": [
+                {"id": "u1", "name": "u1", "metas": "{bad"}
+            ]
+        });
+        assert!(ResponseWalletList::wallet_from_data(&data, None).is_none());
     }
 }

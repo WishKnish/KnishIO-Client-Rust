@@ -101,22 +101,7 @@ impl TokenUnit {
             .ok_or_else(|| KnishIOError::custom("Missing 'name' field in GraphQL data"))?
             .to_string();
 
-        let metas = match data.get("metas") {
-            // JSON text in document order; empty, unparsable or not an object → no metas
-            Some(serde_json::Value::String(metas_str)) => {
-                match serde_json::from_str::<OrderedValue>(metas_str) {
-                    Ok(OrderedValue::Object(map)) => map,
-                    _ => OrderedMap::new(),
-                }
-            }
-            Some(metas_value @ serde_json::Value::Object(_)) => {
-                match OrderedValue::from(metas_value.clone()) {
-                    OrderedValue::Object(map) => map,
-                    _ => OrderedMap::new(),
-                }
-            }
-            _ => OrderedMap::new(),
-        };
+        let metas = served_metas(data.get("metas"))?;
 
         Ok(Self { id, name, metas })
     }
@@ -393,6 +378,29 @@ impl TokenUnit {
     }
 }
 
+/// The `metas` of a unit served by the ledger, as JS `TokenUnit.createFromGraphQL` reads it.
+///
+/// JSON text is parsed in document order; text that is not JSON is an error (JS `JSON.parse`
+/// throws). A served object is taken as is. Absent, null, empty text, or a parsed value that is
+/// not an object reads as no metas.
+pub(crate) fn served_metas(value: Option<&serde_json::Value>) -> Result<OrderedMap<OrderedValue>> {
+    Ok(match value {
+        Some(serde_json::Value::String(text)) if !text.is_empty() => {
+            match serde_json::from_str::<OrderedValue>(text)? {
+                OrderedValue::Object(map) => map,
+                _ => OrderedMap::new(),
+            }
+        }
+        Some(metas_value @ serde_json::Value::Object(_)) => {
+            match OrderedValue::from(metas_value.clone()) {
+                OrderedValue::Object(map) => map,
+                _ => OrderedMap::new(),
+            }
+        }
+        _ => OrderedMap::new(),
+    })
+}
+
 impl std::fmt::Display for TokenUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "TokenUnit(id: {}, name: {})", self.id, self.name)
@@ -478,6 +486,37 @@ mod tests {
             serde_json::to_string(&token_unit)?,
             r#"{"id":"u1","name":"U1","metas":{"2":2,"10":1,"zone":"Z","attr":{"b":1,"a":2}}}"#
         );
+        Ok(())
+    }
+
+    /// JS `JSON.parse` throws on metas that are not JSON; the call fails.
+    #[test]
+    fn test_create_from_graphql_rejects_metas_that_are_not_json() {
+        for metas in ["{bad", "{}x", "nullx", "NaN"] {
+            let data = json!({ "id": "u1", "name": "u1", "metas": metas });
+            assert!(
+                matches!(
+                    TokenUnit::create_from_graphql(&data),
+                    Err(KnishIOError::Serialization(_))
+                ),
+                "metas {metas:?}"
+            );
+        }
+    }
+
+    /// JS `JSON.parse(metas) || {}`: falsy served metas read as no metas.
+    #[test]
+    fn test_create_from_graphql_falsy_metas_are_empty(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        for metas in ["null", "false", "0", "\"\"", ""] {
+            let data = json!({ "id": "u1", "name": "u1", "metas": metas });
+            let unit = TokenUnit::create_from_graphql(&data)?;
+            assert_eq!(
+                serde_json::to_string(&unit.to_data())?,
+                r#"["u1","u1",{}]"#,
+                "metas {metas:?}"
+            );
+        }
         Ok(())
     }
 

@@ -475,7 +475,7 @@ impl Wallet {
             .map(|units_data| {
                 units_data
                     .iter()
-                    .filter_map(|unit_data| {
+                    .filter_map(|unit_data| -> Option<Result<TokenUnit>> {
                         if let Some(obj) = unit_data.as_object() {
                             let id = obj
                                 .get("id")
@@ -490,16 +490,11 @@ impl Wallet {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string();
-                            // `metas` is a JSON-encoded String scalar on the wire, parsed in its
-                            // document order (JS JSON.parse); accept an object too.
-                            let meta = match obj.get("metas") {
-                                Some(serde_json::Value::String(encoded)) => {
-                                    serde_json::from_str::<OrderedValue>(encoded).ok()
-                                }
-                                other => other.cloned().map(OrderedValue::from),
-                            }
-                            .and_then(|v| v.as_object().cloned());
-                            Some(TokenUnit::new(id, name, meta))
+                            let meta = match crate::token_unit::served_metas(obj.get("metas")) {
+                                Ok(meta) => meta,
+                                Err(error) => return Some(Err(error)),
+                            };
+                            Some(Ok(TokenUnit::new(id, name, Some(meta))))
                         } else if let Some(unit_array) = unit_data.as_array() {
                             if unit_array.len() < 2 {
                                 return None;
@@ -515,13 +510,14 @@ impl Wallet {
                                 .and_then(|metas| {
                                     OrderedValue::from(metas.clone()).as_object().cloned()
                                 });
-                            Some(TokenUnit::new(id, name, meta))
+                            Some(Ok(TokenUnit::new(id, name, meta)))
                         } else {
                             None
                         }
                     })
-                    .collect()
+                    .collect::<Result<Vec<_>>>()
             })
+            .transpose()?
             .unwrap_or_default();
 
         Ok(wallet)
@@ -1600,6 +1596,22 @@ mod tests {
         assert_eq!(wallet.batch_id, Some("test-batch".to_string()));
         assert_eq!(wallet.token_units.len(), 1);
         assert_eq!(wallet.token_units[0].id, "unit1");
+    }
+
+    #[test]
+    fn test_from_response_data_rejects_metas_that_are_not_json() {
+        let data = serde_json::json!({
+            "balance": 100.0,
+            "tokenSlug": "TEST",
+            "address": "test-address",
+            "bundleHash": "test-bundle",
+            "position": "test-position",
+            "tokenUnits": [
+                {"id": "unit1", "name": "Unit 1", "metas": "{bad"}
+            ]
+        });
+
+        assert!(Wallet::from_response_data(data).is_err());
     }
 
     #[test]

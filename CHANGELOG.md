@@ -28,6 +28,11 @@ detail, the entry says so instead of guessing.
   `previousPosition` is the bundle's ContinuID head (it was the fresh AUTH wallet's own position), the
   molecule carries the client's cell slug, a Version 4 server gets versioned atoms, and the USER
   remainder is kept on the client. The login is never relayed from. Signed bytes of the I atom change.
+- A served token unit whose `metas` text is not JSON fails as in JS (`JSON.parse` throws):
+  `TokenUnit::create_from_graphql` and `Wallet::from_response_data` (the `query_balance` path) return
+  `KnishIOError::Serialization`, and `ResponseWalletList::wallet_from_data` builds no wallet. Before,
+  such metas read as empty and the unit was signed with `{}`. `ResponseWalletList::get_wallets` (the
+  `query_wallets` path) returns `Option`s, so it leaves that wallet out rather than failing the call.
 
 ## [2.3.1] — 2026-11-13
 
